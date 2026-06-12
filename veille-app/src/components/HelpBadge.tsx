@@ -47,6 +47,8 @@ const SOURCE_BY_PREFIX: Record<string, string> = {
   DC01560: "Poste tout Relais à Transit Souple (PRS) — DC01560 v12 (07-01-2026)",
   DC03858:
     "Poste d'aiguillage à leviers individuels — DC03858 v2 (26-03-2014)",
+  DC01510:
+    "Service de la circulation (Organisation et méthode) — DC01510 v3 (07-04-2023)",
 };
 
 function sourceForReference(reference: string | null): string {

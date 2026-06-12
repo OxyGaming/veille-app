@@ -267,9 +267,51 @@ model Site {
   importedActions  ImportedAction[]
   actionValidations ActionValidation[]
   sightings        SiteSighting[]
+  /// Catalogue d'équipements attendus pour les visites de type INVENTORY.
+  equipments       SiteEquipment[]
 
   @@index([teamId])
   @@index([isVisible])
+}
+
+/// Catalogue d'équipements / éléments de conformité d'un site.
+///
+/// Source de vérité pour les « Veilles de site » (mode INVENTORY) : c'est
+/// ce qui devrait être présent sur le site. Une visite INVENTORY génère
+/// automatiquement une observation par équipement actif au moment de sa
+/// création.
+///
+/// Utilisable pour : trousses de secours, extincteurs, affichages
+/// réglementaires, registres, plans d'évacuation, équipements spécifiques,
+/// documents obligatoires, moyens de communication, etc.
+model SiteEquipment {
+  id               String   @id @default(cuid())
+  siteId           String
+  /// Libellé visible (ex. "Extincteur N°4 (CO2 2kg)", "Plan d'évacuation").
+  label            String
+  /// Catégorie pour regrouper dans l'UI et le PDF
+  /// (ex. "Trousse de secours", "Extincteurs", "Affichage").
+  category         String
+  /// Quantité attendue (null si non quantifiable, ex. plan, registre).
+  expectedQuantity Int?
+  /// True si l'élément a une date de péremption à suivre.
+  isPerishable     Boolean  @default(false)
+  /// Date de péremption de l'exemplaire actuellement en place
+  /// (réactualisée à chaque renouvellement).
+  expirationDate   DateTime?
+  /// Notes libres (ref produit, emplacement précis, fournisseur…).
+  notes            String?
+  isActive         Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  site             Site                   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  observations     SiteVisitObservation[]
+
+  @@index([siteId])
+  @@index([category])
+  @@index([isActive])
 }
 
 /// Lien many-to-many site ↔ équipe.
@@ -297,6 +339,16 @@ model SiteVisitTemplate {
   description  String?
   /// Layout PDF : VEILLE (design moderne) ou SNCF (fidèle au document d'origine).
   pdfLayout    String   @default("VEILLE")
+  /// Type de moteur :
+  ///  - CHECKLIST  : items définis par le template (Trimestrielle incendie,
+  ///                 Planifiée EIC RA). Comportement historique.
+  ///  - INVENTORY  : items générés depuis le catalogue SiteEquipment du site
+  ///                 visité. La saisie suit la logique "conformité par défaut" :
+  ///                 l'agent ne pointe que les écarts.
+  kind         String   @default("CHECKLIST")
+  /// Périodicité attendue en jours (null = libre). Sert à identifier les
+  /// visites en retard et alimenter un futur tableau de bord conformité.
+  expectedFrequencyDays Int?
   /// Schéma libre des champs d'en-tête (RSI, CLSI, COSI, N° UT, distribution…).
   /// JSON : [{ key, label, type: "text"|"checkbox", required? }, …].
   /// V1 affiche juste date + site ; les autres champs restent stockés mais
@@ -407,23 +459,51 @@ model SiteVisitParticipant {
 model SiteVisitObservation {
   id         String   @id @default(cuid())
   visitId    String
-  sectionId  String
+  /// Section : NOT NULL en mode CHECKLIST, NULL en mode INVENTORY.
+  /// L'observation INVENTORY est rattachée à un SiteEquipment via `equipmentId`.
+  sectionId  String?
   itemId     String?
-  /// Couvre les deux modes :
+  /// Lien vers l'équipement du catalogue site (mode INVENTORY uniquement).
+  /// onDelete: SetNull pour préserver l'historique si l'équipement est retiré
+  /// du catalogue après une visite.
+  equipmentId String?
+  /// Couvre les modes :
   ///  PER_ITEM    : OUI | NON | SANS_OBJET
   ///  PER_SECTION : CONFORME | NON_CONFORME | SANS_OBJET
+  ///  INVENTORY   : dérivé de `present` et `discrepancyType` —
+  ///                OUI si conforme, NON si écart, SANS_OBJET si non applicable
   status     String   @default("PENDING")
   comment    String?
+  /// Champs INVENTORY (nullable en mode CHECKLIST).
+  ///
+  /// Source de vérité du constat de présence en mode INVENTORY :
+  /// true = constaté présent ; false = manquant ; null = non encore renseigné.
+  present                Boolean?
+  /// Quantité réellement constatée sur place.
+  quantityObserved       Int?
+  /// Date de péremption de l'exemplaire constaté (utile pour calculer
+  /// le statut « périmé » au moment du contrôle).
+  expirationDateObserved DateTime?
+  /// Type d'écart calculé automatiquement :
+  ///   MISSING | EXPIRED | QUANTITY_LOW | DAMAGED | NONE.
+  /// NULL = pas encore évalué.
+  discrepancyType        String?
   recordedAt DateTime @default(now())
   recordedById String?
 
-  visit      SiteVisit         @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  section    SiteVisitSection  @relation(fields: [sectionId], references: [id])
-  item       SiteVisitItem?    @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  visit      SiteVisit          @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  section    SiteVisitSection?  @relation(fields: [sectionId], references: [id])
+  item       SiteVisitItem?     @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  equipment  SiteEquipment?     @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
 
+  // Une observation par couple section+item dans un mode CHECKLIST.
   @@unique([visitId, sectionId, itemId])
+  // Une observation par équipement dans un mode INVENTORY.
+  @@unique([visitId, equipmentId])
   @@index([visitId])
   @@index([status])
+  @@index([discrepancyType])
+  @@index([equipmentId])
 }
 
 /// Non-conformité relevée : entrée du tableau "Actions correctives".

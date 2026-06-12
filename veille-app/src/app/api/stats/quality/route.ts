@@ -70,6 +70,10 @@ export async function GET(req: Request) {
     { conform: number; nonConform: number; sansObjet: number }
   >();
   for (const o of obs) {
+    // Mode INVENTORY : observation rattachée à un SiteEquipment, pas à une
+    // section. On l'ignore ici, le taux par section est dérivé seulement
+    // des modes CHECKLIST (PER_ITEM / PER_SECTION).
+    if (!o.section) continue;
     const title = o.section.title;
     const row = bySectionMap.get(title) ?? {
       conform: 0,

@@ -1,0 +1,26 @@
+import { prisma } from "@/lib/prisma";
+import ContactsListClient from "./ContactsListClient";
+
+export const dynamic = "force-dynamic";
+
+export default async function ContactsPage() {
+  const [contacts, teams] = await Promise.all([
+    prisma.contact.findMany({ orderBy: { name: "asc" } }),
+    prisma.team.findMany({ orderBy: { name: "asc" } }),
+  ]);
+  const teamById = new Map(teams.map((t) => [t.id, t.name]));
+  return (
+    <ContactsListClient
+      contacts={contacts.map((c) => ({
+        id: c.id,
+        name: c.name,
+        role: c.role,
+        phone: c.phone,
+        email: c.email,
+        notes: c.notes,
+        teamId: c.teamId,
+        teamName: c.teamId ? teamById.get(c.teamId) ?? null : null,
+      }))}
+    />
+  );
+}

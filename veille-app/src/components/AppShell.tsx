@@ -1,0 +1,239 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { Icon } from "@/components/icons";
+
+type Props = {
+  user: { id: string; name: string; role: string; teamId: string | null };
+  children: React.ReactNode;
+};
+
+const NAV_MOBILE = [
+  { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
+  { href: "/visits", label: "Visites", icon: Icon.FileText },
+  { href: "/agents", label: "Agents", icon: Icon.Users },
+  { href: "/sites", label: "Sites", icon: Icon.Building },
+  { href: "/history", label: "Histo.", icon: Icon.Clipboard },
+];
+const NAV_DESKTOP = [
+  { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
+  { href: "/visits", label: "Visites", icon: Icon.FileText },
+  { href: "/sessions", label: "Sessions", icon: Icon.ClipboardCheck },
+  { href: "/agents", label: "Agents", icon: Icon.Users },
+  { href: "/sites", label: "Sites", icon: Icon.Building },
+  { href: "/history", label: "Historique", icon: Icon.Clipboard },
+  { href: "/stats", label: "Statistiques", icon: Icon.Filter },
+  { href: "/links", label: "Liens utiles", icon: Icon.Link },
+  { href: "/contacts", label: "Contacts", icon: Icon.Phone },
+];
+const NAV = NAV_MOBILE;
+
+export default function AppShell({ user, children }: Props) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [online, setOnline] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    setOnline(navigator.onLine);
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    (async () => {
+      try {
+        const { countPending } = await import("@/lib/syncQueue");
+        setPendingCount(await countPending());
+      } catch {
+        setPendingCount(0);
+      }
+    })();
+  }, [pathname]);
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+    router.refresh();
+  }
+
+  const isAdmin = user.role === "ADMIN";
+  const isEditor = isAdmin || user.role === "EDITOR";
+
+  return (
+    <div className="min-h-screen bg-slate-50 lg:flex">
+      {/* ===== Sidebar desktop ===== */}
+      <aside className="hidden lg:flex lg:flex-col lg:w-64 bg-slate-900 text-slate-100 sticky top-0 h-screen no-print">
+        <div className="px-5 py-5 border-b border-white/10">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-700 grid place-items-center">
+              <Icon.ClipboardCheck className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <div className="text-base font-bold leading-none">Veille</div>
+              <div className="text-[10px] font-mono tracking-wider text-slate-400 mt-1">
+                TERRAIN
+              </div>
+            </div>
+          </div>
+        </div>
+        <nav className="flex-1 p-3 space-y-1">
+          {NAV_DESKTOP.map((n) => {
+            const active =
+              pathname === n.href || pathname.startsWith(n.href + "/");
+            return (
+              <Link
+                key={n.href}
+                href={n.href}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  active
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-slate-300 hover:text-white hover:bg-white/5"
+                }`}
+              >
+                <n.icon className="w-4 h-4" />
+                {n.label}
+              </Link>
+            );
+          })}
+          {isEditor && (
+            <Link
+              href="/admin"
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mt-4 border-t border-white/10 pt-4 transition-colors ${
+                pathname.startsWith("/admin")
+                  ? "text-white bg-white/5"
+                  : "text-slate-300 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Icon.Settings className="w-4 h-4" />
+              Back-office
+            </Link>
+          )}
+        </nav>
+        <div className="p-3 border-t border-white/10">
+          <div className="flex items-center gap-2 px-2 py-1.5 mb-2">
+            <div
+              className={`flex items-center gap-1.5 text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                online
+                  ? "bg-emerald-500/20 text-emerald-300"
+                  : "bg-amber-500/20 text-amber-300"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  online ? "bg-emerald-400" : "bg-amber-400"
+                }`}
+              />
+              {online ? "EN LIGNE" : "HORS LIGNE"}
+            </div>
+            {pendingCount > 0 && (
+              <span className="text-[10px] font-mono bg-white/10 text-slate-200 px-1.5 py-0.5 rounded">
+                {pendingCount} en file
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2.5 px-2">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 text-white text-xs font-semibold grid place-items-center shrink-0">
+              {user.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold truncate">{user.name}</div>
+              <div className="text-[10px] font-mono text-slate-400 truncate">
+                {user.role}
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              className="text-slate-400 hover:text-white p-1.5 rounded-md hover:bg-white/5"
+              title="Se déconnecter"
+            >
+              <Icon.LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* ===== Contenu principal ===== */}
+      <div className="flex-1 flex flex-col lg:min-h-screen min-h-screen pb-[64px] lg:pb-0">
+        {/* Top bar mobile */}
+        <header className="lg:hidden sticky top-0 z-30 bg-slate-900 text-white no-print">
+          <div className="px-4 py-3 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-700 grid place-items-center shrink-0">
+              <Icon.ClipboardCheck className="w-4 h-4 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-mono tracking-wider text-slate-400">
+                VEILLE
+              </div>
+              <div className="text-sm font-semibold truncate">{user.name}</div>
+            </div>
+            <div
+              className={`flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded ${
+                online
+                  ? "bg-emerald-500/20 text-emerald-300"
+                  : "bg-amber-500/20 text-amber-300"
+              }`}
+            >
+              {online ? <Icon.Wifi className="w-3 h-3" /> : <Icon.WifiOff className="w-3 h-3" />}
+              {online ? "ONLINE" : "OFFLINE"}
+              {pendingCount > 0 && (
+                <span className="bg-white/20 px-1 rounded">{pendingCount}</span>
+              )}
+            </div>
+            {isEditor && (
+              <Link
+                href="/admin"
+                className="text-[10px] font-mono px-2 py-1 rounded border border-white/20 text-slate-200"
+              >
+                {isAdmin ? "ADMIN" : "EDIT"}
+              </Link>
+            )}
+            <button
+              onClick={logout}
+              className="text-slate-300 hover:text-white p-1.5 rounded-md hover:bg-white/5"
+              title="Se déconnecter"
+            >
+              <Icon.LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1">{children}</main>
+
+        {/* Bottom nav mobile */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 no-print z-30">
+          <div className="grid grid-cols-5">
+            {NAV.map((n) => {
+              const active =
+                pathname === n.href || pathname.startsWith(n.href + "/");
+              return (
+                <Link
+                  key={n.href}
+                  href={n.href}
+                  className={`flex flex-col items-center justify-center py-2.5 text-[10px] font-medium transition-colors ${
+                    active ? "text-indigo-600" : "text-slate-500"
+                  }`}
+                >
+                  <n.icon className="w-5 h-5 mb-0.5" />
+                  {n.label}
+                  {active && (
+                    <span className="absolute top-0 w-12 h-0.5 bg-indigo-600 rounded-b" />
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        </nav>
+      </div>
+    </div>
+  );
+}

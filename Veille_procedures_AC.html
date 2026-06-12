@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Veille des procédures — Agents Circulation (EIC)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#1B2330; --panel:#222C3C; --steel:#2E5496; --steel-d:#1F3864;
+    --surface:#EDEFEC; --card:#FFFFFF; --line:#E2E5EA; --line-d:#CBD1DA;
+    --text:#1B2330; --muted:#647082; --muted2:#8A93A1;
+    --g4:#C0152F; --g3:#E07B16; --g2:#E0A800; --g0:#7A8290; --done:#1E8A4C;
+    --edit:#7A3FB0;
+    --mono:'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --sans:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--sans);background:var(--surface);color:var(--text);line-height:1.5;-webkit-font-smoothing:antialiased}
+  button{font-family:inherit}
+
+  /* ===== Header ===== */
+  header{position:sticky;top:0;z-index:60;background:var(--ink);color:#fff;border-bottom:3px solid var(--steel)}
+  body.editing header{border-bottom-color:var(--edit)}
+  .bar{max-width:1340px;margin:0 auto;padding:13px 22px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .brand{display:flex;flex-direction:column;line-height:1.15;margin-right:auto}
+  .brand .ey{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#8FB0E0}
+  body.editing .brand .ey{color:#C9A8E8}
+  .brand h1{font-size:17px;font-weight:700;letter-spacing:-.01em}
+  .hbtns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto}
+  .btn{font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:#C3CCD8;border:1px solid #3A4759;border-radius:7px;padding:8px 13px;transition:.15s;white-space:nowrap}
+  .btn:hover{border-color:#5A6B82;color:#fff}
+  .btn.primary{background:var(--steel);border-color:var(--steel);color:#fff}
+  .btn.primary:hover{background:#3a66b3}
+  .btn.primary:disabled{opacity:.4;cursor:not-allowed}
+  .btn.on{background:var(--edit);border-color:var(--edit);color:#fff}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:#C3CCD8;cursor:pointer;user-select:none;
+    border:1px solid #3A4759;border-radius:7px;padding:7px 11px}
+  .toggle .sw{width:34px;height:18px;border-radius:10px;background:#3A4759;position:relative;transition:.18s}
+  .toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#9aa6b6;transition:.18s}
+  body.editing .toggle .sw{background:var(--edit)}
+  body.editing .toggle .sw::after{left:18px;background:#fff}
+
+  .subbar{max-width:1340px;margin:0 auto;padding:0 22px 13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .search{flex:1;min-width:200px;position:relative}
+  .search input{width:100%;background:#2B3647;border:1px solid #3A4759;color:#fff;border-radius:7px;padding:9px 12px 9px 34px;font-size:14px}
+  .search input::placeholder{color:#8A93A1}
+  .search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;stroke:#8A93A1}
+  .filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .filters .chip{font-family:var(--mono);font-size:12px;font-weight:500;cursor:pointer;background:#2B3647;color:#C3CCD8;border:1px solid #3A4759;border-radius:20px;padding:6px 11px;display:flex;align-items:center;gap:6px;transition:.15s;user-select:none}
+  .filters .chip:hover{border-color:#5A6B82}
+  .filters .chip .dot{width:9px;height:9px;border-radius:50%}
+  .filters .chip.active{background:#fff;color:var(--ink);border-color:#fff}
+  .gauge{display:flex;align-items:center;gap:10px;color:#fff}
+  .gauge .rd{font-family:var(--mono);font-size:12px;color:#A9B4C4}
+  .gauge .rd b{color:#fff}
+  .minitrk{width:120px;height:7px;background:#3A4759;border-radius:4px;overflow:hidden}
+  .minitrk .f{height:100%;width:0;background:#5BA85B;border-radius:4px;transition:width .35s}
+
+  /* ===== Layout ===== */
+  .wrap{max-width:1340px;margin:0 auto;padding:24px 22px 110px}
+  .intro{color:var(--muted);font-size:13.5px;margin-bottom:20px;max-width:760px}
+
+  /* ===== MENU (silos by domain) ===== */
+  .silos{column-width:340px;column-gap:18px}
+  .silo{break-inside:avoid;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:18px;overflow:hidden;box-shadow:0 1px 2px rgba(27,35,48,.04)}
+  .silo > .sh{padding:13px 15px;background:#F7F8FA;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  .silo > .sh .nm{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--steel-d);flex:1;line-height:1.3}
+  .silo > .sh .cnt{font-family:var(--mono);font-size:11px;color:var(--muted2)}
+  .selall{cursor:pointer;font-size:11px;color:var(--steel);border:1px solid var(--line-d);background:#fff;border-radius:6px;padding:4px 8px;white-space:nowrap}
+  .selall:hover{border-color:var(--steel)}
+  .prow{display:flex;gap:11px;align-items:flex-start;padding:11px 15px;border-top:1px solid var(--line);cursor:pointer;transition:.12s}
+  .prow:first-of-type{border-top:none}
+  .prow:hover{background:#F7F9FC}
+  .prow.sel{background:#EDF3FD}
+  .pcheck{flex:none;width:19px;height:19px;border:2px solid var(--line-d);border-radius:5px;margin-top:2px;display:flex;align-items:center;justify-content:center;background:#fff;transition:.12s}
+  .pcheck svg{width:12px;height:12px;stroke:#fff;stroke-width:3;opacity:0}
+  .prow.sel .pcheck{background:var(--steel);border-color:var(--steel)}
+  .prow.sel .pcheck svg{opacity:1}
+  .pinfo{flex:1;min-width:0}
+  .pinfo .tt{font-size:14px;font-weight:600;line-height:1.3}
+  .pinfo .th{font-size:11px;color:var(--muted2);margin-top:2px;font-style:italic}
+  .pinfo .meta{margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .gpill{font-family:var(--mono);font-size:10px;font-weight:600;color:#fff;border-radius:4px;padding:1px 6px}
+  .gpill.g4{background:var(--g4)} .gpill.g3{background:var(--g3)} .gpill.g2{background:var(--g2);color:var(--ink)} .gpill.g0{background:var(--g0)}
+  .pinfo .meta .ic{font-family:var(--mono);font-size:10.5px;color:var(--muted2)}
+  .docchip{font-family:var(--mono);font-size:10px;color:var(--steel-d);background:#EDF1F8;border:1px solid #D8E1F0;border-radius:4px;padding:0 5px}
+  .pdel{flex:none;background:none;border:none;color:var(--muted2);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;display:none}
+  body.editing .pdel{display:block}
+  .pdel:hover{color:var(--g4)}
+  .addproc{display:none;width:100%;text-align:left;border:none;border-top:1px dashed var(--line-d);background:#FBFBFC;color:var(--edit);font-size:12.5px;font-weight:600;padding:10px 15px;cursor:pointer}
+  body.editing .addproc{display:block}
+  .addproc:hover{background:#F6F1FB}
+
+  /* ===== VEILLE (selected silos) ===== */
+  .veille{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px;align-items:start}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;border-top:4px solid var(--g3);overflow:hidden;box-shadow:0 1px 3px rgba(27,35,48,.05)}
+  .card.g4{border-top-color:var(--g4)} .card.g3{border-top-color:var(--g3)} .card.g2{border-top-color:var(--g2)} .card.g0{border-top-color:var(--g0)} .card.done{border-top-color:var(--done)}
+  .chead{padding:14px 16px 12px}
+  .chead .top{display:flex;gap:10px;align-items:flex-start}
+  .chead .ey{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted2);margin-bottom:3px}
+  .chead h3{font-size:15.5px;font-weight:700;line-height:1.28;flex:1;letter-spacing:-.01em}
+  .grav{font-family:var(--mono);font-size:11px;font-weight:600;color:#fff;border-radius:5px;padding:3px 8px;white-space:nowrap;height:fit-content}
+  .grav.g4{background:var(--g4)} .grav.g3{background:var(--g3)} .grav.g2{background:var(--g2);color:var(--ink)} .grav.g0{background:var(--g0)}
+  .docs{margin-top:8px;display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+  .docs .d{font-family:var(--mono);font-size:10.5px;color:var(--steel-d);background:#EDF1F8;border:1px solid #D8E1F0;border-radius:4px;padding:1px 6px}
+  .prog{display:flex;align-items:center;gap:9px;padding:0 16px 11px}
+  .prog .track{flex:1;height:6px;background:var(--line);border-radius:4px;overflow:hidden}
+  .prog .fill{height:100%;width:0;background:var(--steel);border-radius:4px;transition:width .35s}
+  .card.done .prog .fill{background:var(--done)}
+  .prog .rd{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:40px;text-align:right}
+  .risk{margin:0 16px 11px;font-size:12px;color:#7A2230;background:#FBEDEE;border:1px solid #F2D3D7;border-radius:7px;padding:7px 10px;display:flex;gap:7px;align-items:flex-start}
+  .risk svg{width:13px;height:13px;flex:none;margin-top:2px;stroke:var(--g4)}
+  .risk b{color:var(--g4)}
+  ul.items{list-style:none;padding:0 16px 8px}
+  ul.items li{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line)}
+  ul.items li:first-child{border-top:none}
+  .ck{flex:none;width:19px;height:19px;border:2px solid var(--line-d);border-radius:5px;display:flex;align-items:center;justify-content:center;background:#fff;cursor:pointer;transition:.12s;margin-top:1px}
+  .ck svg{width:12px;height:12px;stroke:#fff;stroke-width:3;opacity:0}
+  li.on .ck{background:var(--done);border-color:var(--done)}
+  li.on .ck svg{opacity:1}
+  .lbl{font-size:13.5px;flex:1;cursor:pointer}
+  .ig{flex:none;font-family:var(--mono);font-size:9.5px;font-weight:600;color:#fff;border-radius:4px;padding:1px 5px;height:fit-content;margin-top:2px}
+  .ig.g4{background:var(--g4)} .ig.g3{background:var(--g3)} .ig.g2{background:var(--g2);color:var(--ink)} .ig.g1{background:#8FA31E} .ig.g0{background:var(--g0)}
+  .cf{flex:none;font-family:var(--mono);font-size:9.5px;font-weight:600;border-radius:4px;padding:1px 5px;height:fit-content;margin-top:2px;border:1px solid transparent}
+  .cf.cfH{background:#E7F4EC;color:#1E7A43;border-color:#BFE3CC}
+  .cf.cfM{background:#FCF3E2;color:#9A6712;border-color:#F0DCB0}
+  .cf.cfL{background:#FBEDEE;color:#A32230;border-color:#F0CDD2}
+  li.on .lbl{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line-d)}
+  .idel{display:none;flex:none;background:none;border:none;color:var(--muted2);cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+  body.editing .idel{display:block}
+  body.editing .ck{display:none}
+  body.editing .lbl{cursor:text;outline:none;border:1px dashed transparent;border-radius:4px;padding:2px 5px;margin:-2px 0}
+  body.editing .lbl:hover,body.editing .lbl:focus{border-color:var(--edit);background:#FAF7FD}
+  body.editing li.on .lbl{text-decoration:none;color:var(--text)}
+  body.editing [data-edit]{outline:none}
+  body.editing h3[contenteditable],body.editing .risktxt[contenteditable],body.editing .docsedit[contenteditable]{border:1px dashed var(--line-d);border-radius:4px;padding:2px 5px;cursor:text}
+  body.editing h3[contenteditable]:focus,body.editing .risktxt:focus,body.editing .docsedit:focus{border-color:var(--edit);background:#FAF7FD}
+  .additem{display:none;width:100%;text-align:left;border:none;border-top:1px dashed var(--line-d);background:#FBFBFC;color:var(--edit);font-size:12.5px;font-weight:600;padding:9px 16px;cursor:pointer}
+  body.editing .additem{display:block}
+  .additem:hover{background:#F6F1FB}
+  .docsedit{font-family:var(--mono);font-size:10.5px;color:var(--steel-d)}
+
+  .empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:70px 20px}
+  .empty .big{font-size:17px;font-weight:600;color:var(--text);margin-bottom:6px}
+
+  /* ===== floating action bar (menu) ===== */
+  .fab{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:55;background:var(--ink);color:#fff;
+    border-radius:12px;padding:11px 14px;display:flex;align-items:center;gap:14px;box-shadow:0 8px 30px rgba(0,0,0,.25);
+    transition:.2s;opacity:0;pointer-events:none}
+  .fab.show{opacity:1;pointer-events:auto}
+  .fab .c{font-size:14px}.fab .c b{font-family:var(--mono)}
+  .fab a.clr{font-size:12px;color:#A9B4C4;text-decoration:underline;cursor:pointer}
+
+  footer{max-width:1340px;margin:0 auto;padding:30px 22px 40px;color:var(--muted2);font-size:12px;line-height:1.6}
+  .editbanner{display:none;background:#F3ECFA;border:1px solid #E1D0F0;color:#5A2D86;border-radius:9px;padding:11px 15px;font-size:13px;margin-bottom:18px}
+  body.editing .editbanner{display:block}
+
+  @media print{
+    header,.fab,.search,.gauge,.editbanner,.additem,.addproc,.idel,.pdel,.selall{display:none!important}
+    body{background:#fff}.wrap{max-width:none;padding:0}
+    .veille{display:block}.card{break-inside:avoid;border:1px solid #bbb;box-shadow:none;margin-bottom:12px}
+    .ck{border-color:#999}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="hbtns">
+      <div class="gauge" id="gaugeWrap" style="display:none">
+        <div class="minitrk"><div class="f" id="gFill"></div></div>
+        <span class="rd"><b id="gPct">0%</b> vérifié</span>
+      </div>
+      <label class="toggle" id="editToggle" title="Activer le mode maintenance"><span class="sw"></span>Édition</label>
+      <button class="btn" id="btnExport">Exporter</button>
+      <button class="btn" id="btnImport">Importer</button>
+      <button class="btn" id="btnRestore">Défauts</button>
+      <button class="btn primary" id="btnBack" style="display:none">← Menu</button>
+    </div>
+  </div>
+  <div class="subbar">
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="q" type="search" placeholder="Rechercher une procédure, un domaine, un risque, un document…" autocomplete="off">
+    </div>
+    <div class="filters" id="gFilters">
+      <span class="chip active" data-g="all">Toutes</span>
+      <span class="chip" data-g="4"><i class="dot" style="background:var(--g4)"></i>G4</span>
+      <span class="chip" data-g="3"><i class="dot" style="background:var(--g3)"></i>G3</span>
+      <span class="chip" data-g="2"><i class="dot" style="background:var(--g2)"></i>G2</span>
+    </div>
+    <button class="btn" id="btnPrint" style="display:none">Imprimer</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="editbanner" id="editBanner">
+    <b>Mode Édition actif.</b> Cliquez sur un texte pour le modifier (titre, risque, documents, points). Utilisez « + Ajouter un point », « + Procédure » et les ✕ pour supprimer. Tout est enregistré automatiquement dans ce navigateur — pensez à <b>Exporter</b> pour conserver/partager vos modifications.
+  </div>
+  <p class="intro" id="introTxt"></p>
+  <div id="screen"></div>
+</div>
+
+<div class="fab" id="fab">
+  <span class="c"><b id="fabN">0</b> procédure(s) sélectionnée(s)</span>
+  <a class="clr" id="fabClear">Tout désélectionner</a>
+  <button class="btn primary" id="fabOpen">Ouvrir la veille →</button>
+</div>
+
+<input type="file" id="fileIn" accept="application/json" style="display:none">
+
+<script>
+/* ============ SEED ============ */
+const SEED=[
+["Acheminement des transports avec particularités","Transports avec particularités","Acheminement d'un transport particulier",4,["DC1792", "DC01503"],"Heurt d'obstacle (gabarit, transport exceptionnel).",[["Circulation d'un convoi avec particularité", 3, [80, 5]], ["Garage d'un convoi avec particularité", 3, null], ["Traitement d'un incident lié à la circulation d'un convoi avec particularité", 3, null], ["Traitement d'un incident MD", 3, null], ["Savoir être au travail", 4, null]]],
+["Circuits de voie","Itinéraires","Circuits de voie peu empruntés",3,["DC08043", "DC1556"],"Circuit de voie non révélateur, réception sur voie occupée.",[["Emprunt des itinéraires désignés", 3, [100, 17]], ["Respect et suivi du programme de circulation", 2, [100, 8]], ["Savoir être au travail", 4, null]]],
+["Circuits de voie","Circulations","Circulations de catégorie A, B, C",3,["DC1556", "DC01133"],"Circulation hors conditions de catégorie.",[["Annonce", 2, [100, 18]], ["Prise des mesures", 3, [97, 31]], ["Savoir être au travail", 4, null]]],
+["Circulation","Service de la circulation","Gares temporaires",4,["DC01503", "DC07292"],"Circulation non protégée lors d'une cessation / reprise.",[["Informations si dernier train MI, Départ, Origine , Terminus", 2, [100, 2]], ["Processus de cessation ou de reprise", 2, [100, 8]], ["Report de mesures de sécurité", 3, [100, 5]], ["Savoir être au travail", 4, null]]],
+["Circulation","Service de la circulation","Gares temporaires / Gares permanentes autorisées à s'absenter",4,["DC01503", "DC07292"],"Circulation non protégée lors d'une cessation / reprise.",[["Processus de cessation ou de reprise du service de la circulation", 2, [100, 5]], ["Report de mesures de sécurité", 3, null]]],
+["Circulation","Communications de sécurité","Principes de communication",2,["DC07202", "DC03978"],"Dépassement de vitesse, collision, déraillement, heurt par mauvaise transmission.",[["Utilisation des moyens de communication", 2, [100, 51]], ["Règles des échanges verbaux", 3, [89, 62]], ["Règles de collationnement", 3, [98, 44]], ["Sacralisation de la remise des ordres", 3, [94, 33]], ["Savoir être au travail", 4, null]]],
+["Circulation","Service de la circulation","Suivi de la circulation",2,["DC03978", "DC01560"],"Perte de suivi, réception ou expédition erronée.",[["Mise à jour des outils et systèmes de suivi des trains (TST, Oléron, fichier 2000, )", 1, [100, 13]], ["Tenue de l'état de circulation ou du registre de cantonnement", 2, [100, 13]], ["Tenue du registre de circulation de voie unique, annotations cadre B ou C", 2, null]]],
+["Circulation","Service de la circulation","Suivi de la circulation en DV",2,["DC03978", "DC01560"],"Perte de suivi, réception ou expédition erronée.",[["Mise à jour des outils et systèmes de suivi des trains (TST, Oléron, fichier 2000, …)", 1, [96, 23]], ["Tenue de l'EC ou du registre de cantonnement", 2, [100, 26]], ["Savoir être au travail", 4, null]]],
+["Circulation","Service de la circulation","Transmission ou cessation du service",3,["DC03978", "DC08043"],"Perte d'information à la relève, situation non transmise.",[["Prise de service avec opérations de sécurité en cours", 3, [90, 10]], ["Transmission ou cessation de service avec opérations de sécurité en cours", 3, [100, 13]], ["Transmission ou cessation du service", 3, [100, 8]], ["Savoir être au travail", 4, null]]],
+["Circulation","Service de la circulation","Transmission, cessation ou prise du service",3,["—"],"",[["Transmission ou cessation du service", 3, [100, 5]], ["Prise de service", 3, [100, 6]]]],
+["Compétences non techniques","Compétences non techniques","Compétences non techniques",0,["—"],"Erreur humaine (communication, charge de travail, coopération).",[["Conscience de la situation", 1, [88, 33]], ["Coopération", 1, [97, 37]], ["Rigueur professionnelle", 1, [91, 46]], ["Communication", 1, [90, 40]], ["Gestion de la charge de travail", 1, [81, 21]], ["Gestion de soi", 1, [88, 17]], ["Prise de décision", 1, [77, 22]]]],
+["Dégagement des VP","Secours","Annulation de la demande de secours",3,["DC01505", "DC08043"],"Reprise de marche d'un EMS non avisé.",[["Autorisation de remise en marche", 2, [100, 8]], ["Réception de l'annulation et demande de remise en marche", 3, [100, 8]], ["Savoir être au travail", 4, null]]],
+["Dégagement des VP","Secours","Mesures préalables au secours",4,["DC01505", "DC01133"],"Secours engagé sans autorisation / sans protection.",[["Lancement des avis", 1, [100, 12]], ["Mesures de protection du train en détresse", 2, [100, 11]], ["Prise des mesures pour mouvement à contre-voie", 3, [100, 11]], ["Traitement de la DSEC", 1, [100, 12]], ["Savoir être au travail", 4, null]]],
+["Dégagement des VP","Secours","Réalisation du secours",3,["DC01505", "DC01560"],"Secours mal exécuté, retour non maîtrisé.",[["Expédition de l'EMS", 3, [100, 11]], ["Ordre au conducteur de l'EMS", 2, [100, 12]], ["Dégagement de la voie", 2, [100, 10]], ["Vérification train revenu entier", 3, [100, 10]], ["Savoir être au travail", 4, null], ["Autorisation de remise en marche", 3, null], ["Réception de l'annulation de la demande de secours et demande de remise en marche", 2, null], ["Particularités en IPCS", 3, null], ["Vérification train revenu complet/dégagement de la voie", 3, null]]],
+["Dégagement des VP","Secours","Traitement d'un secours",3,["—"],"",[["Lancement des avis", 2, null], ["Mesures de protection du train en détresse", 3, null], ["Traitement de la DSEC", 3, null]]],
+["Gestes métiers dans les emprises ferroviaires","Sauvegarde de soi-même, des collègues, des clients, des tiers","Connaissance des Règles Qui Sauvent (RQS)",2,["S2"],"Accident corporel (heurt ferroviaire).",[["Je ne réalise que les missions pour lesquelles je suis autorisé", 2, [100, 72]], ["Je ne travaille jamais en ayant consommé de l'alcool ou un produit stupéfiant", 2, [100, 72]], ["Je n'utilise jamais de téléphone en conduisant", 2, [100, 72]], ["Je respecte les consignes d'utilisation des engins et des outils", 2, [100, 72]], ["J'utilise systématiquement et correctement tous les EPI et agrès adaptés à ma mission", 2, [100, 73]], ["J'utilise un téléphone ou une tablette numérique uniquement dans une situation ne présentant pas de danger", 2, [100, 72]], ["Je participe au briefing et je m'assure de l'avoir compris", 2, [100, 39]], ["NVNP : Je considère toute installation électrique et tout câble électrique comme étant sous tension", 2, [100, 38]], ["NVNP : Je ne m'engage jamais et je n'engage jamais de matériel dans la zone dangereuse sans mesures de protection", 2, [100, 38]], ["NVNP : Je ne pénètre jamais sans autorisation, à moins de 3 mètres d'un engin, d'une machine ou d'une charge", 2, [100, 38]], ["Je considère toute installation électrique et tout câble électrique comme étant sous tension", 2, [100, 34]], ["Je ne chemine jamais dans les voies sans nécessité de service et prise en compte du risque ferroviaire", 2, [100, 34]], ["Je ne circule jamais dans la zone d’action d’un engin ou la zone d’évolution d’une charge sans avoir sécurisé mon intervention", 2, [100, 34]], ["Je ne commence le travail qu'après avoir participé au briefing et l'avoir compris", 2, [100, 34]]]],
+["Manœuvre et utilisation des IS","Utilisation des IS dans des conditions particulières","Franchissement des signaux",3,["DC01560", "DC01505"],"Déraillement sur ADV, prise en écharpe, nez-à-nez, dépassement de vitesse.",[["Conditions de transmission ou de remise", 2, [100, 26]], ["Qualité des communications", 2, [100, 16]], ["Traçabilité, formulaire", 2, [100, 26]], ["Vérification des conditions d'ouverture", 3, [100, 27]], ["Savoir être au travail", 4, null], ["Rédaction/remise du formulaire", 4, [33, 3]], ["Vérification préalable au franchissement du signal", 4, [33, 3]], ["Suivi de l'éclatement des appuis accoustiques", 4, null]]],
+["Manœuvre et utilisation des IS","Utilisation des installations dans les conditions normales","Manoeuvre des installations",3,["—"],"",[["Poste à commande d'itinéraire : commande/formation/établissement/destruction", 3, [100, 7]], ["IPCS", 3, null], ["Prise en compte des dispositifs (DA, DR, DSA, dialogue )", 3, [100, 4]], ["Respect de la position prévue des installations", 3, [100, 2]], ["Vérifications après manoeuvre", 3, [100, 3]], ["Vérifications avant manoeuvre", 3, [100, 3]]]],
+["Manœuvre et utilisation des IS","Utilisation des IS dans les conditions normales","Manœuvre individuelle des appareils de voie",3,["—"],"",[["Prise en compte des dispositifs (DA, DR)", 3, [100, 6]], ["Respect de la position normale", 2, [100, 4]], ["Technique gestuelle et gestes métier", 3, [100, 6]], ["Vérification position et collage", 3, [100, 6]], ["Savoir être au travail", 4, null]]],
+["Manœuvre et utilisation des IS","Utilisation des IS dans les conditions normales","Manœuvre individuelle des signaux",3,["—"],"",[["Ouverture en temps utile", 2, [100, 10]], ["Prise en compte des dispositifs (DA, DR)", 3, [100, 5]], ["Respect de la position normale", 2, [100, 7]], ["Vérification contrôle de fermeture", 3, [100, 10]], ["Utilisation de la fermeture d'urgence", 3, [100, 2]], ["Savoir être au travail", 4, null]]],
+["Manœuvre et utilisation des IS","Utilisation des IS dans des conditions particulières","Modification d'itinéraire",3,["DC01560", "DC01505"],"Itinéraire incompatible, arrêt accidentel mal traité.",[["Arrêt accidentel d'une circulation sur un itinéraire", 3, [100, 4]], ["Itinéraire non pourvu d'Eap, d'Epa ou de DMT", 3, null], ["Itinéraire pourvu de DMT", 3, null], ["Itinéraire pourvu d'EAp ou d'Epa", 3, [100, 8]], ["Savoir être au travail", 4, null]]],
+["Manœuvre et utilisation des IS","Utilisation des IS dans des conditions particulières","Parcours non prévus",3,["—"],"",[["Itinéraire inverse d'un itinéraire existant", 3, [100, 14]], ["Parcours ne correspondant à aucun itinéraire existant", 3, [100, 2]], ["Itinéraire FSO", 3, null], ["Savoir être au travail", 4, null], ["Itinéraire \"formation sans ouverture\"", 3, null]]],
+["Manœuvre et utilisation des IS","Utilisation des IS dans les conditions normales","Poste à commande d'itinéraire",3,["DC01560"],"Commande erronée d'itinéraire ou d'aiguille.",[["Commande/formation/établissement/destruction", 3, [100, 25]], ["Fermeture d'urgence", 3, [100, 17]], ["Prise en compte des dispositifs (DA, DR, dialogues)", 3, [100, 16]], ["Rappel des appareils en position de protection", 3, null], ["Savoir être au travail", 4, null]]],
+["Mise en mouvement des trains","Départ des trains","Autorisation de mouvement",3,["OP56529", "OP56531"],"Départ non autorisé / mouvement non protégé.",[["Autorisation de mouvement", 3, [100, 5]], ["Modalités de transmission de l'AuM", 1, [100, 5]], ["Train prêt au départ", 2, [100, 5]], ["Absence exceptionnelle de l'agent chargé de donner l'AuM", 1, null], ["Présence exceptionnelle de l'agent chargé de donner l'AuM", 1, null], ["Savoir être au travail", 4, null], ["Absence/Présence exceptionnelle de l'agent chargé de donner l'AuM", 3, null]]],
+["Mouvement","Coordination de site","Attribution d'un bloc",3,["S9", "OP56529"],"Bloc attribué sans vérification.",[["Attribution / restitution", 3, [100, 5]], ["Tenue du tableau de suivi du/des blocs", 3, [100, 4]], ["Réquisition d'une voie d'un bloc pour besoin SGC", 2, null], ["Travaux sur bloc", 3, [100, 2]], ["Savoir être au travail", 4, null]]],
+["Mouvement","Circulation des trains et des mouvements de manoeuvre et des manoeuvres guidées","Circulation des manoeuvres guidées et non guidées",3,["—"],"",[["Ententes et opérations préalables à la mise en mouvement", 3, null]]],
+["Mouvement","Circulation des trains et des manœuvres guidées","Circulation des manœuvres guidées",3,["DC08043", "DC03978"],"Manœuvre vers domaine fermé, collision.",[["Savoir être au travail", 4, null], ["Ententes préalables à la mise en mouvement", 2, null], ["Tracé des itinéraires", 3, null]]],
+["Mouvement","Exploitation en mode dégradé","Contre-voie",4,["DC01505", "DC3858"],"Engagement non protégé à contre-voie.",[["Exécution du mouvement à contre-voie", 3, [97, 30]], ["Fin du mouvement à contre-voie", 2, [100, 25]], ["Avis aux agents intéressés", 2, [100, 21]], ["Mesures préalables", 3, [100, 23]], ["Préparation du mouvement à contrevoie", 4, [86, 7]], ["Savoir être au travail", 4, null]]],
+["Mouvement","Coordination de site","Gestion d'un bloc",3,["—"],"",[["Procédures d'engagement/dégagement d'un bloc", 3, [100, 2]], ["Attribution / restitution", 2, [100, 2]], ["Gestion des travaux sur bloc", 3, [100, 2]], ["Réquisition d'une voie d'un bloc pour besoin SGC", 2, null], ["Tenue du tableau de suivi du/des blocs", 3, null]]],
+["Mouvement","Réception des trains","Mesures postérieures à la réception",3,["—"],"",[["Mise à jour du TOV, GOV ou autre outil en tenant lieu", 3, null], ["Mise en protection de la voie après réception (si possible ou prescrit)", 3, null], ["Protection des GF engagés non repérés", 3, null]]],
+["Mouvement","Réception des trains","Mesures préalables à la réception",3,["S9", "OP56529"],"Réception inopinée sur voie occupée.",[["Désignation de la voie de réception par le RR", 2, [100, 2]], ["Réservation de la voie désignée sur TOV, GOV ou autre outil en tenant lieu", 2, [100, 3]], ["Vérification contradictoire terrain/TOV ou GOV, si prescrit", 2, [100, 2]], ["Réalisation des ententes avec les autres intervenants (verbales, dépêches, …)", 2, [100, 2]], ["Tracé de l'itinéraire de réception", 3, [100, 2]], ["Vérification de l'aptitude de la voie (Voie de réception, TE, …)", 2, [100, 2]], ["Vérification des dispositifs de contrôle lorsqu'ils existent", 3, [100, 2]], ["Vérification voie libre sur TOV, GOV ou autre outil en tenant lieu", 3, [100, 2]], ["Savoir être au travail", 4, null], ["Réalisation des ententes avec les autres intervenants (verbales, dépêches, )", 3, [100, 2]], ["Vérification voie libre", 3, null], ["Réception sur voie choisie occupée", 3, null]]],
+["Mouvement","Coordination de site","Réception d'un train sur un bloc",3,["DC08043", "S9"],"Réception non autorisée par le gestionnaire du bloc.",[["Savoir être au travail", 4, null], ["Application CLE/CLO", 3, null]]],
+["Protection du personnel","Protection du personnel lors d'interventions aux abords ou dans la ZD","Protection d'un conducteur intervenant sur son train ou sur IS",3,["DC07202", "DC01560"],"Heurt d'une personne par une circulation.",[["Mesures de protection", 3, [100, 16]], ["Qualité de la demande et ententes", 2, [100, 16]], ["Libellés et transmission des ordres ou avis (Formulaires)", 2, [100, 15]], ["Protection complémentaire sur LGV", 3, null], ["Communications, traçabilité", 1, [100, 14]], ["Savoir être au travail", 4, null]]],
+["Protection du personnel","Protection du personnel lors d'interventions aux abords ou dans la ZD","Protection du personnel (autre que conducteur) lors d'interventions sur intallations ou matériels, travaux aux abords des voies, traversée des voies",3,["S9", "DC1560", "DC1503"],"Heurt d'une ou plusieurs personnes par une circulation ferroviaire",[["Mesures de protection", 4, [100, 17]], ["Communications, traçabilité", 1, [100, 17]], ["Qualité de la demande et ententes", 2, [100, 16]], ["Savoir être au travail", 4, null], ["NVNP : Préparation de l'entente préalable", 3, null], ["NVNP : Caractéristiques de l'opération", 3, null], ["NVNP : Heure d'accord et de restitution", 3, null], ["NVNP : Identification des acteurs et des opérations", 3, null], ["NVNP : Particularités à l'initiative de l'AC ou de l'ASP", 3, null], ["Traçabilité, tenue du carnet", 2, null]]],
+["Protection du personnel","Protection du personnel lors d'interventions aux abords ou dans la ZD","Protection du personnel lors d'opérations de petit entretien d'IS (graissage / détos)",3,["DC6083", "S9", "DC7361"],"Heurt d'une ou plusieurs personnes par une circulation ferroviaire",[["Communications, traçabilité", 1, [100, 7]], ["Mesures de protection", 4, [100, 2]], ["NVNP : Caractéristiques de l’opération", 3, [100, 7]], ["NVNP : Heure d’accord et de restitution de la DPGr", 1, [100, 6]], ["NVNP : Identification des acteurs et des opérations", 1, [100, 2]], ["NVNP : Particularités à l’initiative de l’AC ou de l’ASP", 2, [75, 4]], ["NVNP : Préparation de l’entente préalable", 1, [100, 6]], ["Qualité de la demande et ententes", 2, [100, 7]], ["Savoir être au travail", 4, null]]],
+["Protection du personnel","Protection du personnel lors d'interventions aux abords ou dans la ZD","Protection du personnel lors d'opérations de petit entretien d'IS (graissage/détos)",3,["DC6083", "S9", "DC7361"],"Heurt d'une ou plusieurs personnes par une circulation ferroviaire",[["Mesures de protection", 3, [100, 2]], ["NVNP : Caractéristiques de l'opération", 3, [100, 2]], ["NVNP : Heure d'accord et de restitution de la DPGr", 3, [100, 2]], ["NVNP : Identification des acteurs et des opérations", 3, [100, 2]], ["NVNP : Particularités à l'initiative de l'AC ou de l'ASP", 3, [100, 2]], ["NVNP : Préparation de l'entente préalable", 3, [100, 2]], ["Traçabilité, tenue du carnet", 2, [100, 2]]]],
+["SECURITE DU PERSONNEL","Les règles qui sauvent","Connaissance des Régles qui Sauvent",3,["S2"],"Accident corporel (heurt ferroviaire).",[["L'agent applique les régles qui sauvent", 3, [100, 3]], ["L'agent connait les régles qui sauvent", 3, [100, 3]], ["Savoir être au travail", 4, null]]],
+["SST opérationnelle","SST opérationnelle","RQS : Je ne mengage jamais et nengage jamais du matériel dans la ZD sans mesures de protection (Risque de heurt ferroviaire)",4,["RQS", "S2"],"Heurt ferroviaire d'un agent.",[["NVNP : Avant de travailler en ZD je m'assure de la mise en oeuvre de mesure de protection", 4, [100, 43]], ["NVNP : Avant de travailler en ZD je participe au briefing au pied de l'opération", 4, [100, 43]], ["NVNP : Dans les emprises je ne porte pas d'écouteurs. Dans la ZD je ,n'utilise ni téléphone, ni tablette", 4, [100, 43]], ["NVNP : Je porte les EPI adaptés", 4, [100, 44]], ["NVNP : Je suis autorisé à accéder aux emprises ferroviaires ou accompagné", 4, [100, 44]], ["NVNP : J'identifie les voies où la circulation n'est pas interdite et les emplacements de garage", 4, [100, 44]], ["Respect de la DMVC", 4, [100, 43]], ["Respect des particularités locales", 4, [100, 43]], ["Respect des règles de déplacement", 4, [100, 43]]]],
+["SST opérationnelle","SST opérationnelle","Risque de heurt ferroviaire",4,["RQS", "S2"],"Heurt ferroviaire d'un agent.",[["Port des EPI adaptés", 1, [100, 39]], ["Respect de la DMVC", 1, [100, 39]], ["Respect des mesures de protection prévues en cas de travail dans et à proximité de la ZD", 1, [100, 39]], ["Respect des particularités locales", 1, [100, 39]], ["Respect des règles de déplacement", 1, [100, 39]]]],
+["STEM","Surveillance des trains en marche","Exécution de la STEM",3,["DC01503", "DC01560"],"Avarie non détectée (frein serré, organes de roulement), impact installations / personnes.",[["Détection des anomalies", 2, null], ["Réalisation de la STEM", 2, [100, 7]], ["Désignation d'un autre agent", 2, null], ["Prise des mesures en cas d'anomalies", 3, null], ["Savoir être au travail", 4, null], ["Prendre ou faire prendre des mesures en cas d'anomalies", 3, null]]],
+["Situations perturbées / Incidents","Protection des circulations ou installations","Anomalie MD sur un train en circulation",4,["DC01503", "DC01560"],"Événement matières dangereuses non maîtrisé.",[["Lancement des avis", 1, null], ["Mesures de protection", 3, null], ["Reprise de la circulation normale", 3, null], ["Savoir être au travail", 4, null], ["Traçabilité, dépêches", 1, null], ["Traitement évènement type 1", 3, null], ["Traitement évènement type 2", 3, null]]],
+["Situations perturbées / Incidents","Outils digitaux - Mise en oeuvre des plans de continuité d'activité (PCA)","Indisponibilité des outils digitaux - Mise en oeuvre des PCA",2,["—"],"",[]],
+["Situations perturbées / Incidents","Incidents de circulation","Obstacles / Dangers",4,["DC01503", "DC07202"],"Heurt d'obstacle ou de personnes par une circulation.",[["Lancement des avis", 1, [98, 48]], ["Libellés et transmission des ordres ou avis (Formulaires)", 3, [100, 39]], ["Reconnaissance", 2, [100, 17]], ["Reprise de la circulation avec restriction", 3, [97, 37]], ["Reprise de la circulation normale", 3, [100, 43]], ["Traçabilité, dépêches", 2, [93, 43]], ["Mesures en cas de SAR / SAL", 3, [100, 10]], ["Mesures pour arrêter les trains", 3, [92, 50]], ["Savoir être au travail", 4, null], ["Mesures pour arrêter et retenir les trains", 4, null], ["Particularités des formulaires remis par un poste en amont", 1, null], ["Traitement d'un SAR / SAL", 4, null]]],
+["Situations perturbées / Incidents","Protection des circulations ou installations","Train circulant dans des conditions dangereuses",4,["DC01503", "DC01133"],"Prise en écharpe, heurt, déraillement.",[["Informations conducteur", 2, [100, 3]], ["Lancement des avis", 1, [100, 3]], ["Libellés et transmission des ordres ou avis (Formulaires)", 3, [100, 3]], ["Mesures de protection", 3, [100, 3]], ["Mesures en cas d'alarme DBC", 3, null], ["Reprise de la circulation avec restrictions", 3, null], ["Reprise de la circulation normale", 3, [100, 2]], ["Traçabilité, dépêches", 1, [100, 3]], ["Savoir être au travail", 4, null]]],
+["Traction électrique","Travaux / Incidents","Consignation C",3,["DC08043", "DC01503"],"Intervention sous tension.",[["Autre agent intervenant dans la protection", 3, [100, 6]], ["Mise en œuvre de la protection C", 3, [100, 8]], ["Qualité de la demande et ententes", 2, [100, 10]], ["SNOP", 2, [100, 4]], ["Traçabilité", 1, [100, 10]], ["Savoir être au travail", 4, null]]],
+["Traction électrique","Travaux / Incidents","Mise hors tension / condamnation",3,["DC08043", "DC01560"],"Manœuvre d'appareil d'interruption en charge.",[["Condamnation", 3, [100, 15]], ["Manœuvre des appareils d'interruption", 3, [100, 11]], ["Réalimentation en secours", 3, [100, 8]], ["Vérifications préalables à la mise hors tension", 3, [100, 13]], ["Savoir être au travail", 4, null]]],
+["Traction électrique","Rôle de l'agent E","Ordres reçus du RSS",3,["—"],"",[["Manoeuvre et Condamnation d'un appareil d'interruption", 3, [100, 6]], ["Protection C", 3, [100, 6]], ["SNOP", 3, null]]],
+["Traction électrique","Rôle de l'aiguilleur","Passage d'une circulation bimode sous caténaire privée de tension",3,["—"],"",[]],
+["Traction électrique","Travaux / Incidents","Passage sous caténaire privée de tension",3,["DC08043", "DC01560"],"Engin électrique sous caténaire consignée.",[["Reconnaissance de la circulation", 3, [100, 14]], ["Savoir être au travail", 4, null], ["Levée et rétablissement des mesures", 3, [100, 2]]]],
+["Traction électrique","Ordres reçus du RSS ou agent E","Protection C",3,["DC08043", "DC03978"],"Sel privée d'alimentation / sel secondaire impactée.",[["Réalisation de la protection C", 3, [100, 19]], ["Traçabilité", 2, [100, 18]], ["Savoir être au travail", 4, null]]],
+["Traction électrique","Rôle de l'aiguilleur","Protection C, protection d'une SNOP",3,["DC08043", "DC03978"],"Sel privée d'alimentation / sel secondaire impactée.",[["Mise en oeuvre de la protection C", 3, [100, 3]], ["Tenue de registre de traction électrique", 3, [100, 3]]]],
+["Traction électrique","Rôle de l'agent E","Réalimentation en secours hors consignation C",3,["DC08043", "DC01503"],"Intervention sous tension.",[["Réalimentation en secours", 3, null]]],
+["Traction électrique","Ordres reçus du RSS ou agent E","Suppression de la tension sur El. de caténaire secondaire",3,["DC8043", "DC1556", "S2"],"Dégât aux installations de T.El",[["réalisation de la protection", 3, [100, 12]], ["Savoir être au travail", 4, null]]],
+["Traitement des dérangements","Traitement des dérangements","Dérangement des IS et IS sensibles",4,["DC01560", "DC01133"],"Déraillement sur ADV, prise en écharpe, nez-à-nez.",[["Identification du dérangement", 2, [95, 42]], ["Lancement des avis", 2, [100, 40]], ["Reprise la circulation en mode dégradé", 3, [96, 45]], ["Traçabilité", 1, [98, 43]], ["Qualité des communications échangées", 2, [100, 15]], ["Savoir être au travail", 4, null]]],
+["Traitement des dérangements","Traitement des dérangements","Dérangement des IS et IS sensibles et contraires à la sécurité",4,["DC01560", "DC01133"],"Déraillement sur ADV, prise en écharpe, nez-à-nez.",[["Identification du dérangement", 3, [67, 9]], ["Lancement des avis", 2, [71, 7]], ["Traçabilité", 2, [75, 8]], ["Dérangement contraire à la sécurité : mesures conservatoires", 4, null], ["Reprise la circulation en mode dégradé", 4, [86, 7]]]],
+["Travaux sur les voies ou les IS","Travaux sur IS","1ère Cat. / DATIS",3,["DC01560", "DC3858"],"Raté d'ouverture / fermeture, dérangement aiguille non couvert.",[["Qualité de la demande et ententes", 2, [100, 12]], ["DATIS", 3, [92, 12]], ["Savoir être au travail", 4, null]]],
+["Travaux sur les voies ou les IS","Travaux sur les voies : procédé DFV","DV : Ententes et/ou fermeture de voie",3,["DC03978", "S9"],"Heurt d'une personne ou d'un obstacle par une circulation.",[["Autre agent intervenant dans la protection", 3, [100, 22]], ["Identification train ouvrant", 1, [100, 4]], ["Mise en oeuvre de la fermeture de voie", 3, [97, 34]], ["Réalisation de la vérification ZEP libre", 3, [97, 38]], ["Mesures annexes : SAM pour retenir EM présent sur la ZEP, …", 3, [86, 7]], ["Réalisation de la vérification à postériori de la ZEP (sur demande du RPTx)", 3, null], ["NVNP : Caractéristiques des planches travaux", 2, [95, 21]], ["NVNP : Entente sur l’heure prévue de restitution de la DFV", 1, [100, 22]], ["NVNP : Entente sur les mouvements de LAM", 2, null], ["NVNP : Entente sur les mouvements de TTx", 2, [100, 12]], ["NVNP : Heure d’accord de la DFV", 1, [92, 25]], ["NVNP : Identification des acteurs et des opérations", 2, [100, 18]], ["NVNP : Identification du procédé d’assurance chantier", 2, [96, 23]], ["NVNP : Identification et conformité des documents travaux", 2, [92, 24]], ["NVNP : Manœuvre d’appareils de voie", 3, [100, 8]], ["NVNP : Particularités des documents travaux applicables sur le chantier", 2, [92, 24]], ["Savoir être au travail", 4, null], ["Qualité de la demande et ententes", 2, [100, 4]]]],
+["Travaux sur les voies ou les IS","Travaux sur les voies : procédé DFV","Fin des travaux",3,["DC03978", "DC08043"],"Déraillement sur ADV par travaux mal clôturés.",[["Levée des mesures de protection", 2, [100, 3]], ["Restitution de la DFV", 1, [100, 3]], ["Tenue du carnet de DFV", 2, [100, 3]], ["Gestion des restrictions de circulation suite aux travaux", 3, null], ["Gestion des TTx présents si restitution de la DFV occupée", 2, null]]],
+["Travaux sur les voies ou les IS","Travaux sur les voies : procédé DFV","Fin des travaux et/ou traçabilité",3,["DC03978", "DC08043"],"Déraillement sur ADV par travaux mal clôturés.",[["Autre agent concerné par la protection", 2, [100, 7]], ["Gestion des restrictions de circulation suite aux travaux", 3, [100, 6]], ["Gestion des TTx présents si restitution de la DFV occupée", 2, [100, 5]], ["Levée des mesures de protection", 2, [100, 23]], ["Restitution de la DFV", 2, [100, 23]], ["Tenue du carnet de DFV", 1, [92, 26]], ["Savoir être au travail", 4, null]]],
+["Travaux sur les voies ou les IS","Travaux sur les voies : procédé DFV","NVNP : Ententes et fermeture de voie",4,["—"],"",[["Mise en oeuvre de la fermeture de voie", 4, [100, 11]], ["NVNP : Identification des acteurs et des opérations", 2, [100, 7]], ["NVNP : Identification et conformité des documents travaux", 2, [100, 7]], ["Mesures prises par un autre agent", 4, [67, 9]], ["Identification du train ouvrant", 3, null], ["NVNP : Caractéristiques des planches travaux", 2, [100, 3]], ["NVNP : Entente sur les mouvements de LAM", 2, null], ["NVNP : Entente sur les mouvements de TTx", 2, null], ["NVNP : Entente sur l'heure prévue de restitution de la DFV", 2, [100, 4]], ["NVNP : Heure d'accord de la DFV", 2, [100, 6]], ["NVNP : Identification du procédé d'assurance chantier", 2, [100, 5]], ["NVNP : Manoeuvre d'appareils de voie", 2, null], ["NVNP : Particularités des documents travaux applicables sur le chantier", 2, [100, 2]], ["Réalisation de la vérification ZEP libre par l'AC", 4, [100, 9]]]],
+["Travaux sur les voies ou les IS","Travaux sur les voies : procédé DFV","TTX / LAM",3,["DC03978", "DC01560"],"Talonnage, déraillement sur ADV, collision, heurt.",[["Dégagement de TTx - LAM", 3, [100, 10]], ["Engagement de TTx - LAM", 2, [100, 15]], ["Tracé du ou des itinéraires", 3, [100, 14]], ["Respect de la consigne de convoyage (LAM)", 2, null], ["Rétablissement des mesures de protection après engagement", 3, [100, 9]], ["Savoir être au travail", 4, null], ["TTx déclencheur", 2, null]]],
+["Travaux sur les voies ou les IS","Travaux sur les voies : procédé DFV","Vérifications préalables et/ou accord de la DFV",3,["DC03978", "S9"],"Talonnage / sortie intempestive du DF, collision ou déraillement sur ADV.",[["Qualité de l'accord de la DFV", 2, [100, 34]], ["Signaux sur domaine fermé", 3, [100, 14]], ["Restrictions de circulation sur domaine fermé", 3, [100, 9]], ["Aiguilles sur domaine fermé", 3, [100, 15]], ["Notification à l'agent exploitation devant engager/degager un TTx", 1, [100, 9]], ["Savoir être au travail", 4, null], ["Notification ou avis à l'agent exploitation concerné", 1, [67, 3]]]]
+];
+
+/* ============ state & storage ============ */
+const K_MODEL='cl_model_v3', K_PROG='cl_prog_v3', K_SEL='cl_sel_v3';
+let uid=Date.now();
+const gid=p=>(p||'x')+(++uid).toString(36);
+function load(k){try{const r=localStorage.getItem(k);return r?JSON.parse(r):null;}catch(e){return null;}}
+function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+function seedModel(){return SEED.map((s,i)=>({id:'p'+i,dom:s[0],theme:s[1],pc:s[2],g:s[3],docs:[...s[4]],risk:s[5],
+  items:s[6].map((it,j)=>({id:'p'+i+'_i'+j,t:it[0],g:it[1],conf:it[2]||null}))}));}
+
+let MODEL=load(K_MODEL)||seedModel();
+let PROG=load(K_PROG)||{};
+let SEL=new Set(load(K_SEL)||[]);
+let view='menu', editing=false, term='', gFilter='all';
+
+const $=s=>document.querySelector(s);
+const screen=$('#screen');
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const slug=s=>s.toLowerCase().replace(/[^a-z0-9]+/g,'-');
+const domains=()=>[...new Set(MODEL.map(p=>p.dom))];
+
+function saveModel(){save(K_MODEL,MODEL);}
+function saveProg(){save(K_PROG,PROG);}
+function saveSel(){save(K_SEL,[...SEL]);}
+
+/* ============ render ============ */
+function render(){
+  document.body.classList.toggle('editing',editing);
+  if(view==='menu') renderMenu(); else renderVeille();
+  updateGlobal();
+}
+
+function matches(p){
+  if(!term) return true;
+  const h=(p.pc+' '+p.dom+' '+p.risk+' '+p.docs.join(' ')+' '+p.items.map(i=>i.t).join(' ')).toLowerCase();
+  return h.includes(term);
+}
+
+function renderMenu(){
+  $('#introTxt').textContent='Sélectionnez les procédures à veiller, puis ouvrez la veille. '+MODEL.length+' procédures, '+domains().length+' domaines. En veille, chaque point observé affiche sa gravité et, si disponible, son taux de conformité historique (% conforme).';
+  $('#btnBack').style.display='none';
+  $('#btnPrint').style.display='none';
+  $('#gFilters').style.display='flex';
+  $('#gaugeWrap').style.display='none';
+  let html='<div class="silos">';
+  domains().forEach(dom=>{
+    const procs=MODEL.filter(p=>p.dom===dom && matches(p) && (gFilter==='all'||p.g==gFilter));
+    if(!procs.length) return;
+    const allProcs=MODEL.filter(p=>p.dom===dom && (gFilter==='all'||p.g==gFilter));
+    const allSel=allProcs.every(p=>SEL.has(p.id));
+    html+=`<div class="silo" data-dom="${esc(dom)}">
+      <div class="sh"><span class="nm">${esc(dom)}</span>
+        <span class="cnt">${allProcs.length}</span>
+        <button class="selall" data-selall="${esc(dom)}">${allSel?'Retirer':'Tout'}</button></div>`;
+    procs.forEach(p=>{
+      const sel=SEL.has(p.id);
+      const done=p.items.filter(it=>PROG[it.id]).length;
+      html+=`<div class="prow ${sel?'sel':''}" data-pick="${p.id}">
+        <span class="pcheck"><svg viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-10"/></svg></span>
+        <div class="pinfo">
+          <div class="tt">${esc(p.pc)}</div>${p.theme?`<div class="th">${esc(p.theme)}</div>`:''}
+          <div class="meta">
+            <span class="gpill g${p.g}">${p.g===0?'NT':'G'+p.g}</span>
+            <span class="ic">${p.items.length} pts${done?` · ${done}✓`:''}</span>
+            ${p.docs.slice(0,3).map(d=>`<span class="docchip">${esc(d)}</span>`).join('')}
+          </div>
+        </div>
+        <button class="pdel" data-delproc="${p.id}" title="Supprimer la procédure">✕</button>
+      </div>`;
+    });
+    html+=`<button class="addproc" data-addproc="${esc(dom)}">+ Ajouter une procédure dans « ${esc(dom)} »</button>`;
+    html+=`</div>`;
+  });
+  html+='</div>';
+  if(html==='<div class="silos"></div>') html='<div class="empty"><div class="big">Aucun résultat</div>Aucune procédure ne correspond à votre recherche.</div>';
+  screen.innerHTML=html;
+  updateFab();
+}
+
+function renderVeille(){
+  $('#introTxt').textContent='';
+  $('#btnBack').style.display='';
+  $('#btnPrint').style.display='';
+  $('#gFilters').style.display='none';
+  $('#gaugeWrap').style.display='flex';
+  $('#fab').classList.remove('show');
+  const picked=MODEL.filter(p=>SEL.has(p.id));
+  if(!picked.length){screen.innerHTML='<div class="empty"><div class="big">Aucune procédure sélectionnée</div>Revenez au menu pour en choisir.</div>';return;}
+  let html='<div class="veille">';
+  picked.forEach(p=>{
+    const done=p.items.filter(it=>PROG[it.id]).length;
+    const tot=p.items.length;
+    const complete=tot>0&&done===tot;
+    html+=`<article class="card g${p.g} ${complete?'done':''}" data-card="${p.id}">
+      <div class="chead">
+        <div class="ey">${esc(p.dom)}${p.theme?' · '+esc(p.theme):''}</div>
+        <div class="top">
+          <h3 ${editing?'contenteditable':''} data-edit="pc" data-id="${p.id}">${esc(p.pc)}</h3>
+          <span class="grav g${p.g}">${p.g===0?'NT':'G'+p.g}</span>
+        </div>
+        <div class="docs"><span class="docsedit" ${editing?'contenteditable':''} data-edit="docs" data-id="${p.id}">${editing?esc(p.docs.join(', ')):p.docs.map(d=>`<span class="d">${esc(d)}</span>`).join(' ')}</span></div>
+      </div>
+      <div class="prog"><div class="track"><div class="fill" style="width:${tot?done/tot*100:0}%"></div></div><span class="rd">${done}/${tot}</span></div>
+      <div class="risk"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <div><b>Risque&nbsp;:</b> <span class="risktxt" ${editing?'contenteditable':''} data-edit="risk" data-id="${p.id}">${esc(p.risk)}</span></div></div>
+      <ul class="items">`;
+    p.items.forEach(it=>{
+      const on=!!PROG[it.id];
+      html+=`<li class="${on?'on':''}" data-item="${it.id}" data-proc="${p.id}">
+        <span class="ck" data-toggle="${it.id}"><svg viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-10"/></svg></span>
+        <span class="lbl" data-toggle="${it.id}" ${editing?'contenteditable data-itedit="'+it.id+'"':''}>${esc(it.t)}</span>
+        ${it.conf?`<span class="cf ${it.conf[0]>=90?'cfH':it.conf[0]>=70?'cfM':'cfL'}" title="${it.conf[0]}% conforme sur ${it.conf[1]} évaluation(s) historiques">${it.conf[0]}%</span>`:''}
+        ${(it.g!=null)?`<span class="ig g${it.g}" title="Gravité du point observé">${it.g===0?'NT':'G'+it.g}</span>`:''}
+        <button class="idel" data-delitem="${it.id}" title="Supprimer">✕</button>
+      </li>`;
+    });
+    html+=`</ul><button class="additem" data-additem="${p.id}">+ Ajouter un point</button></article>`;
+  });
+  html+='</div>';
+  screen.innerHTML=html;
+}
+
+function updateFab(){
+  const fab=$('#fab');
+  if(view==='menu'&&SEL.size){fab.classList.add('show');$('#fabN').textContent=SEL.size;}
+  else fab.classList.remove('show');
+}
+function updateGlobal(){
+  if(view!=='veille')return;
+  const picked=MODEL.filter(p=>SEL.has(p.id));
+  let tot=0,done=0; picked.forEach(p=>{tot+=p.items.length;done+=p.items.filter(it=>PROG[it.id]).length;});
+  const pct=tot?Math.round(done/tot*100):0;
+  $('#gPct').textContent=pct+'%'; $('#gFill').style.width=pct+'%';
+  $('#gFill').style.background=pct===100?'#5BA85B':'#7FB0E8';
+}
+function refreshCard(pid){
+  const p=MODEL.find(x=>x.id===pid); if(!p)return;
+  const card=screen.querySelector(`[data-card="${pid}"]`); if(!card)return;
+  const done=p.items.filter(it=>PROG[it.id]).length, tot=p.items.length;
+  card.querySelector('.fill').style.width=(tot?done/tot*100:0)+'%';
+  card.querySelector('.rd').textContent=done+'/'+tot;
+  card.classList.toggle('done',tot>0&&done===tot);
+}
+
+/* ============ events ============ */
+screen.addEventListener('click',e=>{
+  // ---- menu picks ----
+  const sa=e.target.closest('[data-selall]');
+  if(sa){const dom=sa.dataset.selall;const ps=MODEL.filter(p=>p.dom===dom);
+    const allSel=ps.every(p=>SEL.has(p.id));
+    ps.forEach(p=>allSel?SEL.delete(p.id):SEL.add(p.id));saveSel();renderMenu();return;}
+  const ap=e.target.closest('[data-addproc]');
+  if(ap){addProcedure(ap.dataset.addproc);return;}
+  const dp=e.target.closest('[data-delproc]');
+  if(dp){e.stopPropagation();const p=MODEL.find(x=>x.id===dp.dataset.delproc);
+    if(confirm('Supprimer la procédure « '+p.pc+' » ?')){MODEL=MODEL.filter(x=>x.id!==p.id);SEL.delete(p.id);saveModel();saveSel();renderMenu();}return;}
+  const pick=e.target.closest('[data-pick]');
+  if(pick&&!editing){const id=pick.dataset.pick;SEL.has(id)?SEL.delete(id):SEL.add(id);saveSel();
+    pick.classList.toggle('sel');updateFab();
+    // update count text
+    const p=MODEL.find(x=>x.id===id);return;}
+  if(pick&&editing){return;} // in edit mode on menu, clicking row does nothing (use ✕ / titles)
+
+  // ---- veille toggles ----
+  const tg=e.target.closest('[data-toggle]');
+  if(tg&&!editing){const iid=tg.dataset.toggle;PROG[iid]=!PROG[iid];if(!PROG[iid])delete PROG[iid];saveProg();
+    const li=screen.querySelector(`[data-item="${iid}"]`);li.classList.toggle('on',!!PROG[iid]);
+    refreshCard(li.dataset.proc);updateGlobal();return;}
+  const di=e.target.closest('[data-delitem]');
+  if(di){const iid=di.dataset.delitem;const p=MODEL.find(x=>x.items.some(i=>i.id===iid));
+    p.items=p.items.filter(i=>i.id!==iid);delete PROG[iid];saveModel();saveProg();renderVeille();updateGlobal();return;}
+  const ai=e.target.closest('[data-additem]');
+  if(ai){const p=MODEL.find(x=>x.id===ai.dataset.additem);
+    const it={id:gid('i'),t:'Nouveau point à veiller',g:p.g,conf:null};p.items.push(it);saveModel();renderVeille();
+    const el=screen.querySelector(`[data-itedit="${it.id}"]`);if(el){el.focus();document.getSelection().selectAllChildren(el);}return;}
+});
+
+// inline editing (blur)
+screen.addEventListener('blur',e=>{
+  const t=e.target;
+  if(t.dataset && t.dataset.itedit){
+    const p=MODEL.find(x=>x.items.some(i=>i.id===t.dataset.itedit));
+    const it=p.items.find(i=>i.id===t.dataset.itedit);
+    const v=t.textContent.trim(); if(v){it.t=v;}else{t.textContent=it.t;} saveModel();return;
+  }
+  if(t.dataset && t.dataset.edit){
+    const p=MODEL.find(x=>x.id===t.dataset.id);if(!p)return;
+    const v=t.textContent.trim();
+    if(t.dataset.edit==='pc'){p.pc=v||p.pc;t.textContent=p.pc;}
+    else if(t.dataset.edit==='risk'){p.risk=v;}
+    else if(t.dataset.edit==='docs'){p.docs=v.split(/[,;]/).map(s=>s.trim()).filter(Boolean);if(!p.docs.length)p.docs=['—'];}
+    saveModel();
+  }
+},true);
+// Enter confirms item edit
+screen.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&e.target.dataset&&(e.target.dataset.itedit||e.target.dataset.edit)){e.preventDefault();e.target.blur();}
+});
+
+function addProcedure(dom){
+  const name=prompt('Nom de la nouvelle procédure dans « '+dom+' » :');
+  if(!name)return;
+  const np={id:gid('p'),dom,theme:'',pc:name.trim(),g:3,docs:['—'],risk:'À compléter.',
+    items:[{id:gid('i'),t:'Premier point à veiller'}]};
+  // insert after last of domain
+  let idx=-1;MODEL.forEach((p,i)=>{if(p.dom===dom)idx=i;});
+  MODEL.splice(idx+1,0,np);saveModel();renderMenu();
+}
+
+/* ============ header controls ============ */
+$('#q').addEventListener('input',e=>{term=e.target.value.trim().toLowerCase();if(view==='menu')renderMenu();});
+$('#gFilters').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;document.querySelectorAll('#gFilters .chip').forEach(x=>x.classList.remove('active'));c.classList.add('active');gFilter=c.dataset.g;renderMenu();});
+$('#editToggle').addEventListener('click',()=>{editing=!editing;render();});
+$('#btnBack').addEventListener('click',()=>{view='menu';$('#q').value='';term='';render();});
+$('#btnPrint').addEventListener('click',()=>window.print());
+$('#fabOpen').addEventListener('click',()=>{if(SEL.size){view='veille';$('#q').value='';term='';render();window.scrollTo(0,0);}});
+$('#fabClear').addEventListener('click',()=>{SEL.clear();saveSel();renderMenu();});
+
+$('#btnExport').addEventListener('click',()=>{
+  const blob=new Blob([JSON.stringify({version:2,exportedAt:new Date().toISOString(),model:MODEL},null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='veille_procedures_AC.json';a.click();URL.revokeObjectURL(a.href);
+});
+$('#btnImport').addEventListener('click',()=>$('#fileIn').click());
+$('#fileIn').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{try{const d=JSON.parse(r.result);const m=Array.isArray(d)?d:d.model;
+    if(!Array.isArray(m)||!m.length||!m[0].pc)throw 0;
+    MODEL=m.map(p=>({id:p.id||gid('p'),dom:p.dom||'Divers',theme:p.theme||'',pc:p.pc,g:+p.g||3,
+      docs:Array.isArray(p.docs)?p.docs:['—'],risk:p.risk||'',
+      items:(p.items||[]).map(it=>typeof it==='string'?{id:gid('i'),t:it,g:null,conf:null}:{id:it.id||gid('i'),t:it.t,g:(it.g!=null?+it.g:null),conf:it.conf||null})}));
+    saveModel();SEL=new Set([...SEL].filter(id=>MODEL.some(p=>p.id===id)));saveSel();
+    view='menu';render();alert('Import réussi : '+MODEL.length+' procédures.');
+  }catch(err){alert('Fichier invalide. Attendu : un JSON exporté par cet outil.');}
+  e.target.value='';};
+  r.readAsText(f);
+});
+$('#btnRestore').addEventListener('click',()=>{
+  if(!confirm('Restaurer le contenu d’origine ? Vos modifications du modèle seront perdues (les coches sont conservées).'))return;
+  MODEL=seedModel();saveModel();SEL.clear();saveSel();view='menu';render();
+});
+
+render();
+</script>
+</body>
+</html>

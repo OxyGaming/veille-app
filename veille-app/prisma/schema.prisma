@@ -1,0 +1,910 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ─── Utilisateurs, équipes, rôles ─────────────────────────────────────────────
+
+/// Rôles applicatifs :
+/// - ADMIN  : accès total (paramétrage, gestion utilisateurs, vu cross-équipe)
+/// - EDITOR : peut éditer procédures et points clés
+/// - USER   : peut lancer des veilles et valider des actions sur son équipe
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  name            String
+  password        String // bcrypt-like hash via scrypt côté Node (cf. lib/password.ts)
+  role            String   @default("USER") // ADMIN | EDITOR | USER
+  isActive        Boolean  @default(true)
+  /// Équipe principale (par défaut au login, à des fins d'affichage).
+  /// Le scope effectif passe par UserTeam (many-to-many).
+  teamId          String?
+  /// Permet à un USER d'utiliser temporairement la vue cross-équipe.
+  viewAllTeams    Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  team             Team?              @relation("UserPrimaryTeam", fields: [teamId], references: [id], onDelete: SetNull)
+  /// Appartenances multi-équipes — c'est cette table qui détermine le scope.
+  memberships      UserTeam[]
+  sessions         VeilleSession[]
+  observations     ObservationItem[]
+  comments         Comment[]
+  validations      ActionValidation[]
+  uploadedPhotos   Photo[]
+  auditLogs        AuditLog[]
+  siteVisits       SiteVisit[]        @relation("SiteVisitObserver")
+  sightings        AgentSighting[]
+  siteSightings    SiteSighting[]
+  icareMarks       IcareEntry[]
+  hiddenAgents     UserAgentHidden[]
+
+  @@index([teamId])
+  @@index([isActive])
+}
+
+/// Masquage d'un agent au niveau d'un utilisateur — n'altère pas la
+/// visibilité globale `Agent.isVisible` (qui reste contrôlée par l'ADMIN).
+/// Si une ligne existe ici, l'agent est filtré pour cet utilisateur uniquement.
+model UserAgentHidden {
+  id       String   @id @default(cuid())
+  userId   String
+  agentId  String
+  hiddenAt DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent    Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, agentId])
+  @@index([userId])
+  @@index([agentId])
+}
+
+/// Marque "saisie Icare effectuée" pour n'importe quel événement de
+/// l'historique. Évite d'ajouter une colonne `icareDone` sur 5 tables :
+/// on stocke ici (refType, refId) -> doneAt/doneBy.
+///
+/// refType ∈ { "visit", "session", "validation", "sighting", "site-sighting",
+///             "note", "site-note" }.
+model IcareEntry {
+  id        String   @id @default(cuid())
+  refType   String
+  refId     String
+  doneAt    DateTime @default(now())
+  doneById  String
+  doneBy    User     @relation(fields: [doneById], references: [id], onDelete: Cascade)
+
+  @@unique([refType, refId])
+  @@index([refType, refId])
+}
+
+/// Lien many-to-many user ↔ équipe.
+/// Le champ `role` permet de qualifier un user comme "manager" d'une équipe
+/// (cf. spec : "un utilisateur gère une ou plusieurs équipes").
+model UserTeam {
+  id        String   @id @default(cuid())
+  userId    String
+  teamId    String
+  /// MEMBER | MANAGER. MANAGER = peut gérer la composition de l'équipe.
+  role      String   @default("MEMBER")
+  joinedAt  DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@index([teamId])
+}
+
+/// Équipe — unité de cloisonnement.
+/// Les procédures sont communes (cf. spec), donc PAS de teamId sur Procedure.
+/// Les sessions de veille et actions importées appartiennent à une équipe.
+model Team {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String?  @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Users dont l'équipe est leur équipe "principale" (legacy).
+  users           User[]              @relation("UserPrimaryTeam")
+  /// Liens explicites many-to-many.
+  userMemberships UserTeam[]
+  /// Agents dont l'équipe est leur équipe "principale" (legacy).
+  agents          Agent[]             @relation("AgentPrimaryTeam")
+  /// Liens explicites many-to-many.
+  agentMemberships AgentTeam[]
+  sites           Site[]              @relation("SitePrimaryTeam")
+  siteMemberships SiteTeam[]
+  sessions        VeilleSession[]
+  importedActions ImportedAction[]
+  validations     ActionValidation[]
+  imports         ActionImport[]
+  visits          SiteVisit[]
+  sightings       AgentSighting[]
+  siteSightings   SiteSighting[]
+}
+
+// ─── Référentiel métier (commun à toutes les équipes) ─────────────────────────
+
+/// Agent terrain — créé/maintenu lors des imports Excel.
+/// Le matricule (ex "9012096G") est la clé métier.
+model Agent {
+  id            String   @id @default(cuid())
+  matricule     String   @unique
+  lastName      String
+  firstName     String
+  /// Libellé d'origine extrait du fichier Excel (utile pour le débogage des imports).
+  rawLabel      String?
+  /// Équipe principale (legacy). Le scope effectif passe par AgentTeam.
+  teamId        String?
+  posteId       String?
+  secteurId     String?
+  isActive      Boolean  @default(true)
+  /// Visibilité dans les listes courantes. False = masqué partout sauf historique.
+  /// Jamais supprimé (cf. spec).
+  isVisible     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  team             Team?            @relation("AgentPrimaryTeam", fields: [teamId], references: [id], onDelete: SetNull)
+  /// Appartenances multi-équipes — un agent peut figurer dans plusieurs équipes.
+  memberships      AgentTeam[]
+  poste            Poste?           @relation(fields: [posteId], references: [id], onDelete: SetNull)
+  secteur          Secteur?         @relation(fields: [secteurId], references: [id], onDelete: SetNull)
+  sessions         VeilleSession[]
+  importedActions  ImportedAction[]
+  validations      ActionValidation[]
+  visitParticipations SiteVisitParticipant[]
+  sightings        AgentSighting[]
+  hiddenBy         UserAgentHidden[]
+
+  @@index([teamId])
+  @@index([matricule])
+  @@index([lastName, firstName])
+  @@index([isVisible])
+}
+
+/// Lien many-to-many agent ↔ équipe.
+/// Cf. spec : "un agent peut appartenir à plusieurs équipes".
+model AgentTeam {
+  id        String   @id @default(cuid())
+  agentId   String
+  teamId    String
+  joinedAt  DateTime @default(now())
+
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, teamId])
+  @@index([teamId])
+}
+
+/// Marque temporelle posée par un observateur sur un agent :
+///  - kind = "SIGHT" : « Vu » simple (trace de croisement, commentaire optionnel)
+///  - kind = "NOTE"  : commentaire personnalisé (texte libre + photos optionnelles)
+/// Tous deux apparaissent dans l'historique transverse.
+model AgentSighting {
+  id          String   @id @default(cuid())
+  agentId     String
+  teamId      String
+  observerId  String
+  kind        String   @default("SIGHT")
+  comment     String?
+  sightedAt   DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  team        Team     @relation(fields: [teamId], references: [id])
+  observer    User     @relation(fields: [observerId], references: [id])
+  photos      Photo[]
+
+  @@index([agentId])
+  @@index([teamId])
+  @@index([sightedAt])
+  @@index([kind])
+}
+
+/// Pendant de AgentSighting pour un Site (poste d'aiguillage, gare…).
+/// Mêmes deux variantes : SIGHT (Vu) / NOTE (commentaire personnalisé).
+model SiteSighting {
+  id          String   @id @default(cuid())
+  siteId      String
+  teamId      String
+  observerId  String
+  kind        String   @default("SIGHT")
+  comment     String?
+  sightedAt   DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  site        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  team        Team     @relation(fields: [teamId], references: [id])
+  observer    User     @relation(fields: [observerId], references: [id])
+  photos      Photo[]
+
+  @@index([siteId])
+  @@index([teamId])
+  @@index([sightedAt])
+  @@index([kind])
+}
+
+// ─── Sites (postes d'aiguillage, gares, dépôts…) ────────────────────────────
+
+/// Site = un lieu physique faisant l'objet de visites (poste d'aiguillage,
+/// gare, dépôt, local technique…).
+/// Identique en logique à Agent : multi-équipes, visibilité, soft-delete.
+model Site {
+  id          String   @id @default(cuid())
+  /// Code court éventuel (ex. "POS-PEYRAUD").
+  code        String?  @unique
+  name        String
+  /// Type libre : "Poste d'aiguillage", "Gare", "Dépôt", "Local technique"…
+  type        String?
+  address     String?
+  description String?
+  /// Équipe principale (legacy ; le scope effectif passe par SiteTeam).
+  teamId      String?
+  isActive    Boolean  @default(true)
+  /// Visibilité dans les listes courantes (cf. Agent.isVisible).
+  isVisible   Boolean  @default(true)
+  /// Présence d'un local de graissage sur le site. Si false, la section
+  /// « 3 - Locaux de graissage » est filtrée du PDF de visite planifiée.
+  hasGreasingArea Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team             Team?              @relation("SitePrimaryTeam", fields: [teamId], references: [id], onDelete: SetNull)
+  memberships      SiteTeam[]
+  visits           SiteVisit[]
+  importedActions  ImportedAction[]
+  actionValidations ActionValidation[]
+  sightings        SiteSighting[]
+
+  @@index([teamId])
+  @@index([isVisible])
+}
+
+/// Lien many-to-many site ↔ équipe.
+model SiteTeam {
+  id        String   @id @default(cuid())
+  siteId    String
+  teamId    String
+  joinedAt  DateTime @default(now())
+
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, teamId])
+  @@index([teamId])
+}
+
+// ─── Visites de site (rapports type IMO00301 trimestriel, EIC RA planifiée…) ─
+
+/// Modèle de visite — définit la grille (sections + items).
+/// Configurable depuis le back-office : on n'est pas figé aux 2 templates seedés.
+model SiteVisitTemplate {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  name         String
+  description  String?
+  /// Layout PDF : VEILLE (design moderne) ou SNCF (fidèle au document d'origine).
+  pdfLayout    String   @default("VEILLE")
+  /// Schéma libre des champs d'en-tête (RSI, CLSI, COSI, N° UT, distribution…).
+  /// JSON : [{ key, label, type: "text"|"checkbox", required? }, …].
+  /// V1 affiche juste date + site ; les autres champs restent stockés mais
+  /// non saisis (extension future).
+  metaSchema   String   @default("[]")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sections     SiteVisitSection[]
+  visits       SiteVisit[]
+}
+
+/// Une section regroupe des items à observer (ex. "Extincteurs", "Poste de travail").
+model SiteVisitSection {
+  id          String   @id @default(cuid())
+  templateId  String
+  title       String
+  /// Icône (emoji ou slug Lucide).
+  icon        String?
+  /// Mode d'évaluation :
+  ///  - PER_ITEM    : un statut Oui/Non/Sans objet par item (trimestrielle)
+  ///  - PER_SECTION : un statut Conforme/Non conforme/Sans objet global,
+  ///                   les items servent juste de checkpoints lisibles
+  evalMode    String   @default("PER_ITEM")
+  sortOrder   Int      @default(0)
+  /// Tag de catégorisation (ex. "Incendie", "Électrique", "Coactivité")
+  /// — reproduit la colonne italique des PDF EIC RA.
+  category    String?
+  /// Texte fixe affiché dans la colonne "Précisions" du PDF SNCF
+  /// (ex. "Contenu repris dans le GRH0003").
+  precisions  String?
+  isActive    Boolean  @default(true)
+
+  template    SiteVisitTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  items       SiteVisitItem[]
+  observations SiteVisitObservation[]
+
+  @@index([templateId, sortOrder])
+}
+
+model SiteVisitItem {
+  id         String  @id @default(cuid())
+  sectionId  String
+  label      String
+  sortOrder  Int     @default(0)
+  isActive   Boolean @default(true)
+
+  section    SiteVisitSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  observations SiteVisitObservation[]
+
+  @@index([sectionId, sortOrder])
+}
+
+/// Une visite réalisée — instance d'un template, sur un site.
+model SiteVisit {
+  id             String   @id @default(cuid())
+  templateId     String
+  siteId         String
+  teamId         String
+  observerId     String
+  /// Date de la visite (séparée de createdAt qui = horodatage technique).
+  visitDate      DateTime @default(now())
+  /// Statut workflow.
+  status         String   @default("active") // draft | active | completed | archived
+  finishedAt     DateTime?
+  generalComment String?
+  /// Métadonnées d'en-tête saisies (clé → valeur). JSON souple.
+  /// V1 contient au moins { siteName, visitDate }, le reste sera enrichi.
+  metadata       String   @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  template       SiteVisitTemplate    @relation(fields: [templateId], references: [id])
+  site           Site                 @relation(fields: [siteId], references: [id])
+  team           Team                 @relation(fields: [teamId], references: [id])
+  observer       User                 @relation("SiteVisitObserver", fields: [observerId], references: [id])
+  participants   SiteVisitParticipant[]
+  observations   SiteVisitObservation[]
+  nonConformities SiteVisitNonConformity[]
+  reports        SiteVisitReport[]
+
+  @@index([siteId])
+  @@index([teamId])
+  @@index([observerId])
+  @@index([status])
+  @@index([visitDate])
+}
+
+model SiteVisitParticipant {
+  id        String   @id @default(cuid())
+  visitId   String
+  /// Soit lié à un Agent existant, soit texte libre.
+  agentId   String?
+  fullName  String
+  function  String?
+  /// Signature : V2 (base64 image ou data URI canvas). V1 = null.
+  signature String?
+  sortOrder Int      @default(0)
+
+  visit     SiteVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  agent     Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@index([visitId])
+}
+
+/// Observation au niveau item (PER_ITEM) ou section (itemId=null, PER_SECTION).
+model SiteVisitObservation {
+  id         String   @id @default(cuid())
+  visitId    String
+  sectionId  String
+  itemId     String?
+  /// Couvre les deux modes :
+  ///  PER_ITEM    : OUI | NON | SANS_OBJET
+  ///  PER_SECTION : CONFORME | NON_CONFORME | SANS_OBJET
+  status     String   @default("PENDING")
+  comment    String?
+  recordedAt DateTime @default(now())
+  recordedById String?
+
+  visit      SiteVisit         @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  section    SiteVisitSection  @relation(fields: [sectionId], references: [id])
+  item       SiteVisitItem?    @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@unique([visitId, sectionId, itemId])
+  @@index([visitId])
+  @@index([status])
+}
+
+/// Non-conformité relevée : entrée du tableau "Actions correctives".
+/// Peut générer automatiquement une ImportedAction côté site.
+model SiteVisitNonConformity {
+  id                String    @id @default(cuid())
+  visitId           String
+  /// Ordre d'affichage dans le tableau (1..N).
+  sortOrder         Int       @default(0)
+  description       String
+  riskIdentified    String?
+  evrpCotation      String?
+  proposedMeasures  String?
+  responsible       String?
+  plannedDate       DateTime?
+  redressedDate     DateTime?
+  closedDate        DateTime?
+  /// Si une ImportedAction a été générée, on la référence pour la traçabilité
+  /// (validation locale côté fiche Site ↔ NC).
+  generatedActionId String?   @unique
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  visit             SiteVisit       @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  generatedAction   ImportedAction? @relation("NCAction", fields: [generatedActionId], references: [id], onDelete: SetNull)
+
+  @@index([visitId])
+}
+
+/// PDF / DOCX généré (cf. Report pour les sessions). Trace les exports.
+model SiteVisitReport {
+  id          String   @id @default(cuid())
+  visitId     String
+  format      String   @default("PDF") // PDF | DOCX (futur)
+  layout      String   @default("VEILLE") // VEILLE | SNCF
+  storagePath String?
+  payload     String   @default("{}")
+  createdAt   DateTime @default(now())
+
+  visit       SiteVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([visitId])
+}
+
+/// Poste — RR, AC, ASP, etc.
+model Poste {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  acronym  String?
+  description String?
+
+  agents   Agent[]
+  sessions VeilleSession[]
+}
+
+/// Secteur — RIVE DROITE NORD, etc.
+model Secteur {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  code      String?
+
+  agents    Agent[]
+  sessions  VeilleSession[]
+}
+
+/// Contact — annuaire interne.
+model Contact {
+  id        String   @id @default(cuid())
+  name      String
+  role      String?
+  phone     String?
+  email     String?
+  notes     String?
+  teamId    String?
+  createdAt DateTime @default(now())
+
+  @@index([teamId])
+}
+
+/// Mnémonique métier — abréviations, formules.
+model Mnemonique {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  meaning     String
+  description String?
+  category    String?
+  createdAt   DateTime @default(now())
+}
+
+/// Abréviation — version plus simple que Mnémonique (paire courte).
+model Abreviation {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  meaning   String
+  createdAt DateTime @default(now())
+}
+
+// ─── Procédures et points de checklist ────────────────────────────────────────
+
+/// Procédure de veille — paramétrable depuis le back-office.
+/// Pas de teamId : les procédures sont communes (spec).
+model Procedure {
+  id           String   @id @default(cuid())
+  /// Domaine (ex. "Circulation", "Traction électrique").
+  domain       String
+  /// Thème (sous-domaine).
+  theme        String?
+  /// Point clé — titre principal affiché.
+  title        String
+  /// Gravité 0..4 (0=Non technique, 4=critique).
+  gravity      Int      @default(3)
+  /// Documents de référence (séparés par virgule pour rester simple).
+  documents    String   @default("[]") // JSON tableau
+  /// Description du risque associé.
+  risk         String?
+  /// Ordre d'affichage dans le silo de son domaine.
+  sortOrder    Int      @default(0)
+  isActive     Boolean  @default(true)
+  /// Si vrai, le commentaire général est obligatoire à la fin de la veille.
+  requireGeneralComment Boolean @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items                ChecklistItem[]
+  procedureObservations ProcedureObservation[]
+  importedActions      ImportedAction[]
+
+  @@index([domain])
+  @@index([isActive])
+}
+
+/// Point de checklist d'une procédure.
+model ChecklistItem {
+  id            String   @id @default(cuid())
+  procedureId   String
+  label         String
+  /// Gravité spécifique du point (peut différer de la procédure).
+  gravity       Int?
+  sortOrder     Int      @default(0)
+  /// Commentaire obligatoire si non conforme.
+  requireCommentIfKO Boolean @default(false)
+  /// Photo obligatoire si non conforme.
+  requirePhotoIfKO   Boolean @default(false)
+  /// % historique de conformité (peut être enrichi plus tard).
+  historicConformPct Int?
+  historicSampleSize Int?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  procedure     Procedure         @relation(fields: [procedureId], references: [id], onDelete: Cascade)
+  observations  ObservationItem[]
+
+  @@index([procedureId, sortOrder])
+}
+
+// ─── Sessions de veille terrain ───────────────────────────────────────────────
+
+/// Une session = une veille terrain conduite par un observateur sur un agent.
+model VeilleSession {
+  id              String    @id @default(cuid())
+  teamId          String
+  observerId      String
+  agentId         String?
+  posteId         String?
+  secteurId       String?
+  /// Statut workflow : draft | active | completed | archived
+  status          String    @default("draft")
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+  /// Commentaire général sur la session.
+  generalComment  String?
+  /// JSON éventuel d'éléments synchronisés (pour audit offline → online).
+  clientGeneratedId String? @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  team        Team    @relation(fields: [teamId], references: [id])
+  observer    User    @relation(fields: [observerId], references: [id])
+  agent       Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  poste       Poste?  @relation(fields: [posteId], references: [id], onDelete: SetNull)
+  secteur     Secteur? @relation(fields: [secteurId], references: [id], onDelete: SetNull)
+  procedures  ProcedureObservation[]
+  comments    Comment[]
+  photos      Photo[]
+  reports     Report[]
+
+  @@index([teamId])
+  @@index([observerId])
+  @@index([agentId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+/// Lien session ↔ procédure : permet d'observer plusieurs procédures dans une seule session.
+model ProcedureObservation {
+  id           String   @id @default(cuid())
+  sessionId    String
+  procedureId  String
+  generalComment String?
+  createdAt    DateTime @default(now())
+
+  session      VeilleSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  procedure    Procedure         @relation(fields: [procedureId], references: [id])
+  items        ObservationItem[]
+
+  @@unique([sessionId, procedureId])
+}
+
+/// Observation d'un point de checklist dans une session.
+model ObservationItem {
+  id                    String   @id @default(cuid())
+  procedureObservationId String
+  checklistItemId       String
+  /// Statut : CONFORME | NON_CONFORME | NON_OBSERVE | NON_APPLICABLE | A_REVOIR
+  status                String   @default("NON_OBSERVE")
+  comment               String?
+  recordedAt            DateTime @default(now())
+  recordedById          String
+
+  procedureObservation ProcedureObservation @relation(fields: [procedureObservationId], references: [id], onDelete: Cascade)
+  checklistItem        ChecklistItem        @relation(fields: [checklistItemId], references: [id])
+  recordedBy           User                 @relation(fields: [recordedById], references: [id])
+  photos               Photo[]
+  history              ObservationHistory[]
+
+  @@unique([procedureObservationId, checklistItemId])
+  @@index([status])
+}
+
+/// Trace complète des modifications d'une observation.
+model ObservationHistory {
+  id              String   @id @default(cuid())
+  observationId   String
+  previousStatus  String?
+  newStatus       String
+  previousComment String?
+  newComment      String?
+  changedById     String
+  changedAt       DateTime @default(now())
+
+  observation ObservationItem @relation(fields: [observationId], references: [id], onDelete: Cascade)
+
+  @@index([observationId])
+}
+
+/// Commentaires libres rattachés à une session ou à une observation.
+model Comment {
+  id          String   @id @default(cuid())
+  sessionId   String?
+  observationId String?
+  authorId    String
+  content     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  session     VeilleSession?   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  author      User             @relation(fields: [authorId], references: [id])
+
+  @@index([sessionId])
+  @@index([observationId])
+}
+
+/// Photos prises ou téléversées pendant une veille.
+model Photo {
+  id              String   @id @default(cuid())
+  sessionId       String?
+  observationId   String?
+  /// Photo rattachée à un « Vu / Commentaire » sur un agent.
+  agentSightingId String?
+  /// Photo rattachée à un « Vu / Commentaire » sur un site.
+  siteSightingId  String?
+  uploaderId      String
+  /// Chemin relatif au dossier d'uploads ("photos/<sessionId>/<uuid>.jpg") ou data: URI temporaire.
+  storagePath     String
+  /// Hash / nom client pour dédupliquer après resync.
+  clientId        String?
+  legend          String?
+  /// Statut de synchronisation : LOCAL | SYNCED
+  syncStatus      String   @default("SYNCED")
+  width           Int?
+  height          Int?
+  byteSize        Int?
+  createdAt       DateTime @default(now())
+
+  session       VeilleSession?    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  observation   ObservationItem?  @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  agentSighting AgentSighting?    @relation(fields: [agentSightingId], references: [id], onDelete: Cascade)
+  siteSighting  SiteSighting?     @relation(fields: [siteSightingId], references: [id], onDelete: Cascade)
+  uploader      User              @relation(fields: [uploaderId], references: [id])
+
+  @@index([sessionId])
+  @@index([observationId])
+  @@index([agentSightingId])
+  @@index([siteSightingId])
+  @@index([syncStatus])
+}
+
+/// Compte rendu généré (PDF) — persisté pour traçabilité.
+model Report {
+  id          String   @id @default(cuid())
+  sessionId   String
+  format      String   @default("PDF") // PDF | DOCX | XLSX (futur)
+  storagePath String?
+  /// Snapshot JSON du compte rendu au moment de la génération.
+  payload     String   @default("{}")
+  createdAt   DateTime @default(now())
+
+  session     VeilleSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}
+
+// ─── Actions agent importées via Excel ────────────────────────────────────────
+
+/// Une action importée depuis le fichier Excel.
+/// La clé métier est le couple (externalId, agentId) :
+/// une même "ID Action" peut être affectée à plusieurs agents.
+/// Note SQLite : NULL n'est jamais "égal" à NULL, donc plusieurs rows avec
+/// agentId=NULL et même externalId restent autorisés (acceptable car les
+/// actions sans agent n'apparaissent pas dans la vue agent).
+model ImportedAction {
+  id              String   @id @default(cuid())
+  externalId      String
+  teamId          String
+  /// Cible : un agent OU un site (ou aucun pour les vieux imports).
+  /// Une NC remontée d'une visite renseigne `siteId`.
+  agentId         String?
+  siteId          String?
+  procedureId     String?
+  /// Statut local : ACTIVE | REPLACED | OBSOLETE | VALIDATED_LOCAL
+  /// (le statut d'origine est conservé dans `originalStatus`)
+  localStatus     String   @default("ACTIVE")
+  originalStatus  String?
+  type            String?
+  subType         String?
+  // Hiérarchie d'origine
+  establishment   String?
+  unit            String?
+  secteur         String?
+  veilleGroup     String?
+  space           String?
+  domain          String?
+  theme           String?
+  keyPoint        String?
+  observedElement String?
+  veilleType      String?
+  realizedAt      DateTime?
+  dueAt           DateTime?
+  closedAt        DateTime?
+  comment         String?
+  initialOwner    String?
+  sharedWith      String?
+  transferredTo   String?
+  actionPlan      String?
+  importId        String?
+  /// Timestamp du dernier import qui a touché cette action.
+  lastSeenAt      DateTime @default(now())
+  /// Empreinte logique pour détecter les doublons (même agent peut recevoir
+  /// plusieurs IDs Action distincts mais identiques en contenu).
+  /// Calculée à l'import : SHA1(keyPoint + comment + dueAt + actionPlan).
+  /// Les doublons d'un même couple (agentId, dedupHash) sont collapsés
+  /// dans la vue agent — leur validation cascade sur tout le groupe.
+  dedupHash       String?
+  /// Tags libres (JSON array de strings). Exemples : "veille légale",
+  /// "obligatoire", "sécurité", "suivi DPX", "compétence", "terrain".
+  /// La colonne `type` héritée de l'Excel reste, mais `tags` permet la
+  /// classification multi-dimensionnelle ajoutée côté application.
+  tags            String   @default("[]")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  team        Team             @relation(fields: [teamId], references: [id])
+  agent       Agent?           @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  site        Site?            @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  procedure   Procedure?       @relation(fields: [procedureId], references: [id], onDelete: SetNull)
+  import      ActionImport?    @relation(fields: [importId], references: [id], onDelete: SetNull)
+  validations ActionValidation[]
+  nonConformity SiteVisitNonConformity? @relation("NCAction")
+
+  @@unique([externalId, agentId])
+  @@index([externalId])
+  @@index([teamId])
+  @@index([agentId])
+  @@index([siteId])
+  @@index([localStatus])
+  @@index([dueAt])
+  @@index([agentId, dedupHash])
+}
+
+/// Historique d'un import Excel.
+model ActionImport {
+  id              String   @id @default(cuid())
+  teamId          String
+  importedById    String?
+  fileName        String?
+  rowsTotal       Int      @default(0)
+  rowsCreated     Int      @default(0)
+  rowsUpdated     Int      @default(0)
+  rowsObsoleted   Int      @default(0)
+  rowsErrored     Int      @default(0)
+  agentsCreated   Int      @default(0)
+  unknownAgents   Int      @default(0)
+  /// Résumé JSON de l'import (warnings, erreurs détaillées).
+  summary         String   @default("{}")
+  createdAt       DateTime @default(now())
+
+  team           Team             @relation(fields: [teamId], references: [id])
+  importedActions ImportedAction[]
+
+  @@index([teamId])
+  @@index([createdAt])
+}
+
+/// Validation d'une action depuis l'application.
+/// Une action validée n'apparaît plus dans la liste à traiter mais reste dans l'historique.
+model ActionValidation {
+  id           String   @id @default(cuid())
+  actionId     String
+  agentId      String?
+  siteId       String?
+  validatedById String
+  teamId       String
+  realizedAt   DateTime @default(now())
+  comment      String?
+  createdAt    DateTime @default(now())
+
+  action       ImportedAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  agent        Agent?         @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  site         Site?          @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  validatedBy  User           @relation(fields: [validatedById], references: [id])
+  team         Team           @relation(fields: [teamId], references: [id])
+
+  @@index([actionId])
+  @@index([agentId])
+  @@index([siteId])
+  @@index([teamId])
+}
+
+// ─── Liens utiles ─────────────────────────────────────────────────────────────
+
+model LinkCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  /// Icône Lucide (ex "link", "book", "external-link").
+  icon      String?
+  color     String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+
+  links     Link[]
+}
+
+model Link {
+  id           String   @id @default(cuid())
+  categoryId   String
+  label        String
+  url          String
+  description  String?
+  icon         String?
+  color        String?
+  sortOrder    Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  category     LinkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId, sortOrder])
+}
+
+// ─── Audit ────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  userEmail String?
+  action    String
+  entity    String
+  entityId  String?
+  details   String   @default("{}")
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

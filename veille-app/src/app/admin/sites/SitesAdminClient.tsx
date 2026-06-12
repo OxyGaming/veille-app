@@ -1,0 +1,427 @@
+"use client";
+
+import { useState } from "react";
+import { Icon } from "@/components/icons";
+
+type Site = {
+  id: string;
+  code: string | null;
+  name: string;
+  type: string | null;
+  address: string | null;
+  isActive: boolean;
+  isVisible: boolean;
+  hasGreasingArea: boolean;
+  teamIds: string[];
+  teamNames: string[];
+  visitsCount: number;
+  actionsCount: number;
+};
+type Team = { id: string; name: string };
+
+export default function SitesAdminClient({
+  initial,
+  teams,
+}: {
+  initial: Site[];
+  teams: Team[];
+}) {
+  const [sites, setSites] = useState(initial);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    code: "",
+    type: "Poste d'aiguillage",
+    address: "",
+    teamIds: [] as string[],
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [editTeams, setEditTeams] = useState<Site | null>(null);
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const res = await fetch("/api/admin/sites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    if (res.ok) {
+      const s = await res.json();
+      setSites((arr) => [
+        ...arr,
+        {
+          ...s,
+          teamIds: form.teamIds,
+          teamNames: teams
+            .filter((t) => form.teamIds.includes(t.id))
+            .map((t) => t.name),
+          visitsCount: 0,
+          actionsCount: 0,
+          isVisible: true,
+          hasGreasingArea: false,
+        },
+      ]);
+      setCreating(false);
+      setForm({ name: "", code: "", type: "Poste d'aiguillage", address: "", teamIds: [] });
+    } else {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error || "Erreur");
+    }
+  }
+
+  async function toggleVisibility(s: Site) {
+    const res = await fetch(`/api/admin/sites/${s.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isVisible: !s.isVisible }),
+    });
+    if (res.ok) {
+      setSites((arr) =>
+        arr.map((x) =>
+          x.id === s.id ? { ...x, isVisible: !x.isVisible } : x
+        )
+      );
+    }
+  }
+
+  async function toggleGreasing(s: Site) {
+    const res = await fetch(`/api/admin/sites/${s.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hasGreasingArea: !s.hasGreasingArea }),
+    });
+    if (res.ok) {
+      setSites((arr) =>
+        arr.map((x) =>
+          x.id === s.id
+            ? { ...x, hasGreasingArea: !x.hasGreasingArea }
+            : x
+        )
+      );
+    }
+  }
+
+  async function saveTeams(siteId: string, teamIds: string[]) {
+    const res = await fetch(`/api/admin/sites/${siteId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamIds }),
+    });
+    if (res.ok) {
+      const newNames = teamIds
+        .map((id) => teams.find((t) => t.id === id)?.name ?? id)
+        .filter(Boolean);
+      setSites((arr) =>
+        arr.map((x) =>
+          x.id === siteId ? { ...x, teamIds, teamNames: newNames } : x
+        )
+      );
+      setEditTeams(null);
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Sites</h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Postes d&apos;aiguillage, gares, dépôts et autres lieux visités.
+          </p>
+        </div>
+        <button
+          onClick={() => setCreating((v) => !v)}
+          className="btn btn-primary"
+        >
+          <Icon.Plus className="w-4 h-4" /> {creating ? "Annuler" : "Nouveau site"}
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      {creating && (
+        <form
+          onSubmit={create}
+          className="bg-white border border-slate-200 rounded-xl p-4 mb-4 grid grid-cols-1 md:grid-cols-2 gap-3"
+        >
+          <Field label="Nom du site" required>
+            <input
+              required
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="input"
+              placeholder="Ex. Poste de Givors Canal"
+            />
+          </Field>
+          <Field label="Code">
+            <input
+              value={form.code}
+              onChange={(e) => setForm({ ...form, code: e.target.value })}
+              className="input"
+              placeholder="POS-GIVORS"
+            />
+          </Field>
+          <Field label="Type">
+            <input
+              value={form.type}
+              onChange={(e) => setForm({ ...form, type: e.target.value })}
+              className="input"
+              placeholder="Poste d'aiguillage, gare, dépôt…"
+            />
+          </Field>
+          <Field label="Adresse">
+            <input
+              value={form.address}
+              onChange={(e) => setForm({ ...form, address: e.target.value })}
+              className="input"
+            />
+          </Field>
+          <Field label="Équipes" full>
+            <div className="flex flex-wrap gap-1.5">
+              {teams.map((t) => {
+                const sel = form.teamIds.includes(t.id);
+                return (
+                  <button
+                    type="button"
+                    key={t.id}
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        teamIds: sel
+                          ? form.teamIds.filter((id) => id !== t.id)
+                          : [...form.teamIds, t.id],
+                      })
+                    }
+                    className={`text-xs px-2 py-1 rounded border ${
+                      sel
+                        ? "bg-indigo-600 border-indigo-600 text-white"
+                        : "bg-white border-slate-200 text-slate-600"
+                    }`}
+                  >
+                    {t.name}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+          <div className="md:col-span-2">
+            <button type="submit" className="btn btn-primary">
+              Créer
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <tr>
+              <th className="text-left px-4 py-2.5">Site</th>
+              <th className="text-left px-4 py-2.5">Code</th>
+              <th className="text-left px-4 py-2.5">Type</th>
+              <th className="text-left px-4 py-2.5">Équipes</th>
+              <th className="text-right px-4 py-2.5">Visites</th>
+              <th className="text-right px-4 py-2.5">Actions</th>
+              <th className="text-center px-4 py-2.5" title="Local de graissage présent sur le site">
+                Graissage
+              </th>
+              <th className="text-center px-4 py-2.5">Visibilité</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {sites.map((s) => (
+              <tr
+                key={s.id}
+                className={`border-t border-slate-100 hover:bg-slate-50 ${
+                  !s.isVisible ? "bg-slate-50/60 text-slate-500" : ""
+                }`}
+              >
+                <td className="px-4 py-2.5 font-semibold">{s.name}</td>
+                <td className="px-4 py-2.5 font-mono text-xs">{s.code}</td>
+                <td className="px-4 py-2.5 text-xs">{s.type}</td>
+                <td className="px-4 py-2.5 text-xs">
+                  {s.teamNames.length ? (
+                    <span className="flex flex-wrap gap-1">
+                      {s.teamNames.map((n) => (
+                        <span
+                          key={n}
+                          className="bg-indigo-50 border border-indigo-200 text-indigo-700 px-1.5 py-0.5 rounded font-mono text-[10px]"
+                        >
+                          {n}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 text-right font-mono">
+                  {s.visitsCount}
+                </td>
+                <td className="px-4 py-2.5 text-right font-mono">
+                  {s.actionsCount}
+                </td>
+                <td className="px-4 py-2.5 text-center">
+                  <label
+                    className="inline-flex items-center gap-1.5 cursor-pointer select-none text-xs"
+                    title="Bascule la section « 3 - Locaux de graissage » dans les PDF de visite planifiée"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={s.hasGreasingArea}
+                      onChange={() => toggleGreasing(s)}
+                      className="w-4 h-4 accent-indigo-600 cursor-pointer"
+                    />
+                    <span
+                      className={
+                        s.hasGreasingArea
+                          ? "text-indigo-700 font-mono"
+                          : "text-slate-400 font-mono"
+                      }
+                    >
+                      {s.hasGreasingArea ? "Oui" : "Non"}
+                    </span>
+                  </label>
+                </td>
+                <td className="px-4 py-2.5 text-center">
+                  <button
+                    onClick={() => toggleVisibility(s)}
+                    className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
+                      s.isVisible
+                        ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        s.isVisible ? "bg-emerald-500" : "bg-slate-400"
+                      }`}
+                    />
+                    {s.isVisible ? "Visible" : "Masqué"}
+                  </button>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <button
+                    onClick={() => setEditTeams(s)}
+                    className="text-xs text-indigo-600 underline"
+                  >
+                    Équipes
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {!sites.length && (
+              <tr>
+                <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
+                  Aucun site.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {editTeams && (
+        <TeamPicker
+          site={editTeams}
+          teams={teams}
+          onCancel={() => setEditTeams(null)}
+          onSave={(ids) => saveTeams(editTeams.id, ids)}
+        />
+      )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  required,
+  full,
+}: {
+  label: string;
+  children: React.ReactNode;
+  required?: boolean;
+  full?: boolean;
+}) {
+  return (
+    <div className={full ? "md:col-span-2" : ""}>
+      <label className="block text-xs font-medium text-slate-600 mb-1">
+        {label} {required && <span className="text-rose-600">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function TeamPicker({
+  site,
+  teams,
+  onCancel,
+  onSave,
+}: {
+  site: Site;
+  teams: Team[];
+  onCancel: () => void;
+  onSave: (ids: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set(site.teamIds));
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/40 z-50" onClick={onCancel} />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden">
+        <header className="px-4 py-3 border-b border-slate-200">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+            Équipes
+          </div>
+          <div className="text-sm font-bold">{site.name}</div>
+        </header>
+        <div className="p-3 space-y-1 max-h-80 overflow-auto">
+          {teams.map((t) => {
+            const sel = selected.has(t.id);
+            return (
+              <label
+                key={t.id}
+                className={`flex items-center gap-2 px-3 py-2 rounded cursor-pointer ${
+                  sel ? "bg-indigo-50" : "hover:bg-slate-50"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={sel}
+                  onChange={() => {
+                    const next = new Set(selected);
+                    if (next.has(t.id)) next.delete(t.id);
+                    else next.add(t.id);
+                    setSelected(next);
+                  }}
+                />
+                <span className="text-sm">{t.name}</span>
+              </label>
+            );
+          })}
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-slate-100"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={() => onSave([...selected])}
+            className="btn btn-primary"
+          >
+            Enregistrer
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}

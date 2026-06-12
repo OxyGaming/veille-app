@@ -1,0 +1,716 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { addMonths, format } from "date-fns";
+import { fr } from "date-fns/locale";
+import { Icon } from "@/components/icons";
+import { TagChips, TagInput } from "@/components/TagChips";
+import { TAG_OBLIGATOIRE, TAG_VEILLE_LEGALE } from "@/lib/tags";
+import NoteModal from "@/components/NoteModal";
+
+type Duplicate = {
+  id: string;
+  externalId: string;
+  dueAt: string | null;
+  originalStatus: string | null;
+  createdAt: string;
+};
+type Action = {
+  id: string;
+  externalId: string;
+  comment: string | null;
+  keyPoint: string | null;
+  domain: string | null;
+  theme: string | null;
+  type: string | null;
+  actionPlan: string | null;
+  dueAt: string | null;
+  procedureId: string | null;
+  /** Nombre d'actions partageant la même empreinte logique (>=1). */
+  duplicateCount: number;
+  /** Détail de TOUTES les occurrences du groupe (la première est la principale). */
+  duplicates: Duplicate[];
+  tags: string[];
+};
+
+export default function AgentActionsClient({
+  agentId,
+  agentName,
+  actions: initial,
+  targetKind = "agent",
+}: {
+  agentId: string;
+  agentName: string;
+  actions: Action[];
+  /** Type de cible : "agent" (par défaut) ou "site". Détermine les endpoints. */
+  targetKind?: "agent" | "site";
+}) {
+  const router = useRouter();
+  const [actions, setActions] = useState(initial);
+  const [validating, setValidating] = useState<Action | null>(null);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
+  const [sighting, setSighting] = useState(false);
+  const [noting, setNoting] = useState(false);
+
+  function toggleExpanded(id: string) {
+    setExpanded((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function openValidate(a: Action) {
+    setValidating(a);
+    setComment("");
+  }
+
+  async function confirmValidate() {
+    if (!validating) return;
+    setBusy(true);
+    try {
+      // Validation cascade : valide toutes les actions du groupe de doublons.
+      const ids = validating.duplicates.map((d) => d.id);
+      for (const aid of ids) {
+        const res = await fetch(`/api/actions/${aid}/validate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comment: comment.trim() || null }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          alert(j.error || "Erreur de validation");
+          return;
+        }
+      }
+      setActions((arr) => arr.filter((x) => x.id !== validating.id));
+      setValidating(null);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-xs text-slate-500">
+          {actions.length === 0
+            ? "Aucune action à traiter."
+            : `${actions.length} action${actions.length > 1 ? "s" : ""} en cours.`}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setSighting(true)}
+            className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:text-emerald-700 inline-flex items-center gap-1.5"
+            title={
+              targetKind === "site"
+                ? "Marquer une prise en compte du site"
+                : "Marquer une simple prise en compte de l'agent (sans veille)"
+            }
+          >
+            <Icon.Check className="w-4 h-4" /> Vu
+          </button>
+          <button
+            type="button"
+            onClick={() => setNoting(true)}
+            className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700 inline-flex items-center gap-1.5"
+            title="Commentaire personnalisé (texte libre + photos)"
+          >
+            <Icon.MessageSquare className="w-4 h-4" /> Commentaire
+          </button>
+          {targetKind === "agent" && (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="btn btn-primary"
+            >
+              <Icon.Plus className="w-4 h-4" /> Ajouter une action
+            </button>
+          )}
+        </div>
+      </div>
+      {adding && (
+        <ManualActionModal
+          agentId={agentId}
+          agentName={agentName}
+          onClose={() => setAdding(false)}
+          onCreated={() => {
+            setAdding(false);
+            router.refresh();
+          }}
+        />
+      )}
+      {sighting && (
+        <SightingModal
+          agentId={agentId}
+          agentName={agentName}
+          targetKind={targetKind}
+          onClose={() => setSighting(false)}
+          onCreated={() => {
+            setSighting(false);
+            router.refresh();
+          }}
+        />
+      )}
+      {noting && (
+        <NoteModal
+          target={targetKind}
+          targetId={agentId}
+          targetName={agentName}
+          onClose={() => setNoting(false)}
+          onCreated={() => {
+            setNoting(false);
+            router.refresh();
+          }}
+        />
+      )}
+      {actions.length === 0 ? (
+        <div className="text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-6 text-center">
+          Aucune action à traiter. Lancez un import Excel ou cliquez{" "}
+          <button
+            onClick={() => setAdding(true)}
+            className="underline text-indigo-600"
+          >
+            Ajouter une action
+          </button>
+          .
+        </div>
+      ) : (
+      <ul className="grid gap-2">
+        {actions.map((a) => {
+          const due = a.dueAt ? new Date(a.dueAt) : null;
+          const late = due && due < new Date();
+          return (
+            <li
+              key={a.id}
+              className={`bg-white border rounded-xl px-3 py-3 transition-shadow hover:shadow-sm ${
+                late
+                  ? "border-rose-200 bg-rose-50/40"
+                  : "border-slate-200"
+              }`}
+            >
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                {a.type && (
+                  <span className="text-[10px] font-mono bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                    {a.type}
+                  </span>
+                )}
+                {due && (
+                  <span
+                    className={`text-[10px] font-mono ${
+                      late ? "text-rose-700" : "text-slate-500"
+                    }`}
+                  >
+                    {late ? "⚠ EN RETARD · " : "Échéance "}
+                    {format(due, "P", { locale: fr })}
+                  </span>
+                )}
+                {a.duplicateCount > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleExpanded(a.id);
+                    }}
+                    className={`text-[10px] font-mono inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                      expanded.has(a.id)
+                        ? "bg-indigo-600 border-indigo-600 text-white"
+                        : "bg-indigo-50 border-indigo-200 text-indigo-700 hover:border-indigo-400"
+                    }`}
+                    title={`${a.duplicateCount} occurrences (IDs Action différents, contenu identique) — cliquer pour détails`}
+                  >
+                    ×{a.duplicateCount}
+                    <span className="text-[8px] leading-none">
+                      {expanded.has(a.id) ? "▴" : "▾"}
+                    </span>
+                  </button>
+                )}
+                {a.procedureId && (
+                  <Link
+                    href={`/procedures?proc=${a.procedureId}`}
+                    className="text-[10px] font-mono text-indigo-600 underline"
+                  >
+                    Procédure liée
+                  </Link>
+                )}
+              </div>
+              {/* Action concrète à réaliser en titre (commentaire = description métier).
+                  Le point clé reste comme contexte au-dessous (catégorisation). */}
+              {a.comment ? (
+                <div className="text-sm font-semibold leading-snug">
+                  {a.comment}
+                </div>
+              ) : (
+                <div className="text-sm font-semibold leading-snug">
+                  {a.keyPoint || a.externalId}
+                </div>
+              )}
+              {a.comment && (a.keyPoint || a.domain) && (
+                <div className="text-[11px] text-slate-500 mt-1">
+                  {a.keyPoint && <span className="font-medium">{a.keyPoint}</span>}
+                  {a.keyPoint && a.domain && " · "}
+                  {a.domain}
+                  {a.theme && ` · ${a.theme}`}
+                </div>
+              )}
+              {!a.comment && a.domain && (
+                <div className="text-[11px] text-slate-500">
+                  {a.domain}
+                  {a.theme && ` · ${a.theme}`}
+                </div>
+              )}
+              {a.tags.length > 0 && (
+                <div className="mt-1.5">
+                  <TagChips tags={a.tags} />
+                </div>
+              )}
+              {a.actionPlan && (
+                <div className="text-xs text-indigo-900 mt-1 line-clamp-2">
+                  <b>Plan :</b> {a.actionPlan}
+                </div>
+              )}
+              {a.duplicateCount > 1 && expanded.has(a.id) && (
+                <div className="mt-2 border-t border-indigo-100 pt-2 animate-in">
+                  <div className="text-[11px] font-mono uppercase tracking-wider text-indigo-700 mb-1.5">
+                    {a.duplicateCount} occurrences groupées
+                  </div>
+                  <ul className="space-y-1">
+                    {a.duplicates.map((d, idx) => (
+                      <li
+                        key={d.id}
+                        className="flex items-center gap-2 text-[11px] font-mono py-1 px-2 rounded bg-indigo-50/60"
+                      >
+                        <span
+                          className={`shrink-0 w-4 text-center font-semibold ${
+                            idx === 0 ? "text-indigo-700" : "text-slate-500"
+                          }`}
+                        >
+                          {idx === 0 ? "★" : `${idx + 1}`}
+                        </span>
+                        <span className="flex-1 truncate text-slate-700">
+                          {d.externalId}
+                        </span>
+                        {d.originalStatus && (
+                          <span className="text-slate-500">
+                            {d.originalStatus}
+                          </span>
+                        )}
+                        {d.dueAt && (
+                          <span className="text-slate-700">
+                            {format(new Date(d.dueAt), "P", { locale: fr })}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="text-[10px] text-slate-500 mt-1.5 italic">
+                    ★ occurrence principale (échéance la plus proche).
+                    Cliquer « Valider » les marquera toutes réalisées.
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-2 mt-2.5">
+                <button
+                  onClick={() => openValidate(a)}
+                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                >
+                  ✓ Valider la réalisation
+                  {a.duplicateCount > 1 && (
+                    <span className="text-[10px] font-mono bg-white/20 px-1 py-px rounded">
+                      ×{a.duplicateCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      )}
+
+      {validating && (
+        <ValidateModal
+          action={validating}
+          comment={comment}
+          setComment={setComment}
+          busy={busy}
+          onConfirm={confirmValidate}
+          onClose={() => setValidating(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function ValidateModal({
+  action,
+  comment,
+  setComment,
+  busy,
+  onConfirm,
+  onClose,
+}: {
+  action: Action;
+  comment: string;
+  setComment: (s: string) => void;
+  busy: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-x-0 bottom-0 md:bottom-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-md md:w-full z-50 bg-white rounded-t-2xl md:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+      >
+        <header className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+              Valider une action
+            </div>
+            <div className="text-sm font-semibold truncate">
+              {action.keyPoint || action.externalId}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="p-4 space-y-3">
+          {action.duplicateCount > 1 && (
+            <div className="text-xs bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg px-3 py-2 flex items-start gap-2">
+              <span className="font-mono font-bold">×{action.duplicateCount}</span>
+              <span>
+                Cette action est présente {action.duplicateCount} fois sous des
+                IDs différents pour cet agent. La validation les marquera{" "}
+                <b>toutes</b> comme réalisées.
+              </span>
+            </div>
+          )}
+          <label className="block text-xs font-medium text-slate-500">
+            Commentaire (optionnel)
+            <textarea
+              autoFocus
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Précisez les conditions de réalisation, le contexte…"
+              className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm min-h-[120px] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </label>
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={onClose}
+              className="text-sm text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-100"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={busy}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+            >
+              {busy
+                ? "Validation…"
+                : action.duplicateCount > 1
+                ? `Valider les ${action.duplicateCount} occurrences`
+                : "Confirmer la validation"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Modal de création manuelle d'une action sur la fiche d'un agent.
+ * Tags imposés : "veille légale" + "obligatoire" (non supprimables).
+ * Titre obligatoire, échéance par défaut +7 mois (éditable), tags extras libres.
+ */
+function ManualActionModal({
+  agentId,
+  agentName,
+  onClose,
+  onCreated,
+}: {
+  agentId: string;
+  agentName: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const imposed = [TAG_VEILLE_LEGALE, TAG_OBLIGATOIRE];
+  const defaultDue = format(addMonths(new Date(), 7), "yyyy-MM-dd");
+  const [title, setTitle] = useState("");
+  const [dueAt, setDueAt] = useState(defaultDue);
+  const [extraTags, setExtraTags] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          dueAt: new Date(dueAt + "T00:00:00").toISOString(),
+          extraTags,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error || "Erreur lors de la création");
+        return;
+      }
+      onCreated();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-x-0 bottom-0 md:bottom-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-lg md:w-full z-50 bg-white rounded-t-2xl md:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+      >
+        <header className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+          <Icon.Plus className="w-4 h-4 text-indigo-600" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+              Ajouter une action
+            </div>
+            <div className="text-sm font-semibold truncate">
+              {agentName}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </header>
+        <form onSubmit={submit} className="p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Titre <span className="text-rose-600">*</span>
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Ex. Renouvellement habilitation S0"
+              className="input"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Échéance{" "}
+              <span className="text-[10px] font-mono text-slate-400">
+                (défaut M+7)
+              </span>
+            </label>
+            <input
+              type="date"
+              value={dueAt}
+              onChange={(e) => setDueAt(e.target.value)}
+              className="input"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Tags{" "}
+              <span className="text-[10px] text-slate-400">
+                (« veille légale » et « obligatoire » imposés)
+              </span>
+            </label>
+            <TagInput
+              tags={[...imposed, ...extraTags]}
+              imposed={imposed}
+              onChange={(next) =>
+                setExtraTags(
+                  next.filter(
+                    (t) =>
+                      !imposed.some(
+                        (i) => i.toLowerCase() === t.toLowerCase()
+                      )
+                  )
+                )
+              }
+              placeholder="Ajouter un tag (Entrée pour valider)…"
+            />
+          </div>
+          {error && (
+            <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-2">
+              <Icon.AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              {error}
+            </div>
+          )}
+          <div className="flex gap-2 justify-end pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-sm text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-100"
+            >
+              Annuler
+            </button>
+            <button
+              type="submit"
+              disabled={!title.trim() || submitting}
+              className="btn btn-primary"
+            >
+              {submitting ? "Création…" : "Créer l'action"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Mini-modal : marquer un agent comme « Vu ». Commentaire libre optionnel.
+ * Trace minimaliste sans déclencher une session de veille complète.
+ */
+function SightingModal({
+  agentId,
+  agentName,
+  targetKind = "agent",
+  onClose,
+  onCreated,
+}: {
+  agentId: string;
+  agentName: string;
+  targetKind?: "agent" | "site";
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function confirm() {
+    setBusy(true);
+    setError(null);
+    try {
+      const url =
+        targetKind === "site"
+          ? `/api/sites/${agentId}/sight`
+          : `/api/agents/${agentId}/sight`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "SIGHT", comment: comment.trim() || null }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error || "Erreur");
+        return;
+      }
+      onCreated();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-x-0 bottom-0 md:bottom-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-md md:w-full z-50 bg-white rounded-t-2xl md:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+      >
+        <header className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+          <Icon.Check className="w-4 h-4 text-emerald-600" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+              Marquer comme « Vu »
+            </div>
+            <div className="text-sm font-semibold truncate">{agentName}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-slate-500">
+            Trace de prise en compte minimaliste (croisement, échange rapide…)
+            quand aucune session de veille n&apos;est nécessaire. L&apos;entrée
+            apparaîtra dans l&apos;historique.
+          </p>
+          <label className="block text-xs font-medium text-slate-600">
+            Commentaire (optionnel)
+            <textarea
+              autoFocus
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Contexte de la prise en compte…"
+              maxLength={300}
+              className="mt-1 input min-h-[80px]"
+            />
+          </label>
+          {error && (
+            <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={onClose}
+              className="text-sm text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-100"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={confirm}
+              disabled={busy}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg inline-flex items-center gap-1.5"
+            >
+              <Icon.Check className="w-4 h-4" />
+              {busy ? "Enregistrement…" : "Marquer comme Vu"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}

@@ -62,7 +62,16 @@ type Equipment = {
   category: string;
   expectedQuantity: number | null;
   isPerishable: boolean;
+  expirationDate: string | null;
 };
+
+// Libellé de la colonne Date selon la catégorie d'équipement.
+// Extincteur → échéance de prochaine visite (toujours pré-renseignée).
+// Reste → date de péremption (à remplir au stylo ou laissée vide).
+function dateColumnLabel(category: string): string {
+  if (/extincteur/i.test(category)) return "Échéance prochaine visite";
+  return "Date de péremption";
+}
 
 /**
  * Mappe une catégorie de section à son numéro de chapitre SNCF.
@@ -217,15 +226,21 @@ export default function VisitReportClient({
                         {e.expectedQuantity ?? "—"}
                       </span>
                       <span className="flex-1">{e.label}</span>
-                      <span
-                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                          e.isPerishable
-                            ? "bg-amber-50 text-amber-700 border border-amber-200"
-                            : "bg-slate-100 text-slate-500"
-                        }`}
-                      >
-                        {e.isPerishable ? "Périssable" : "—"}
-                      </span>
+                      {e.expirationDate ? (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">
+                          {format(new Date(e.expirationDate), "dd/MM/yyyy")}
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                            e.isPerishable
+                              ? "bg-amber-50 text-amber-700 border border-amber-200"
+                              : "bg-slate-900 text-slate-100"
+                          }`}
+                        >
+                          {e.isPerishable ? "Périssable" : "Non périssable"}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -1272,7 +1287,7 @@ function renderInventory(
           },
           { content: "Qté", styles: { fontStyle: "bold", halign: "center" } },
           {
-            content: "Date de péremption",
+            content: dateColumnLabel(cat),
             styles: { fontStyle: "bold", halign: "center" },
           },
         ],
@@ -1280,11 +1295,14 @@ function renderInventory(
       body: eqs.map((e) => [
         e.label,
         e.expectedQuantity != null ? String(e.expectedQuantity) : "",
-        // La cellule Date reste vide quoi qu'il arrive. Pour les éléments
-        // non périssables on dessine une diagonale par-dessus (cf.
-        // didDrawCell) — il faut une hauteur de cellule mini pour que la
-        // diagonale soit visible et permette une saisie au stylo après.
-        "",
+        // 3 cas :
+        //   - date renseignée au catalogue (ex. échéance prochaine visite
+        //     d'extincteur) → affichée telle quelle ;
+        //   - périssable sans date → cellule vide (à remplir au stylo) ;
+        //   - non périssable sans date → noircie par didDrawCell.
+        e.expirationDate
+          ? format(new Date(e.expirationDate), "dd/MM/yyyy")
+          : "",
       ]),
       styles: {
         fontSize: 9,
@@ -1312,13 +1330,15 @@ function renderInventory(
         column: { index: number };
         row: { index: number };
       }) => {
-        // Case Date "non périssable" → entièrement noircie. On retrouve
-        // l'item via row.index (les rows sont alignées sur `eqs`).
-        // Petit padding pour préserver la bordure visible du tableau.
+        // Case Date "non périssable" sans date pré-renseignée → noircie.
+        // On retrouve l'item via row.index (rows alignées sur `eqs`).
+        // Si une date est renseignée au catalogue (cas extincteur =
+        // échéance prochaine visite), elle est déjà imprimée — on ne
+        // noircit pas.
         if (data.section !== "body") return;
         if (data.column.index !== 2) return;
         const eq = eqs[data.row.index];
-        if (!eq || eq.isPerishable) return;
+        if (!eq || eq.isPerishable || eq.expirationDate) return;
         const pad = 0.6;
         doc.setFillColor(0, 0, 0);
         doc.rect(

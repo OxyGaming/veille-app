@@ -35,5 +35,23 @@ export default async function VisitReportPage({
     },
   });
   if (!visit) notFound();
-  return <VisitReportClient visit={JSON.parse(JSON.stringify(visit))} />;
+  // En mode INVENTORY le rendu PDF s'appuie sur le catalogue d'équipements
+  // (pas sur les observations / NC). On le pré-charge ici.
+  const equipments =
+    visit.template.kind === "INVENTORY"
+      ? await prisma.siteEquipment.findMany({
+          where: { siteId: visit.siteId, isActive: true },
+          orderBy: [
+            { category: "asc" },
+            { sortOrder: "asc" },
+            { label: "asc" },
+          ],
+        })
+      : [];
+  return (
+    <VisitReportClient
+      visit={JSON.parse(JSON.stringify(visit))}
+      equipments={JSON.parse(JSON.stringify(equipments))}
+    />
+  );
 }

@@ -36,7 +36,13 @@ type Visit = {
   id: string;
   visitDate: string;
   generalComment: string | null;
-  template: { slug: string; name: string; pdfLayout: string; sections: Section[] };
+  template: {
+    slug: string;
+    name: string;
+    pdfLayout: string;
+    kind: string;
+    sections: Section[];
+  };
   site: {
     name: string;
     code: string | null;
@@ -48,6 +54,14 @@ type Visit = {
   participants: { fullName: string; function: string | null }[];
   observations: Observation[];
   nonConformities: NC[];
+};
+
+type Equipment = {
+  id: string;
+  label: string;
+  category: string;
+  expectedQuantity: number | null;
+  isPerishable: boolean;
 };
 
 /**
@@ -77,11 +91,18 @@ const STATUS_LABEL: Record<string, string> = {
   PENDING: "—",
 };
 
-export default function VisitReportClient({ visit }: { visit: Visit }) {
+export default function VisitReportClient({
+  visit,
+  equipments = [],
+}: {
+  visit: Visit;
+  equipments?: Equipment[];
+}) {
   const [layout, setLayout] = useState<"VEILLE" | "SNCF">(
     (visit.template.pdfLayout as "VEILLE" | "SNCF") ?? "VEILLE"
   );
   const [generating, setGenerating] = useState(false);
+  const isInventory = visit.template.kind === "INVENTORY";
 
   function findObs(sectionId: string, itemId: string | null) {
     return visit.observations.find(
@@ -101,7 +122,9 @@ export default function VisitReportClient({ visit }: { visit: Visit }) {
       const margin = 40;
       const usableW = PAGE_W - margin * 2;
 
-      if (layout === "SNCF" && visit.template.slug === "trimestrielle-incendie") {
+      if (isInventory) {
+        renderInventory(doc, autoTable, visit, equipments, margin, usableW, PAGE_H);
+      } else if (layout === "SNCF" && visit.template.slug === "trimestrielle-incendie") {
         renderTrimestrielle(doc, autoTable, visit, findObs, margin, usableW, PAGE_H);
       } else if (
         layout === "SNCF" &&
@@ -136,22 +159,34 @@ export default function VisitReportClient({ visit }: { visit: Visit }) {
       </div>
 
       <div className="card mt-4 p-4 flex flex-wrap items-center gap-3">
-        <span className="text-xs font-medium text-slate-600">Layout PDF :</span>
-        <div className="flex gap-1">
-          {(["VEILLE", "SNCF"] as const).map((l) => (
-            <button
-              key={l}
-              onClick={() => setLayout(l)}
-              className={`text-xs font-mono px-3 py-1.5 rounded-md border ${
-                layout === l
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white text-slate-600 border-slate-200"
-              }`}
-            >
-              {l === "VEILLE" ? "Design Veille" : "Fidèle (original)"}
-            </button>
-          ))}
-        </div>
+        {!isInventory && (
+          <>
+            <span className="text-xs font-medium text-slate-600">
+              Layout PDF :
+            </span>
+            <div className="flex gap-1">
+              {(["VEILLE", "SNCF"] as const).map((l) => (
+                <button
+                  key={l}
+                  onClick={() => setLayout(l)}
+                  className={`text-xs font-mono px-3 py-1.5 rounded-md border ${
+                    layout === l
+                      ? "bg-slate-900 text-white border-slate-900"
+                      : "bg-white text-slate-600 border-slate-200"
+                  }`}
+                >
+                  {l === "VEILLE" ? "Design Veille" : "Fidèle (original)"}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {isInventory && (
+          <span className="text-xs font-medium text-slate-600">
+            Fiche de suivi papier — composition théorique uniquement, date
+            à remplir au stylo.
+          </span>
+        )}
         <button
           onClick={generatePDF}
           disabled={generating}
@@ -162,7 +197,46 @@ export default function VisitReportClient({ visit }: { visit: Visit }) {
         </button>
       </div>
 
-      {/* Aperçu compact */}
+      {/* Aperçu compact mode INVENTORY : catalogue groupé par catégorie */}
+      {isInventory && (
+        <div className="grid gap-4 md:grid-cols-2 mt-6 items-start">
+          {[...new Set(equipments.map((e) => e.category))].sort().map((cat) => {
+            const eqs = equipments.filter((e) => e.category === cat);
+            return (
+              <section key={cat} className="card p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="text-sm font-bold">{cat}</div>
+                  <span className="ml-auto text-[10px] font-mono text-slate-400">
+                    {eqs.length} élément(s)
+                  </span>
+                </div>
+                <ul className="text-xs space-y-0.5">
+                  {eqs.map((e) => (
+                    <li key={e.id} className="flex gap-2 items-center">
+                      <span className="font-mono text-slate-400 w-10 text-right shrink-0">
+                        {e.expectedQuantity ?? "—"}
+                      </span>
+                      <span className="flex-1">{e.label}</span>
+                      <span
+                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                          e.isPerishable
+                            ? "bg-amber-50 text-amber-700 border border-amber-200"
+                            : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {e.isPerishable ? "Périssable" : "—"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Aperçu CHECKLIST : sections + items historiques */}
+      {!isInventory && (
       <div className="grid gap-4 md:grid-cols-2 mt-6 items-start">
         {visit.template.sections.map((s) => {
           const obs = s.items.map((it) => findObs(s.id, it.id)).filter(Boolean);
@@ -227,8 +301,9 @@ export default function VisitReportClient({ visit }: { visit: Visit }) {
           );
         })}
       </div>
+      )}
 
-      {visit.nonConformities.length > 0 && (
+      {!isInventory && visit.nonConformities.length > 0 && (
         <section className="card mt-6 p-4">
           <h2 className="text-sm font-bold mb-2">
             {visit.nonConformities.length} non-conformité(s)
@@ -1117,4 +1192,168 @@ function renderNCRecap(
     headStyles: { fillColor: [192, 21, 47] },
     margin: { left: margin, right: margin },
   });
+}
+
+/* ============================================================================
+ *  PDF — Veille de site (INVENTORY) : fiche de suivi papier
+ *
+ *  Volontairement austère : composition théorique + colonne Date manuelle.
+ *  Ne montre NI les écarts, NI les commentaires, NI les NC. Le PDF est
+ *  imprimé puis annoté au stylo lors des contrôles suivants.
+ *
+ *  - Périssable     : colonne Date vide (à remplir au stylo)
+ *  - Non périssable : colonne Date barrée en diagonale
+ * ========================================================================== */
+
+function renderInventory(
+  doc: import("jspdf").jsPDF,
+  autoTable: AutoTable,
+  visit: Visit,
+  equipments: Equipment[],
+  margin: number,
+  usableW: number,
+  pageH: number
+) {
+  // En-tête
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(visit.template.name, margin, margin + 4);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(
+    `Site : ${visit.site.name}${
+      visit.site.code ? ` (${visit.site.code})` : ""
+    }`,
+    margin,
+    margin + 22
+  );
+  doc.text(
+    `Date de dernière vérification : ${format(new Date(visit.visitDate), "PPP", { locale: fr })}`,
+    margin,
+    margin + 36
+  );
+  doc.text(`Vérifié par : ${visit.observer.name}`, margin, margin + 50);
+
+  let y = margin + 70;
+
+  // Groupage par catégorie + tri stable (la liste arrive déjà triée).
+  const byCat = new Map<string, Equipment[]>();
+  for (const e of equipments) {
+    const arr = byCat.get(e.category) ?? [];
+    arr.push(e);
+    byCat.set(e.category, arr);
+  }
+  const cats = [...byCat.entries()].sort(([a], [b]) => a.localeCompare(b, "fr"));
+
+  for (const [cat, eqs] of cats) {
+    if (y > pageH - 100) {
+      doc.addPage();
+      y = margin;
+    }
+    autoTable(doc, {
+      startY: y,
+      head: [
+        [
+          {
+            content: cat,
+            colSpan: 3,
+            styles: {
+              fillColor: [235, 235, 235],
+              textColor: [30, 30, 30],
+              fontStyle: "bold",
+              halign: "left",
+            },
+          },
+        ],
+        [
+          {
+            content: "Désignation",
+            styles: { fontStyle: "bold" },
+          },
+          { content: "Qté", styles: { fontStyle: "bold", halign: "center" } },
+          {
+            content: "Date de péremption",
+            styles: { fontStyle: "bold", halign: "center" },
+          },
+        ],
+      ],
+      body: eqs.map((e) => [
+        e.label,
+        e.expectedQuantity != null ? String(e.expectedQuantity) : "",
+        // La cellule Date reste vide quoi qu'il arrive. Pour les éléments
+        // non périssables on dessine une diagonale par-dessus (cf.
+        // didDrawCell) — il faut une hauteur de cellule mini pour que la
+        // diagonale soit visible et permette une saisie au stylo après.
+        "",
+      ]),
+      styles: {
+        fontSize: 9,
+        cellPadding: { top: 6, right: 6, bottom: 6, left: 6 },
+        lineColor: [120, 120, 120],
+        lineWidth: 0.4,
+        valign: "middle",
+        minCellHeight: 22,
+      },
+      headStyles: {
+        fillColor: [248, 248, 248],
+        textColor: [30, 30, 30],
+        lineWidth: 0.4,
+      },
+      columnStyles: {
+        0: { cellWidth: usableW * 0.62 },
+        1: { cellWidth: usableW * 0.13, halign: "center" },
+        2: { cellWidth: usableW * 0.25, halign: "center" },
+      },
+      margin: { left: margin, right: margin },
+      theme: "grid",
+      didDrawCell: (data: {
+        section: "head" | "body" | "foot";
+        cell: { x: number; y: number; width: number; height: number };
+        column: { index: number };
+        row: { index: number };
+      }) => {
+        // Case Date "non périssable" → barrée en diagonale, comme sur la
+        // fiche papier d'origine. On retrouve l'item via row.index puisque
+        // les rows sont alignées sur `eqs`.
+        if (data.section !== "body") return;
+        if (data.column.index !== 2) return;
+        const eq = eqs[data.row.index];
+        if (!eq || eq.isPerishable) return;
+        const x1 = data.cell.x + 2;
+        const y1 = data.cell.y + 2;
+        const x2 = data.cell.x + data.cell.width - 2;
+        const y2 = data.cell.y + data.cell.height - 2;
+        doc.setDrawColor(60, 60, 60);
+        doc.setLineWidth(0.8);
+        doc.line(x1, y1, x2, y2);
+      },
+    });
+    // @ts-expect-error lastAutoTable
+    y = doc.lastAutoTable.finalY + 10;
+  }
+
+  // Pied de page sur chaque page (cohérent avec visite planifiée).
+  stampSimpleFooter(doc, pageH, margin);
+}
+
+function stampSimpleFooter(
+  doc: import("jspdf").jsPDF,
+  pageH: number,
+  margin: number
+) {
+  const total = doc.getNumberOfPages();
+  for (let i = 1; i <= total; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(110, 110, 110);
+    doc.text("Interne SNCF Réseau", margin, pageH - 14);
+    doc.text(
+      `${i} / ${total}`,
+      doc.internal.pageSize.getWidth() - margin,
+      pageH - 14,
+      { align: "right" }
+    );
+  }
+  doc.setTextColor(0);
 }

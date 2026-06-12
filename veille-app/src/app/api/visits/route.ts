@@ -117,5 +117,29 @@ export async function POST(req: Request) {
     },
   });
 
+  // Snapshot eager pour les visites INVENTORY : on crée une observation par
+  // équipement actif du site, pré-remplie aux valeurs du catalogue. L'agent
+  // n'a plus qu'à modifier les écarts.
+  if (template.kind === "INVENTORY") {
+    const equipments = await prisma.siteEquipment.findMany({
+      where: { siteId: data.siteId, isActive: true },
+      orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { label: "asc" }],
+    });
+    if (equipments.length > 0) {
+      await prisma.siteVisitObservation.createMany({
+        data: equipments.map((eq) => ({
+          visitId: visit.id,
+          equipmentId: eq.id,
+          // sectionId / itemId restent null en mode INVENTORY.
+          present: true,
+          quantityObserved: eq.expectedQuantity,
+          expirationDateObserved: eq.expirationDate,
+          discrepancyType: null,
+          status: "OUI",
+        })),
+      });
+    }
+  }
+
   return NextResponse.json(visit);
 }

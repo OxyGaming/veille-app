@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { createHash } from "crypto";
+import { addDays } from "date-fns";
 import { prisma } from "@/lib/prisma";
 import { requireUser, teamScope } from "@/lib/auth";
+import {
+  encodeTags,
+  normalizeTag,
+  TAG_OBLIGATOIRE,
+  TAG_VEILLE_LEGALE,
+} from "@/lib/tags";
 
 async function loadScoped(
   id: string,
@@ -90,8 +98,157 @@ export async function PATCH(
       finishedAt,
     },
   });
+
+  // Génération auto des NC + actions à la clôture d'une visite INVENTORY.
+  // Idempotent : on saute les observations qui ont déjà généré une NC
+  // (clé externalRef nc-inv-{observationId}).
+  if (
+    data.status === "completed" &&
+    existing.template.kind === "INVENTORY" &&
+    existing.status !== "completed"
+  ) {
+    await generateInventoryNonConformities(updated.id, existing.teamId);
+  }
+
   return NextResponse.json(updated);
 }
+
+/**
+ * Génère une NC + ImportedAction pour chaque observation INVENTORY en écart.
+ *  - Type d'écart → tag déduit (manquant, périmé, quantité, détérioré)
+ *  - Échéance par défaut : J+30
+ *  - externalId stable `nc-inv-{observationId}` → idempotent
+ */
+async function generateInventoryNonConformities(visitId: string, teamId: string) {
+  const obs = await prisma.siteVisitObservation.findMany({
+    where: {
+      visitId,
+      discrepancyType: { not: null },
+      equipmentId: { not: null },
+    },
+    include: {
+      equipment: {
+        select: { id: true, label: true, category: true },
+      },
+    },
+  });
+  if (!obs.length) return;
+  const visit = await prisma.siteVisit.findUnique({
+    where: { id: visitId },
+    select: { siteId: true },
+  });
+  if (!visit) return;
+
+  const lastOrder = await prisma.siteVisitNonConformity.findFirst({
+    where: { visitId },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  let order = lastOrder?.sortOrder ?? 0;
+
+  for (const o of obs) {
+    if (!o.equipment) continue;
+    const eqLabel = o.equipment.label;
+    const description = describeDiscrepancy(o.discrepancyType, eqLabel, o);
+    const externalId = `nc-inv-${o.id}`;
+    // Skip si une action a déjà été générée pour cette observation
+    // (idempotence sur clôture multiple).
+    const alreadyAction = await prisma.importedAction.findFirst({
+      where: { externalId },
+      select: { id: true },
+    });
+    if (alreadyAction) continue;
+
+    order += 1;
+    const dueAt = addDays(new Date(), 30);
+    const tags = [
+      TAG_VEILLE_LEGALE,
+      TAG_OBLIGATOIRE,
+      "site",
+      "veille de site",
+      tagForDiscrepancy(o.discrepancyType),
+    ].filter(Boolean) as string[];
+    const dedupHash = createHash("sha1")
+      .update(
+        [
+          description.toLowerCase().trim(),
+          "",
+          "",
+          dueAt.toISOString().slice(0, 10),
+          tags.map(normalizeTag).sort().join(","),
+          "",
+        ].join("|")
+      )
+      .digest("hex");
+    await prisma.$transaction(async (tx) => {
+      const action = await tx.importedAction.create({
+        data: {
+          externalId,
+          teamId,
+          siteId: visit.siteId,
+          localStatus: "ACTIVE",
+          dedupHash,
+          originalStatus: "Planifiée",
+          keyPoint: description,
+          veilleType: "Site",
+          dueAt,
+          tags: encodeTags(tags),
+        },
+      });
+      await tx.siteVisitNonConformity.create({
+        data: {
+          visitId,
+          sortOrder: order,
+          description,
+          generatedActionId: action.id,
+        },
+      });
+    });
+  }
+}
+
+function describeDiscrepancy(
+  type: string | null,
+  label: string,
+  o: { quantityObserved: number | null; expirationDateObserved: Date | null }
+): string {
+  switch (type) {
+    case "MISSING":
+      return `Élément manquant : ${label}`;
+    case "EXPIRED":
+      return `Équipement périmé : ${label}${
+        o.expirationDateObserved
+          ? ` (DLC ${o.expirationDateObserved
+              .toISOString()
+              .slice(0, 10)})`
+          : ""
+      }`;
+    case "QUANTITY_LOW":
+      return `Quantité insuffisante : ${label}${
+        o.quantityObserved != null ? ` (${o.quantityObserved} sur place)` : ""
+      }`;
+    case "DAMAGED":
+      return `Équipement détérioré : ${label}`;
+    default:
+      return `Écart constaté : ${label}`;
+  }
+}
+
+function tagForDiscrepancy(type: string | null): string {
+  switch (type) {
+    case "MISSING":
+      return "manquant";
+    case "EXPIRED":
+      return "péremption";
+    case "QUANTITY_LOW":
+      return "quantité";
+    case "DAMAGED":
+      return "détérioré";
+    default:
+      return "écart";
+  }
+}
+
 
 /**
  * Suppression d'une visite de site (couvre planifiée EIC RA et trimestrielle

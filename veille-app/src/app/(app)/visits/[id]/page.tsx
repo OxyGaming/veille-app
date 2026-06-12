@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser, teamScope } from "@/lib/auth";
 import VisitClient from "./VisitClient";
+import VisitInventoryClient from "./VisitInventoryClient";
 
 export const dynamic = "force-dynamic";
 
@@ -38,9 +39,18 @@ export default async function VisitPage({
     },
   });
   if (!visit) notFound();
-  return (
-    <VisitClient
-      visit={JSON.parse(JSON.stringify(visit))}
-    />
-  );
+  // Bascule de moteur côté serveur : INVENTORY a son rendu dédié.
+  if (visit.template.kind === "INVENTORY") {
+    const equipments = await prisma.siteEquipment.findMany({
+      where: { siteId: visit.siteId },
+      orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { label: "asc" }],
+    });
+    return (
+      <VisitInventoryClient
+        visit={JSON.parse(JSON.stringify(visit))}
+        equipments={JSON.parse(JSON.stringify(equipments))}
+      />
+    );
+  }
+  return <VisitClient visit={JSON.parse(JSON.stringify(visit))} />;
 }

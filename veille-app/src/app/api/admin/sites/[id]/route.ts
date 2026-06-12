@@ -77,3 +77,65 @@ export async function PATCH(
   });
   return NextResponse.json({ ok: true });
 }
+
+/**
+ * Suppression d'un site.
+ *  - ?mode=soft (défaut) : alias de PATCH isActive=false (le site disparaît
+ *    des listes mais l'historique reste).
+ *  - ?mode=hard : suppression définitive uniquement si aucune trace
+ *    opérationnelle (visite, action, validation, sighting). Sinon 409.
+ */
+export async function DELETE(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  try {
+    await requireRole("ADMIN");
+  } catch (r) {
+    return r as Response;
+  }
+  const { id } = await ctx.params;
+  const url = new URL(req.url);
+  const mode = url.searchParams.get("mode") ?? "soft";
+  const site = await prisma.site.findUnique({ where: { id } });
+  if (!site) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+
+  if (mode === "soft") {
+    await prisma.site.update({
+      where: { id },
+      data: { isActive: false, isVisible: false },
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  // === Mode hard ===
+  const [visits, actions, validations, sightings] = await Promise.all([
+    prisma.siteVisit.count({ where: { siteId: id } }),
+    prisma.importedAction.count({ where: { siteId: id } }),
+    prisma.actionValidation.count({ where: { siteId: id } }),
+    prisma.siteSighting.count({ where: { siteId: id } }),
+  ]);
+  const counts: Record<string, number> = {
+    visits,
+    actions,
+    validations,
+    sightings,
+  };
+  const nonEmpty = Object.entries(counts).filter(([, n]) => n > 0);
+  if (nonEmpty.length > 0) {
+    const detail = nonEmpty.map(([k, n]) => `${n} ${k}`).join(", ");
+    return NextResponse.json(
+      {
+        error: `Suppression refusée — le site a des données rattachées (${detail}). Désactivez-le plutôt.`,
+        counts,
+      },
+      { status: 409 }
+    );
+  }
+  // Aucune trace : on supprime memberships puis site.
+  await prisma.$transaction([
+    prisma.siteTeam.deleteMany({ where: { siteId: id } }),
+    prisma.site.delete({ where: { id } }),
+  ]);
+  return NextResponse.json({ ok: true, deleted: site.name });
+}

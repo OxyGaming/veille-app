@@ -37,6 +37,42 @@ export default function SitesAdminClient({
   });
   const [error, setError] = useState<string | null>(null);
   const [editTeams, setEditTeams] = useState<Site | null>(null);
+  const [editing, setEditing] = useState<Site | null>(null);
+
+  async function saveEdit(s: Site, patch: Partial<Site>) {
+    setError(null);
+    const res = await fetch(`/api/admin/sites/${s.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error || "Erreur");
+      return;
+    }
+    setSites((arr) => arr.map((x) => (x.id === s.id ? { ...x, ...patch } : x)));
+    setEditing(null);
+  }
+
+  async function hardDelete(s: Site) {
+    setError(null);
+    const ok = confirm(
+      `Supprimer définitivement « ${s.name} » ?\n\n` +
+        `Refusé si le site a déjà des visites, actions, validations ou vu/notes. ` +
+        `Pour ne plus le voir sans casser l'historique, utilise le toggle Visibilité.`
+    );
+    if (!ok) return;
+    const res = await fetch(`/api/admin/sites/${s.id}?mode=hard`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      setSites((arr) => arr.filter((x) => x.id !== s.id));
+    } else {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error || "Suppression refusée");
+    }
+  }
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -306,19 +342,32 @@ export default function SitesAdminClient({
                     {s.isVisible ? "Visible" : "Masqué"}
                   </button>
                 </td>
-                <td className="px-4 py-2.5 text-right">
+                <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                  <button
+                    onClick={() => setEditing(s)}
+                    className="text-xs text-slate-500 hover:text-indigo-700 px-2 py-1 rounded hover:bg-indigo-50"
+                  >
+                    Modifier
+                  </button>
                   <button
                     onClick={() => setEditTeams(s)}
-                    className="text-xs text-indigo-600 underline"
+                    className="text-xs text-slate-500 hover:text-indigo-700 px-2 py-1 rounded hover:bg-indigo-50"
                   >
                     Équipes
+                  </button>
+                  <button
+                    onClick={() => hardDelete(s)}
+                    className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50"
+                    title="Supprimer définitivement (refusé si traces opérationnelles)"
+                  >
+                    <Icon.Trash className="w-4 h-4 inline" />
                   </button>
                 </td>
               </tr>
             ))}
             {!sites.length && (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
                   Aucun site.
                 </td>
               </tr>
@@ -333,6 +382,13 @@ export default function SitesAdminClient({
           teams={teams}
           onCancel={() => setEditTeams(null)}
           onSave={(ids) => saveTeams(editTeams.id, ids)}
+        />
+      )}
+      {editing && (
+        <EditSiteModal
+          site={editing}
+          onCancel={() => setEditing(null)}
+          onSave={(patch) => saveEdit(editing, patch)}
         />
       )}
     </div>
@@ -357,6 +413,95 @@ function Field({
       </label>
       {children}
     </div>
+  );
+}
+
+function EditSiteModal({
+  site,
+  onCancel,
+  onSave,
+}: {
+  site: Site;
+  onCancel: () => void;
+  onSave: (patch: Partial<Site>) => void;
+}) {
+  const [name, setName] = useState(site.name);
+  const [code, setCode] = useState(site.code ?? "");
+  const [type, setType] = useState(site.type ?? "");
+  const [address, setAddress] = useState(site.address ?? "");
+  const valid = name.trim().length > 0;
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/50 z-40" onClick={onCancel} />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] overflow-auto">
+        <header className="px-5 py-4 border-b border-slate-100 flex items-center">
+          <h3 className="font-bold">Modifier le site</h3>
+          <button
+            onClick={onCancel}
+            className="ml-auto text-slate-400 hover:text-slate-700"
+          >
+            <Icon.X className="w-5 h-5" />
+          </button>
+        </header>
+        <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field label="Nom du site" required>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="input"
+              autoFocus
+              required
+            />
+          </Field>
+          <Field label="Code">
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="POS-GIVORS"
+              className="input"
+            />
+          </Field>
+          <Field label="Type">
+            <input
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              placeholder="Poste d'aiguillage, gare, dépôt…"
+              className="input"
+            />
+          </Field>
+          <Field label="Adresse" full>
+            <input
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="input"
+            />
+          </Field>
+        </div>
+        <footer className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="text-sm px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={() =>
+              valid &&
+              onSave({
+                name: name.trim(),
+                code: code.trim() || null,
+                type: type.trim() || null,
+                address: address.trim() || null,
+              })
+            }
+            disabled={!valid}
+            className="text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg"
+          >
+            Enregistrer
+          </button>
+        </footer>
+      </div>
+    </>
   );
 }
 

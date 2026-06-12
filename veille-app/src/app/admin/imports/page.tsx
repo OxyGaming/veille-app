@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { agentScope, getSessionUser } from "@/lib/auth";
 import ImportClient from "./ImportClient";
+import PointagesImport from "./PointagesImport";
 import QuickActionForm from "./QuickActionForm";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,10 @@ export default async function ImportsPage() {
       <div className="grid gap-4 lg:grid-cols-2 mb-6">
         <QuickActionForm agents={agentsForPicker} teams={teamsForPicker} />
         <ImportClient />
+      </div>
+
+      <div className="mb-6">
+        <PointagesImport />
       </div>
 
       <h2 className="text-base font-bold mt-8 mb-2">Historique</h2>

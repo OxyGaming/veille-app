@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Icon } from "@/components/icons";
+import ImportExportToolbar from "./ImportExportToolbar";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +22,12 @@ export default async function AdminProceduresPage() {
             {procs.length} procédure(s) active(s).
           </p>
         </div>
-        <Link href="/admin/procedures/new" className="btn btn-primary">
-          <Icon.Plus className="w-4 h-4" /> Nouvelle procédure
-        </Link>
+        <div className="flex items-center gap-2">
+          <ImportExportToolbar />
+          <Link href="/admin/procedures/new" className="btn btn-primary">
+            <Icon.Plus className="w-4 h-4" /> Nouvelle procédure
+          </Link>
+        </div>
       </div>
       <div className="card overflow-hidden">
         <table className="w-full text-sm">

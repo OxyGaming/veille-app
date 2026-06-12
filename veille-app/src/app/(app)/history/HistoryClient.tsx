@@ -26,6 +26,7 @@ type Entry = {
   badges?: string[];
   accent?: "default" | "warn" | "ok" | "info";
   icareDone?: boolean;
+  commentText?: string | null;
 };
 
 const FILTERS = [
@@ -430,21 +431,37 @@ export default function HistoryClient() {
                             par {e.observerName}
                           </div>
                         )}
+                        {e.commentText && (
+                          <div
+                            className={`text-[12px] mt-1 italic line-clamp-2 ${
+                              e.icareDone
+                                ? "text-emerald-800"
+                                : "text-slate-600"
+                            }`}
+                          >
+                            « {e.commentText} »
+                          </div>
+                        )}
                       </div>
                       {e.badges && e.badges.length > 0 && (
                         <div className="hidden md:flex flex-wrap gap-1 max-w-[40%] justify-end">
-                          {e.badges.map((b, i) => (
-                            <span
-                              key={i}
-                              className={`text-[10px] font-mono px-1.5 py-0.5 rounded truncate max-w-[180px] ${
-                                e.icareDone
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : "bg-slate-100 text-slate-700"
-                              }`}
-                            >
-                              {b}
-                            </span>
-                          ))}
+                          {e.badges.map((b, i) => {
+                            const isImport = b === "Import";
+                            return (
+                              <span
+                                key={i}
+                                className={`text-[10px] font-mono px-1.5 py-0.5 rounded truncate max-w-[180px] ${
+                                  e.icareDone
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : isImport
+                                    ? "bg-sky-100 text-sky-800 border border-sky-200 font-semibold uppercase tracking-wider"
+                                    : "bg-slate-100 text-slate-700"
+                                }`}
+                              >
+                                {b}
+                              </span>
+                            );
+                          })}
                         </div>
                       )}
                     </Link>

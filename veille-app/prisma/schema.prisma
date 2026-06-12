@@ -197,6 +197,8 @@ model AgentSighting {
   comment     String?
   sightedAt   DateTime @default(now())
   createdAt   DateTime @default(now())
+  /// Référence externe pour l'idempotence des imports (ex. "pointage-718").
+  externalRef String?  @unique
 
   agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   team        Team     @relation(fields: [teamId], references: [id])
@@ -220,6 +222,8 @@ model SiteSighting {
   comment     String?
   sightedAt   DateTime @default(now())
   createdAt   DateTime @default(now())
+  /// Référence externe pour l'idempotence des imports.
+  externalRef String?  @unique
 
   site        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
   team        Team     @relation(fields: [teamId], references: [id])

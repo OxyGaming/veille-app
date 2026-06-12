@@ -118,6 +118,7 @@ export async function GET(req: Request) {
             observer: { select: { name: true } },
             _count: { select: { photos: true } },
           },
+          // Champs nécessaires pour distinguer un import : externalRef.
         })
       : Promise.resolve([]),
     types.has("sighting") && !agentId
@@ -159,6 +160,8 @@ export async function GET(req: Request) {
     badges?: string[];
     accent?: "default" | "warn" | "ok" | "info";
     icareDone?: boolean;
+    /** Texte de commentaire à afficher en clair (séparément des badges). */
+    commentText?: string | null;
   };
 
   const entries: Entry[] = [];
@@ -224,6 +227,20 @@ export async function GET(req: Request) {
   }
   for (const sg of sightings) {
     const isNote = sg.kind === "NOTE";
+    const isImport = sg.externalRef?.startsWith("pointage-") ?? false;
+    // Pour les imports, on remplace le badge « commentaire long » par une
+    // étiquette « Import » : le commentaire reste lisible en clair sous le
+    // titre via `commentText`.
+    const badges = isImport
+      ? ["Import"]
+      : [
+          ...(sg.comment ? [sg.comment.slice(0, 80)] : []),
+          ...(sg._count.photos > 0 ? [`${sg._count.photos} photo(s)`] : []),
+        ];
+    if (!isImport && sg._count.photos > 0) {
+      // Le compteur photos pour les imports n'a pas grand sens (pas
+      // d'upload), donc on ne le met pas.
+    }
     entries.push({
       type: isNote ? "note" : "sighting",
       id: sg.id,
@@ -235,15 +252,20 @@ export async function GET(req: Request) {
         : "Agent inconnu",
       agentId: sg.agentId,
       href: `/agents/${sg.agentId}`,
-      badges: [
-        ...(sg.comment ? [sg.comment.slice(0, 80)] : []),
-        ...(sg._count.photos > 0 ? [`${sg._count.photos} photo(s)`] : []),
-      ],
+      badges,
+      commentText: isImport ? sg.comment : null,
       accent: isNote ? "info" : "default",
     });
   }
   for (const sg of siteSightings) {
     const isNote = sg.kind === "NOTE";
+    const isImport = sg.externalRef?.startsWith("pointage-") ?? false;
+    const badges = isImport
+      ? ["Import"]
+      : [
+          ...(sg.comment ? [sg.comment.slice(0, 80)] : []),
+          ...(sg._count.photos > 0 ? [`${sg._count.photos} photo(s)`] : []),
+        ];
     entries.push({
       type: isNote ? "site-note" : "site-sighting",
       id: sg.id,
@@ -253,10 +275,8 @@ export async function GET(req: Request) {
       subtitle: sg.site.name,
       siteId: sg.siteId,
       href: `/sites/${sg.siteId}`,
-      badges: [
-        ...(sg.comment ? [sg.comment.slice(0, 80)] : []),
-        ...(sg._count.photos > 0 ? [`${sg._count.photos} photo(s)`] : []),
-      ],
+      badges,
+      commentText: isImport ? sg.comment : null,
       accent: isNote ? "info" : "default",
     });
   }

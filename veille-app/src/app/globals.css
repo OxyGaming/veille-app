@@ -137,19 +137,30 @@ input, button, textarea, select {
 .btn-ghost { color: var(--color-text-muted); background: transparent; }
 .btn-ghost:hover { background: var(--color-bg); color: var(--color-text); }
 
-.input {
-  width: 100%;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 9px 12px;
-  font-size: 14px;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-.input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+/* `@layer components` est nécessaire pour que les utilities Tailwind
+   (pl-9, pr-12, etc.) puissent surcharger les paddings ici. En Tailwind
+   v4, les utilities sont dans @layer utilities qui passe APRÈS
+   @layer components. Sans cette enveloppe, .input est "unlayered" et
+   bat les utilities (cascade par layer-order). Symptôme : la loupe de
+   recherche se superposait au texte du placeholder. */
+@layer components {
+  .input {
+    width: 100%;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding-top: 9px;
+    padding-bottom: 9px;
+    padding-left: 12px;
+    padding-right: 12px;
+    font-size: 14px;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+  }
 }
 
 /* Animation simple pour modaux/drawers */

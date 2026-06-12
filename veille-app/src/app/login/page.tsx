@@ -1,10 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@/components/icons";
 
 export default function LoginPage() {
+  // useSearchParams() exige un boundary Suspense en build production
+  // (sinon Next.js échoue avec « missing-suspense-with-csr-bailout »).
+  return (
+    <Suspense fallback={<div />}>
+      <LoginInner />
+    </Suspense>
+  );
+}
+
+function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
   const from = params.get("from") || "/procedures";

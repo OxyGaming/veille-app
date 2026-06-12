@@ -4,6 +4,11 @@
  *
  * Idempotent : tout est en `upsert`.
  */
+// Charge .env explicitement — utile en exécution standalone via `tsx`
+// (sans cette ligne, `process.env.DATABASE_URL` est undefined et l'adapter
+// Prisma tombe sur le fallback `file:./dev.db`, qui ne correspond pas au
+// fichier créé par `prisma db push`).
+import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
 import { hashPassword } from "../src/lib/auth";
 import { SEED_PROCEDURES } from "./seed-procedures";

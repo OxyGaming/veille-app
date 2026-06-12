@@ -50,6 +50,7 @@ type ReportPayload = {
     gravity: number;
     helpReference: string | null;
     helpText: string | null;
+    photos: string[];
   }[];
 };
 
@@ -267,24 +268,53 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
           y += 12;
         }
         doc.setTextColor(0);
-        const rows = po.items.map((i) => [
-          shortStatus(i.status),
-          i.gravity != null ? `G${i.gravity}` : "",
-          i.label,
-          i.helpReference ?? "",
-          i.comment ?? "",
-        ]);
+        // Filtre des items non observés : ils n'ont pas leur place dans
+        // le compte rendu (un item au statut "?" = pas évalué).
+        const observed = po.items.filter((i) => i.status !== "NON_OBSERVE");
+        if (observed.length === 0) {
+          doc.setFont("helvetica", "italic");
+          doc.setFontSize(9);
+          doc.setTextColor(120);
+          doc.text("Aucun point observé sur cette procédure.", margin, y);
+          doc.setTextColor(0);
+          doc.setFont("helvetica", "normal");
+          y += 18;
+          continue;
+        }
+        // Cellule "Point" : libellé en gras + aide réglementaire (3
+        // premières phrases) en italique sous le libellé. Le tout est
+        // traité comme un seul bloc texte par autoTable qui le wrap.
+        const rows = observed.map((i) => {
+          const labelBlock = i.helpText
+            ? `${i.label}\n${firstSentences(i.helpText, 3)}`
+            : i.label;
+          return [
+            shortStatus(i.status),
+            i.gravity != null ? `G${i.gravity}` : "",
+            labelBlock,
+            i.helpReference ?? "",
+            i.comment ?? "",
+          ];
+        });
         autoTable(doc, {
           startY: y,
           head: [["Statut", "G", "Point", "Réf.", "Commentaire"]],
           body: rows,
-          styles: { fontSize: 9, cellPadding: 4 },
-          headStyles: { fillColor: [46, 84, 150] },
+          styles: {
+            fontSize: 9,
+            cellPadding: 4,
+            // overflow: linebreak fait grandir la ligne automatiquement
+            // selon le contenu — pas de troncature sur commentaires longs.
+            overflow: "linebreak",
+            valign: "top",
+          },
+          headStyles: { fillColor: [46, 84, 150], valign: "middle" },
           columnStyles: {
-            0: { cellWidth: 40 },
-            1: { cellWidth: 24 },
+            0: { cellWidth: 36, halign: "center" },
+            1: { cellWidth: 24, halign: "center" },
             2: { cellWidth: 200 },
             3: { cellWidth: 86, font: "courier", fontStyle: "normal" },
+            // colonne 4 (Commentaire) : largeur restante (auto)
           },
           margin: { left: margin, right: margin },
         });
@@ -320,15 +350,96 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
               nc.comment ?? "",
             ];
           }),
-          styles: { fontSize: 9, cellPadding: 4, valign: "top" },
+          styles: {
+            fontSize: 9,
+            cellPadding: 4,
+            valign: "top",
+            // Hauteur de ligne adaptative pour les commentaires longs.
+            overflow: "linebreak",
+          },
           headStyles: { fillColor: [192, 21, 47] },
           columnStyles: {
             0: { cellWidth: 100 },
             1: { cellWidth: 240 },
             2: { cellWidth: 40, halign: "center" },
+            // colonne 3 (Commentaire) : largeur restante (auto)
           },
           margin: { left: margin, right: margin },
         });
+        // @ts-expect-error lastAutoTable
+        y = doc.lastAutoTable.finalY + 16;
+
+        // ─── Photos jointes aux NC ──────────────────────────────────────
+        // Chaque NC peut avoir 0..N photos. On les charge en parallèle
+        // (fetch → blob → dataURL) puis on les insère par groupes de 3,
+        // titre "Photos NC #i — <procédure>".
+        const ncWithPhotos = data.nonConform.filter(
+          (nc) => nc.photos && nc.photos.length > 0
+        );
+        if (ncWithPhotos.length > 0) {
+          if (y > 680) {
+            doc.addPage();
+            y = margin;
+          }
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(11);
+          doc.text("Photos jointes aux non-conformités", margin, y);
+          y += 16;
+          for (let i = 0; i < ncWithPhotos.length; i++) {
+            const nc = ncWithPhotos[i];
+            const ncIdx = data.nonConform.indexOf(nc) + 1;
+            if (y > 700) {
+              doc.addPage();
+              y = margin;
+            }
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.setTextColor(80);
+            doc.text(`NC #${ncIdx} — ${nc.procedure} — ${nc.item.slice(0, 80)}`, margin, y);
+            doc.setTextColor(0);
+            doc.setFont("helvetica", "normal");
+            y += 12;
+            // Chargement des images en parallèle.
+            const dataUrls = await Promise.all(
+              nc.photos.map(async (path) => {
+                try {
+                  const r = await fetch(path);
+                  if (!r.ok) return null;
+                  const blob = await r.blob();
+                  return await new Promise<string>((resolve) => {
+                    const fr = new FileReader();
+                    fr.onload = () => resolve(fr.result as string);
+                    fr.readAsDataURL(blob);
+                  });
+                } catch {
+                  return null;
+                }
+              })
+            );
+            const valid = dataUrls.filter((u): u is string => !!u);
+            const thumbW = 120;
+            const thumbH = 90;
+            const gap = 8;
+            let x = margin;
+            for (const url of valid) {
+              if (x + thumbW > doc.internal.pageSize.getWidth() - margin) {
+                x = margin;
+                y += thumbH + gap;
+                if (y + thumbH > 780) {
+                  doc.addPage();
+                  y = margin;
+                }
+              }
+              try {
+                doc.addImage(url, "JPEG", x, y, thumbW, thumbH);
+              } catch {
+                // si format non géré : ignore silencieusement.
+              }
+              x += thumbW + gap;
+            }
+            y += thumbH + 18;
+          }
+        }
       }
 
       if (data.session.generalComment) {
@@ -418,32 +529,56 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
       <div className="text-sm">Observateur : <b>{data.observer.name}</b></div>
 
       <div className="grid gap-3 mt-4">
-        {data.procedures.map((po) => (
-          <section key={po.id} className="bg-white border border-[var(--line)] rounded-xl p-3">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--muted-2)]">
-              {po.procedure.domain}
-              {po.procedure.theme && ` · ${po.procedure.theme}`}
-            </div>
-            <h2 className="text-sm font-bold">{po.procedure.title}</h2>
-            <ul className="mt-2 grid gap-1">
-              {po.items.map((i, idx) => (
-                <li key={idx} className="text-sm flex gap-2">
-                  <span className="text-[10px] font-mono w-7 text-center rounded bg-slate-100 px-1 py-0.5">
-                    {shortStatus(i.status)}
-                  </span>
-                  <span className="flex-1">
-                    {i.label}
-                    {i.comment && (
-                      <div className="text-xs text-[var(--muted)]">
-                        « {i.comment} »
-                      </div>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
+        {data.procedures.map((po) => {
+          // Aperçu HTML aligné sur le PDF : on n'affiche que les items
+          // effectivement observés (les "?" sont exclus du compte rendu).
+          const observed = po.items.filter((i) => i.status !== "NON_OBSERVE");
+          return (
+            <section
+              key={po.id}
+              className="bg-white border border-[var(--line)] rounded-xl p-3"
+            >
+              <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--muted-2)]">
+                {po.procedure.domain}
+                {po.procedure.theme && ` · ${po.procedure.theme}`}
+              </div>
+              <h2 className="text-sm font-bold">{po.procedure.title}</h2>
+              {observed.length === 0 ? (
+                <div className="text-xs italic text-[var(--muted)] mt-2">
+                  Aucun point observé sur cette procédure.
+                </div>
+              ) : (
+                <ul className="mt-2 grid gap-1">
+                  {observed.map((i, idx) => (
+                    <li key={idx} className="text-sm flex gap-2">
+                      <span className="text-[10px] font-mono w-7 text-center rounded bg-slate-100 px-1 py-0.5">
+                        {shortStatus(i.status)}
+                      </span>
+                      <span className="flex-1">
+                        {i.label}
+                        {i.helpReference && (
+                          <span className="ml-1.5 text-[10px] font-mono text-indigo-700 bg-indigo-50 border border-indigo-100 rounded px-1 py-0.5 align-middle">
+                            {i.helpReference}
+                          </span>
+                        )}
+                        {i.helpText && (
+                          <div className="text-[11px] italic text-slate-500 mt-0.5">
+                            {firstSentences(i.helpText, 3)}
+                          </div>
+                        )}
+                        {i.comment && (
+                          <div className="text-xs text-[var(--muted)] mt-0.5">
+                            « {i.comment} »
+                          </div>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          );
+        })}
       </div>
 
       {data.nonConform.length > 0 && (

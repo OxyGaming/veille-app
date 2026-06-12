@@ -41,7 +41,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // Pas de `output: "standalone"` — cela force `node .next/standalone/server.js`
+  // et casse `next start` utilisé par PM2 (npm start → next start -p 3002).
+  // Standalone n'est utile que pour Docker. Symptôme en cas de régression :
+  // page servie sans CSS + erreur webpack "Cannot read properties of
+  // undefined" + warning "next start does not work with output: standalone".
   serverExternalPackages: ["better-sqlite3"],
   turbopack: {},
 

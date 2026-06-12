@@ -12,6 +12,10 @@ sudo bash veille-bootstrap/deploy/install.sh
 rm -rf veille-bootstrap
 ```
 
+> Si le dépôt est privé, le clone va te demander un username + token GitHub.
+> Une fois l'install faite, lance `setup-ssh-key.sh` (voir plus bas) pour
+> ne plus avoir à le saisir pour les `git pull` suivants.
+
 Ce que fait `install.sh` :
 
 1. Installe les paquets système (`git`, `nodejs` 20 via NodeSource si nécessaire, `build-essential`, `pm2` global).
@@ -73,6 +77,27 @@ Soit tu reset (destructif) :
 ```bash
 cd /var/www/veille && git reset --hard origin/main && bash deploy/update.sh
 ```
+
+## Authentification GitHub sans mot de passe
+
+À faire **une seule fois** par serveur pour que les `git pull` n'invitent
+plus à saisir un token :
+
+```bash
+sudo -u ubuntu bash /var/www/veille/deploy/setup-ssh-key.sh
+```
+
+Le script :
+
+1. Génère une clé `~/.ssh/id_ed25519` (sans passphrase, lecture-seule).
+2. Affiche la clé publique à copier dans **Settings → Deploy keys → Add
+   deploy key** sur la page du dépôt GitHub. Coche « Allow write
+   access » uniquement si tu veux pouvoir `git push` depuis ce serveur
+   (rare pour un VPS de prod — laisse décoché).
+3. Teste la connexion (`ssh -T git@github.com`).
+4. Bascule l'origin du dépôt en SSH (`git@github.com:owner/repo.git`).
+
+Après ça, `bash deploy/update.sh` marche silencieusement.
 
 ## Alternative : `ecosystem.config.cjs`
 

@@ -212,11 +212,13 @@ function describeDiscrepancy(
   label: string,
   o: { quantityObserved: number | null; expirationDateObserved: Date | null }
 ): string {
+  // Libellé orienté action — ce qui est attendu de l'agent qui prendra la
+  // suite ("Remplacer", "Compléter") plutôt qu'un simple constat.
   switch (type) {
     case "MISSING":
-      return `Élément manquant : ${label}`;
+      return `Remplacer l'élément manquant : ${label}`;
     case "EXPIRED":
-      return `Équipement périmé : ${label}${
+      return `Remplacer l'élément périmé : ${label}${
         o.expirationDateObserved
           ? ` (DLC ${o.expirationDateObserved
               .toISOString()
@@ -224,13 +226,13 @@ function describeDiscrepancy(
           : ""
       }`;
     case "QUANTITY_LOW":
-      return `Quantité insuffisante : ${label}${
+      return `Compléter la quantité manquante : ${label}${
         o.quantityObserved != null ? ` (${o.quantityObserved} sur place)` : ""
       }`;
     case "DAMAGED":
-      return `Équipement détérioré : ${label}`;
+      return `Remplacer l'élément détérioré : ${label}`;
     default:
-      return `Écart constaté : ${label}`;
+      return `Remettre en conformité : ${label}`;
   }
 }
 

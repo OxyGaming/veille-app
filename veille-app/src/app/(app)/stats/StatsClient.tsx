@@ -118,7 +118,35 @@ const TABS = [
   { v: "quality", label: "Qualité de saisie" },
   { v: "activity", label: "Activité" },
   { v: "actions", label: "Actions" },
+  { v: "veille-site", label: "Veille de site" },
 ] as const;
+
+type VeilleSite = {
+  dashboard: {
+    siteId: string;
+    siteName: string;
+    siteCode: string | null;
+    lastVisitId: string | null;
+    lastVisitDate: string | null;
+    total: number;
+    conformes: number;
+    ecarts: number;
+    rate: number | null;
+    openActions: number;
+  }[];
+  renouveler: {
+    equipmentId: string;
+    siteId: string;
+    siteName: string;
+    siteCode: string | null;
+    category: string;
+    label: string;
+    expectedQuantity: number | null;
+    expirationDate: string | null;
+    status: "EXPIRED" | "SOON";
+    daysToExpiry: number | null;
+  }[];
+};
 
 export default function StatsClient() {
   const [tab, setTab] = useState<(typeof TABS)[number]["v"]>("overview");
@@ -135,6 +163,7 @@ export default function StatsClient() {
   const [quality, setQuality] = useState<Quality | null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
   const [actions, setActions] = useState<Actions | null>(null);
+  const [veilleSite, setVeilleSite] = useState<VeilleSite | null>(null);
 
   useEffect(() => {
     fetch("/api/history/filters")
@@ -180,6 +209,14 @@ export default function StatsClient() {
       .then((r) => r.json())
       .then(setActions);
   }, [tab, params]);
+  useEffect(() => {
+    if (tab !== "veille-site") return;
+    // Pas de filtres date/agent/site sur cet onglet : le tableau est un
+    // instantané (dernière visite par site, péremption à 30 j).
+    fetch(`/api/stats/veille-site`)
+      .then((r) => r.json())
+      .then(setVeilleSite);
+  }, [tab]);
 
   function toggleType(t: string) {
     setTypes((s) => {
@@ -330,6 +367,7 @@ export default function StatsClient() {
       {tab === "quality" && <QualityTab data={quality} />}
       {tab === "activity" && <ActivityTab data={activity} />}
       {tab === "actions" && <ActionsTab data={actions} />}
+      {tab === "veille-site" && <VeilleSiteTab data={veilleSite} />}
     </div>
   );
 }
@@ -781,6 +819,212 @@ function Empty() {
   return (
     <div className="text-xs text-slate-500 text-center py-4">
       Pas de données pour cette période.
+    </div>
+  );
+}
+
+/* ============================================================================
+ *  Veille de site — conformité par site + liste "à renouveler"
+ *  Onglet indépendant des filtres globaux (instantané).
+ * ========================================================================== */
+function VeilleSiteTab({ data }: { data: VeilleSite | null }) {
+  if (!data)
+    return (
+      <div className="text-sm text-slate-500 py-12 text-center">Chargement…</div>
+    );
+
+  return (
+    <div className="space-y-4">
+      {/* (a) Tableau de bord conformité par site */}
+      <section className="card p-4">
+        <h2 className="font-bold mb-1 text-sm">Conformité par site</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Dernière visite « Veille de site » terminée par site —{" "}
+          <span className="font-mono">{data.dashboard.length}</span> site(s).
+        </p>
+        {data.dashboard.length === 0 ? (
+          <div className="text-xs text-slate-500 text-center py-4">
+            Aucun site visible.
+          </div>
+        ) : (
+          <div className="overflow-x-auto -mx-4 px-4">
+            <table className="w-full text-xs">
+              <thead className="text-slate-500">
+                <tr className="border-b border-slate-200">
+                  <th className="text-left font-mono font-normal py-1.5">Site</th>
+                  <th className="text-left font-mono font-normal py-1.5">
+                    Dernière vérif.
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Total
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Conformes
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Écarts
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Taux
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Actions ouvertes
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.dashboard.map((row) => (
+                  <tr
+                    key={row.siteId}
+                    className="border-b border-slate-100 last:border-0"
+                  >
+                    <td className="py-1.5">
+                      <div className="font-medium">{row.siteName}</div>
+                      {row.siteCode && (
+                        <div className="text-[10px] font-mono text-slate-400">
+                          {row.siteCode}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-1.5 font-mono">
+                      {row.lastVisitDate ? (
+                        <a
+                          href={`/visits/${row.lastVisitId}`}
+                          className="text-indigo-600 hover:underline"
+                        >
+                          {format(new Date(row.lastVisitDate), "dd/MM/yyyy", {
+                            locale: fr,
+                          })}
+                        </a>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-right font-mono">
+                      {row.total || "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-mono text-emerald-700">
+                      {row.total ? row.conformes : "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-mono text-rose-700">
+                      {row.total ? row.ecarts : "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-mono font-bold">
+                      {row.rate != null ? (
+                        <span
+                          className={
+                            row.rate >= 95
+                              ? "text-emerald-700"
+                              : row.rate >= 80
+                                ? "text-amber-700"
+                                : "text-rose-700"
+                          }
+                        >
+                          {row.rate.toFixed(1)} %
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-right font-mono">
+                      {row.openActions > 0 ? (
+                        <a
+                          href={`/sites/${row.siteId}`}
+                          className="text-rose-700 hover:underline font-bold"
+                        >
+                          {row.openActions}
+                        </a>
+                      ) : (
+                        <span className="text-slate-400">0</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* (b) Liste "à renouveler" — périssables < 30 j ou dépassés */}
+      <section className="card p-4">
+        <h2 className="font-bold mb-1 text-sm">À renouveler (≤ 30 jours)</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Éléments périssables dont la date de péremption est dépassée ou
+          arrive à échéance — tous sites confondus.
+        </p>
+        {data.renouveler.length === 0 ? (
+          <div className="text-xs text-slate-500 text-center py-4">
+            Rien à renouveler dans les 30 jours.
+          </div>
+        ) : (
+          <div className="overflow-x-auto -mx-4 px-4">
+            <table className="w-full text-xs">
+              <thead className="text-slate-500">
+                <tr className="border-b border-slate-200">
+                  <th className="text-left font-mono font-normal py-1.5">Site</th>
+                  <th className="text-left font-mono font-normal py-1.5">
+                    Catégorie
+                  </th>
+                  <th className="text-left font-mono font-normal py-1.5">
+                    Élément
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">Qté</th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Péremption
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Statut
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.renouveler.map((e) => (
+                  <tr
+                    key={e.equipmentId}
+                    className="border-b border-slate-100 last:border-0"
+                  >
+                    <td className="py-1.5">
+                      <a
+                        href={`/sites/${e.siteId}`}
+                        className="font-medium text-indigo-600 hover:underline"
+                      >
+                        {e.siteName}
+                      </a>
+                    </td>
+                    <td className="py-1.5 text-slate-500">{e.category}</td>
+                    <td className="py-1.5">{e.label}</td>
+                    <td className="py-1.5 text-right font-mono text-slate-500">
+                      {e.expectedQuantity ?? "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-mono">
+                      {e.expirationDate
+                        ? format(new Date(e.expirationDate), "dd/MM/yyyy")
+                        : "—"}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      {e.status === "EXPIRED" ? (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+                          Périmé{e.daysToExpiry != null && e.daysToExpiry < 0
+                            ? ` (J${e.daysToExpiry})`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                          Bientôt
+                          {e.daysToExpiry != null
+                            ? ` (J+${e.daysToExpiry})`
+                            : ""}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

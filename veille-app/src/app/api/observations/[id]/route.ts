@@ -88,21 +88,30 @@ export async function PATCH(
       },
     });
 
-    // Génération automatique d'une action quand on passe en "À revoir".
-    // Idempotent : externalId unique par (observation, agent), donc un re-clic
-    // sur "À revoir" ne crée pas de doublon.
+    // Génération automatique d'une action quand on passe en "Non conforme"
+    // ou "À revoir". Une NC est plus prioritaire (échéance plus courte)
+    // qu'un "À revoir" (suivi pédagogique). Idempotent : externalId unique
+    // par observation, un re-clic ne crée pas de doublon.
+    const isNc = data.status === "NON_CONFORME";
+    const isAr = data.status === "A_REVOIR";
+    const wasNcOrAr =
+      obs.status === "NON_CONFORME" || obs.status === "A_REVOIR";
     if (
-      data.status === "A_REVOIR" &&
-      obs.status !== "A_REVOIR" &&
+      (isNc || isAr) &&
+      !wasNcOrAr &&
       obs.procedureObservation.session.agentId
     ) {
       const agentId = obs.procedureObservation.session.agentId;
       const teamId = obs.procedureObservation.session.teamId;
       const proc = obs.procedureObservation.procedure;
       const item = obs.checklistItem;
-      const title = `[À revoir] ${proc.title} — ${item.label}`;
-      const dueAt = addMonths(new Date(), 7);
-      const tags = ["veille", "à revoir"];
+      // Préfixe + tag + échéance distincts selon le statut.
+      const statusLabel = isNc ? "Non conforme" : "À revoir";
+      const statusTag = isNc ? "non conforme" : "à revoir";
+      const monthsAhead = isNc ? 3 : 7;
+      const title = `[${statusLabel}] ${proc.title} — ${item.label}`;
+      const dueAt = addMonths(new Date(), monthsAhead);
+      const tags = ["veille", statusTag];
       if (item.gravity ?? proc.gravity)
         tags.push(`G${item.gravity ?? proc.gravity}`);
       const externalId = `obs-${id}`;

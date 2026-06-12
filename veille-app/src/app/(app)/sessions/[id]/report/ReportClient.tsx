@@ -289,7 +289,7 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
             ? `${i.label}\n${firstSentences(i.helpText, 3)}`
             : i.label;
           return [
-            shortStatus(i.status),
+            longStatus(i.status),
             i.gravity != null ? `G${i.gravity}` : "",
             labelBlock,
             i.helpReference ?? "",
@@ -310,10 +310,10 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
           },
           headStyles: { fillColor: [46, 84, 150], valign: "middle" },
           columnStyles: {
-            0: { cellWidth: 36, halign: "center" },
+            0: { cellWidth: 70, halign: "center" },
             1: { cellWidth: 24, halign: "center" },
-            2: { cellWidth: 200 },
-            3: { cellWidth: 86, font: "courier", fontStyle: "normal" },
+            2: { cellWidth: 180 },
+            3: { cellWidth: 80, font: "courier", fontStyle: "normal" },
             // colonne 4 (Commentaire) : largeur restante (auto)
           },
           margin: { left: margin, right: margin },
@@ -355,7 +355,7 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
             return [
               nc.procedure,
               nc.item + refLine + extract,
-              shortStatus(nc.status),
+              longStatus(nc.status),
               nc.comment ?? "",
             ];
           }),
@@ -367,9 +367,9 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
           },
           headStyles: { fillColor: [192, 21, 47] },
           columnStyles: {
-            0: { cellWidth: 100 },
-            1: { cellWidth: 240 },
-            2: { cellWidth: 40, halign: "center" },
+            0: { cellWidth: 90 },
+            1: { cellWidth: 230 },
+            2: { cellWidth: 70, halign: "center" },
           },
           margin: { left: margin, right: margin },
         });
@@ -619,5 +619,21 @@ function shortStatus(s: string): string {
       return "NA";
     default:
       return "?";
+  }
+}
+
+/** Libellé long du statut — utilisé dans le PDF pour la lisibilité. */
+function longStatus(s: string): string {
+  switch (s) {
+    case "CONFORME":
+      return "Conforme";
+    case "NON_CONFORME":
+      return "Non conforme";
+    case "A_REVOIR":
+      return "À revoir";
+    case "NON_APPLICABLE":
+      return "Non applicable";
+    default:
+      return "—";
   }
 }

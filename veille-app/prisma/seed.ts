@@ -91,7 +91,13 @@ async function main() {
       where: { slug: t.slug },
       include: { sections: { include: { items: true } } },
     });
-    if (existing && existing.sections.length > 0) {
+    // Pour les templates CHECKLIST déjà présents avec leurs sections, on ne
+    // touche pas au contenu (préserve les éditions admin). Pour les templates
+    // INVENTORY (toujours sans sections), on autorise la mise à jour des
+    // scalaires : kind, expectedFrequencyDays, description peuvent évoluer
+    // entre versions.
+    const isInventory = t.kind === "INVENTORY";
+    if (existing && !isInventory && existing.sections.length > 0) {
       console.log(`Template ${t.slug} déjà présent (${existing.sections.length} sections) — on ne réécrase pas.`);
       continue;
     }
@@ -102,6 +108,8 @@ async function main() {
             name: t.name,
             description: t.description,
             pdfLayout: t.pdfLayout,
+            kind: t.kind ?? "CHECKLIST",
+            expectedFrequencyDays: t.expectedFrequencyDays ?? null,
           },
         })
       : await prisma.siteVisitTemplate.create({
@@ -110,6 +118,8 @@ async function main() {
             name: t.name,
             description: t.description,
             pdfLayout: t.pdfLayout,
+            kind: t.kind ?? "CHECKLIST",
+            expectedFrequencyDays: t.expectedFrequencyDays ?? null,
           },
         });
     for (let i = 0; i < t.sections.length; i++) {

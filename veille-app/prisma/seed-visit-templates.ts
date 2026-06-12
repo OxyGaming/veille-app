@@ -14,6 +14,14 @@ export type SeedTemplate = {
   name: string;
   description: string;
   pdfLayout: "VEILLE" | "SNCF";
+  /**
+   * Type de moteur :
+   *  - CHECKLIST  : items définis par le template (sections + items)
+   *  - INVENTORY  : items générés depuis le catalogue SiteEquipment du site
+   */
+  kind?: "CHECKLIST" | "INVENTORY";
+  /** Périodicité attendue en jours (null = libre). */
+  expectedFrequencyDays?: number;
   sections: SeedSection[];
 };
 export type SeedSection = {
@@ -541,7 +549,33 @@ export const TEMPLATE_PLANIFIEE: SeedTemplate = {
   ],
 };
 
+/**
+ * Veille de site (mode INVENTORY).
+ *
+ * Coquille générique pour les contrôles terrain dont les items proviennent
+ * du catalogue `SiteEquipment` du site visité, pas du template :
+ *   - veille SST (trousse de secours, extincteurs)
+ *   - affichages réglementaires
+ *   - registres, plans d'évacuation
+ *   - moyens de communication
+ *   - inventaires divers
+ *
+ * Pas de sections : le rendu groupe automatiquement par
+ * `equipment.category`. Fréquence par défaut 90 jours (trimestrielle).
+ */
+export const TEMPLATE_VEILLE_SITE: SeedTemplate = {
+  slug: "veille-site",
+  name: "Veille de site",
+  description:
+    "Contrôle générique du référentiel d'équipements d'un site. Les éléments à vérifier proviennent du catalogue de l'établissement (trousses de secours, extincteurs, affichages, registres, équipements de sécurité…). L'agent ne signale que les écarts.",
+  pdfLayout: "VEILLE",
+  kind: "INVENTORY",
+  expectedFrequencyDays: 90,
+  sections: [],
+};
+
 export const SEED_VISIT_TEMPLATES: SeedTemplate[] = [
   TEMPLATE_TRIMESTRIELLE,
   TEMPLATE_PLANIFIEE,
+  TEMPLATE_VEILLE_SITE,
 ];

@@ -322,19 +322,28 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
         y = doc.lastAutoTable.finalY + 16;
       }
 
-      if (data.nonConform.length) {
-        if (y > 720) {
+      // ─── Curseur vertical unifié pour les blocs suivants ───────────────
+      // Toutes les sections ci-après s'enchaînent en utilisant `y` comme
+      // unique référence. Un helper `ensureSpace(h)` ajoute une nouvelle
+      // page si la hauteur requise dépasse la zone utile. Plus de
+      // `lastAutoTable.finalY` qui peut pointer ailleurs après images.
+      const pageH = doc.internal.pageSize.getHeight();
+      const pageW = doc.internal.pageSize.getWidth();
+      const bottomMargin = margin;
+      function ensureSpace(h: number) {
+        if (y + h > pageH - bottomMargin) {
           doc.addPage();
           y = margin;
         }
+      }
+
+      // ─── Synthèse des points non conformes / à revoir ─────────────────
+      if (data.nonConform.length) {
+        ensureSpace(50);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(12);
         doc.text("Synthèse des points non conformes / à revoir", margin, y);
-        y += 14;
-        // Une ligne par NC contient : procédure / point + réf + extrait /
-        // statut / commentaire. L'extrait reprend les 3 premières phrases
-        // de l'aide réglementaire (helpText) pour que le rapport soit
-        // auto-suffisant sans consulter la doc source.
+        y += 16;
         autoTable(doc, {
           startY: y,
           head: [["Procédure", "Point", "Statut", "Commentaire"]],
@@ -354,7 +363,6 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
             fontSize: 9,
             cellPadding: 4,
             valign: "top",
-            // Hauteur de ligne adaptative pour les commentaires longs.
             overflow: "linebreak",
           },
           headStyles: { fillColor: [192, 21, 47] },
@@ -362,131 +370,116 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
             0: { cellWidth: 100 },
             1: { cellWidth: 240 },
             2: { cellWidth: 40, halign: "center" },
-            // colonne 3 (Commentaire) : largeur restante (auto)
           },
           margin: { left: margin, right: margin },
         });
         // @ts-expect-error lastAutoTable
-        y = doc.lastAutoTable.finalY + 16;
-
-        // ─── Photos jointes aux NC ──────────────────────────────────────
-        // Chaque NC peut avoir 0..N photos. On les charge en parallèle
-        // (fetch → blob → dataURL) puis on les insère par groupes de 3,
-        // titre "Photos NC #i — <procédure>".
-        const ncWithPhotos = data.nonConform.filter(
-          (nc) => nc.photos && nc.photos.length > 0
-        );
-        if (ncWithPhotos.length > 0) {
-          if (y > 680) {
-            doc.addPage();
-            y = margin;
-          }
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(11);
-          doc.text("Photos jointes aux non-conformités", margin, y);
-          y += 16;
-          for (let i = 0; i < ncWithPhotos.length; i++) {
-            const nc = ncWithPhotos[i];
-            const ncIdx = data.nonConform.indexOf(nc) + 1;
-            if (y > 700) {
-              doc.addPage();
-              y = margin;
-            }
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(9);
-            doc.setTextColor(80);
-            doc.text(`NC #${ncIdx} — ${nc.procedure} — ${nc.item.slice(0, 80)}`, margin, y);
-            doc.setTextColor(0);
-            doc.setFont("helvetica", "normal");
-            y += 12;
-            // Chargement des images en parallèle.
-            const dataUrls = await Promise.all(
-              nc.photos.map(async (path) => {
-                try {
-                  const r = await fetch(path);
-                  if (!r.ok) return null;
-                  const blob = await r.blob();
-                  return await new Promise<string>((resolve) => {
-                    const fr = new FileReader();
-                    fr.onload = () => resolve(fr.result as string);
-                    fr.readAsDataURL(blob);
-                  });
-                } catch {
-                  return null;
-                }
-              })
-            );
-            const valid = dataUrls.filter((u): u is string => !!u);
-            const thumbW = 120;
-            const thumbH = 90;
-            const gap = 8;
-            let x = margin;
-            for (const url of valid) {
-              if (x + thumbW > doc.internal.pageSize.getWidth() - margin) {
-                x = margin;
-                y += thumbH + gap;
-                if (y + thumbH > 780) {
-                  doc.addPage();
-                  y = margin;
-                }
-              }
-              try {
-                doc.addImage(url, "JPEG", x, y, thumbW, thumbH);
-              } catch {
-                // si format non géré : ignore silencieusement.
-              }
-              x += thumbW + gap;
-            }
-            y += thumbH + 18;
-          }
-        }
+        y = doc.lastAutoTable.finalY + 24;
       }
 
+      // ─── Commentaire général ──────────────────────────────────────────
       if (data.session.generalComment) {
-        // @ts-expect-error idem
-        let cy = (doc.lastAutoTable?.finalY ?? y) + 20;
-        if (cy > 720) {
-          doc.addPage();
-          cy = margin;
-        }
+        const lines = doc.splitTextToSize(
+          data.session.generalComment,
+          pageW - 2 * margin
+        );
+        ensureSpace(18 + lines.length * 12);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(11);
-        doc.text("Commentaire général", margin, cy);
-        cy += 14;
+        doc.text("Commentaire général", margin, y);
+        y += 14;
         doc.setFont("helvetica", "normal");
         doc.setFontSize(10);
-        const lines = doc.splitTextToSize(data.session.generalComment, 515);
-        doc.text(lines, margin, cy);
+        doc.text(lines, margin, y);
+        y += lines.length * 12 + 16;
       }
 
-      // ─── Pied de page "Sources réglementaires" sur la dernière page ───
-      // Listées en italique gris, séparateur fin au-dessus pour bien les
-      // distinguer du corps du rapport.
-      if (sources.length) {
-        // @ts-expect-error lastAutoTable
-        const yLast = doc.lastAutoTable?.finalY ?? y;
-        const pageH = doc.internal.pageSize.getHeight();
-        let sy = yLast + 24;
-        const blockH = 18 + sources.length * 11;
-        if (sy + blockH > pageH - margin) {
-          doc.addPage();
-          sy = margin;
+      // ─── Photos jointes aux NC (page dédiée systématique) ─────────────
+      const ncWithPhotos = data.nonConform.filter(
+        (nc) => nc.photos && nc.photos.length > 0
+      );
+      if (ncWithPhotos.length > 0) {
+        // Démarre toujours sur une nouvelle page pour éviter tout
+        // chevauchement avec les blocs précédents.
+        doc.addPage();
+        y = margin;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.text("Photos jointes aux non-conformités", margin, y);
+        y += 18;
+        for (const nc of ncWithPhotos) {
+          const ncIdx = data.nonConform.indexOf(nc) + 1;
+          ensureSpace(120);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9);
+          doc.setTextColor(80);
+          const titleLines = doc.splitTextToSize(
+            `NC #${ncIdx} — ${nc.procedure} — ${nc.item}`,
+            pageW - 2 * margin
+          );
+          doc.text(titleLines, margin, y);
+          y += titleLines.length * 11 + 4;
+          doc.setTextColor(0);
+          doc.setFont("helvetica", "normal");
+          // Charge les images en parallèle.
+          const dataUrls = await Promise.all(
+            nc.photos.map(async (path) => {
+              try {
+                const r = await fetch(path);
+                if (!r.ok) return null;
+                const blob = await r.blob();
+                return await new Promise<string>((resolve) => {
+                  const fr = new FileReader();
+                  fr.onload = () => resolve(fr.result as string);
+                  fr.readAsDataURL(blob);
+                });
+              } catch {
+                return null;
+              }
+            })
+          );
+          const valid = dataUrls.filter((u): u is string => !!u);
+          const thumbW = 140;
+          const thumbH = 100;
+          const gap = 10;
+          let x = margin;
+          for (const url of valid) {
+            if (x + thumbW > pageW - margin) {
+              x = margin;
+              y += thumbH + gap;
+              ensureSpace(thumbH + gap);
+            }
+            try {
+              doc.addImage(url, "JPEG", x, y, thumbW, thumbH);
+            } catch {
+              /* skip silencieusement */
+            }
+            x += thumbW + gap;
+          }
+          y += thumbH + 24;
         }
+      }
+
+      // ─── Pied "Sources réglementaires" (toujours sur sa propre fin) ───
+      if (sources.length) {
+        const blockH = 22 + sources.length * 11;
+        ensureSpace(blockH + 12);
+        y += 8;
         doc.setDrawColor(200, 200, 200);
         doc.setLineWidth(0.4);
-        doc.line(margin, sy, doc.internal.pageSize.getWidth() - margin, sy);
-        sy += 12;
+        doc.line(margin, y, pageW - margin, y);
+        y += 12;
         doc.setFont("helvetica", "bold");
         doc.setFontSize(9);
         doc.setTextColor(80);
-        doc.text("Sources réglementaires", margin, sy);
-        sy += 11;
+        doc.text("Sources réglementaires", margin, y);
+        y += 11;
         doc.setFont("helvetica", "italic");
         doc.setFontSize(8);
         doc.setTextColor(120);
         for (const src of sources) {
-          doc.text(`• ${src}`, margin, sy);
-          sy += 11;
+          doc.text(`• ${src}`, margin, y);
+          y += 11;
         }
         doc.setTextColor(0);
         doc.setFont("helvetica", "normal");

@@ -36,6 +36,8 @@ const SOURCE_BY_PREFIX: Record<string, string> = {
   DC01506:
     "Gare temporaire DV BA — Reprise/cessation — DC01506 v2 (30-07-2025)",
   DC01503: "Incidents de circulation — DC01503 v5 (07-10-2025)",
+  DC01505:
+    "DV et voies banalisées — Circulation, secours, VUT, contre-voie — DC01505 v11 (29-09-2025)",
 };
 
 function sourceForReference(reference: string | null): string {

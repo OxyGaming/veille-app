@@ -42,6 +42,8 @@ const SOURCE_BY_PREFIX: Record<string, string> = {
     "Traction électrique — Consignation C / Protection C — DC08043 v4 (07-10-2021)",
   DC01792:
     "Acheminement transports particuliers (TE, MD radioactives, météo extrêmes) — DC01792 v2 (29-09-2025)",
+  DC01556:
+    "Shuntage — Circulations catégorie A, B, C — DC01556 v4 (13-03-2025)",
 };
 
 function sourceForReference(reference: string | null): string {

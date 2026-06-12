@@ -44,6 +44,9 @@ const SOURCE_BY_PREFIX: Record<string, string> = {
     "Acheminement transports particuliers (TE, MD radioactives, météo extrêmes) — DC01792 v2 (29-09-2025)",
   DC01556:
     "Shuntage — Circulations catégorie A, B, C — DC01556 v4 (13-03-2025)",
+  DC01560: "Poste tout Relais à Transit Souple (PRS) — DC01560 v12 (07-01-2026)",
+  DC03858:
+    "Poste d'aiguillage à leviers individuels — DC03858 v2 (26-03-2014)",
 };
 
 function sourceForReference(reference: string | null): string {

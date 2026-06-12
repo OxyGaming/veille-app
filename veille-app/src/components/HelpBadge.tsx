@@ -4,9 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 /**
- * Pastille "?" cliquable affichée à droite d'un libellé de checklist.
- * Au clic (ou tap mobile) → ouvre un petit popover avec la référence
- * réglementaire et un texte d'explication courte.
+ * Pastille "i" cliquable (info) affichée à droite d'un libellé de
+ * checklist. Au clic (ou tap mobile) → ouvre un petit popover avec
+ * la référence réglementaire et un texte d'explication courte.
  *
  *   - N'affiche rien si `reference` ET `text` sont vides → pas de
  *     régression visuelle sur les items historiques sans aide.
@@ -17,6 +17,10 @@ import { createPortal } from "react-dom";
  *     touche Escape.
  *   - Source en pied : "Modes opératoires des agents-circulation —
  *     Tome 1 (13-09-2022)".
+ *
+ * Le symbole "i" (italique) est utilisé plutôt que "?" pour éviter la
+ * confusion avec l'indicateur de statut "Non observé" de la session,
+ * qui utilise déjà "?" pour signaler un item pas encore noté.
  */
 export default function HelpBadge({
   reference,
@@ -110,13 +114,13 @@ export default function HelpBadge({
         aria-label="Aide réglementaire"
         aria-expanded={open}
         title={title}
-        className={`inline-flex items-center justify-center w-5 h-5 align-middle ml-1.5 rounded-full text-[11px] font-bold leading-none transition-colors cursor-pointer ${
+        className={`inline-flex items-center justify-center w-5 h-5 align-middle ml-1.5 rounded-full text-[12px] italic font-serif font-bold leading-none transition-colors cursor-pointer ${
           open
             ? "bg-indigo-600 text-white"
             : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
         }`}
       >
-        ?
+        i
       </button>
       {popover}
     </>

@@ -151,7 +151,7 @@ export const TEMPLATE_TRIMESTRIELLE: SeedTemplate = {
 
 export const TEMPLATE_PLANIFIEE: SeedTemplate = {
   slug: "planifiee-eic-ra",
-  name: "Visite planifiée — EIC Rhône-Alpes",
+  name: "Visite planifiée",
   description:
     "Visite planifiée de site (poste, chantier) — référentiel EIC RA RH00003 : poste de travail, incendie, électrique, prévention, coactivité, véhicules, EPI, environnement.",
   pdfLayout: "VEILLE",

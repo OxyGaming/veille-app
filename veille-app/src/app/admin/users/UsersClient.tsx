@@ -32,6 +32,13 @@ export default function UsersClient({
     role: "USER",
     teamId: teams[0]?.id ?? "",
   });
+  const [editing, setEditing] = useState<User | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+  });
+  const [editSaving, setEditSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function create(e: React.FormEvent) {
@@ -68,7 +75,10 @@ export default function UsersClient({
     }
   }
 
-  async function patch(u: User, patch: Partial<User>) {
+  async function patch(
+    u: User,
+    patch: Partial<User> & { password?: string }
+  ) {
     setError(null);
     const res = await fetch(`/api/admin/users/${u.id}`, {
       method: "PATCH",
@@ -89,10 +99,37 @@ export default function UsersClient({
             : x
         )
       );
-    } else {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Erreur");
+      return true;
     }
+    const j = await res.json().catch(() => ({}));
+    setError(j.error ?? "Erreur");
+    return false;
+  }
+
+  function openEdit(u: User) {
+    setError(null);
+    setEditing(u);
+    setEditForm({ name: u.name, email: u.email, password: "" });
+  }
+
+  async function saveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editing) return;
+    setEditSaving(true);
+    const payload: Partial<User> & { password?: string } = {};
+    if (editForm.name.trim() && editForm.name !== editing.name)
+      payload.name = editForm.name.trim();
+    if (editForm.email.trim() && editForm.email !== editing.email)
+      payload.email = editForm.email.trim();
+    if (editForm.password) payload.password = editForm.password;
+    if (Object.keys(payload).length === 0) {
+      setEditSaving(false);
+      setEditing(null);
+      return;
+    }
+    const ok = await patch(editing, payload);
+    setEditSaving(false);
+    if (ok) setEditing(null);
   }
 
   async function hardDelete(u: User) {
@@ -282,13 +319,22 @@ export default function UsersClient({
                   </button>
                 </td>
                 <td className="px-4 py-2.5 text-right">
-                  <button
-                    onClick={() => hardDelete(u)}
-                    className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50"
-                    title="Supprimer définitivement (refusé si traces opérationnelles)"
-                  >
-                    <Icon.Trash className="w-4 h-4" />
-                  </button>
+                  <div className="inline-flex items-center gap-1">
+                    <button
+                      onClick={() => openEdit(u)}
+                      className="text-slate-500 hover:text-indigo-700 p-1 rounded hover:bg-indigo-50"
+                      title="Modifier (nom, email, mot de passe)"
+                    >
+                      <Icon.FileEdit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => hardDelete(u)}
+                      className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50"
+                      title="Supprimer définitivement (refusé si traces opérationnelles)"
+                    >
+                      <Icon.Trash className="w-4 h-4" />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -305,6 +351,92 @@ export default function UsersClient({
           font-size: 14px;
         }
       `}</style>
+
+      {editing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 animate-in"
+          onClick={() => !editSaving && setEditing(null)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={saveEdit}
+            className="bg-white border border-slate-200 rounded-xl shadow-lg w-full max-w-md p-5 animate-slide-up"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-bold">Modifier l&apos;utilisateur</h2>
+                <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                  {editing.email}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2"
+                disabled={editSaving}
+                aria-label="Fermer"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              <Field label="Nom complet">
+                <input
+                  value={editForm.name}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, name: e.target.value })
+                  }
+                  className="input"
+                  required
+                />
+              </Field>
+              <Field label="Email">
+                <input
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, email: e.target.value })
+                  }
+                  className="input"
+                  required
+                />
+              </Field>
+              <Field label="Nouveau mot de passe">
+                <input
+                  type="password"
+                  value={editForm.password}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, password: e.target.value })
+                  }
+                  className="input"
+                  placeholder="Laisser vide pour ne pas changer"
+                  minLength={6}
+                  autoComplete="new-password"
+                />
+              </Field>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="text-sm font-semibold px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-100"
+                disabled={editSaving}
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+                disabled={editSaving}
+              >
+                {editSaving ? "Enregistrement…" : "Enregistrer"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

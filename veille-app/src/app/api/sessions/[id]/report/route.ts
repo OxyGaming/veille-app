@@ -54,6 +54,8 @@ export async function GET(
         status: i.status,
         comment: i.comment,
         gravity: i.checklistItem.gravity ?? po.procedure.gravity,
+        helpReference: i.checklistItem.helpReference,
+        helpText: i.checklistItem.helpText,
         photos: i.photos.map((p) => p.storagePath),
       }))
   );
@@ -87,6 +89,8 @@ export async function GET(
         status: i.status,
         comment: i.comment,
         gravity: i.checklistItem.gravity,
+        helpReference: i.checklistItem.helpReference,
+        helpText: i.checklistItem.helpText,
         photos: i.photos.map((p) => ({
           path: p.storagePath,
           legend: p.legend,

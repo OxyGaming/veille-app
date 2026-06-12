@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { sourceForReference } from "@/lib/regSources";
 
 /**
  * Pastille "i" cliquable (info) affichée à droite d'un libellé de
@@ -24,39 +25,7 @@ import { createPortal } from "react-dom";
  * qui utilise déjà "?" pour signaler un item pas encore noté.
  */
 
-/**
- * Mapping préfixe document → libellé court du référentiel source.
- * Doit rester aligné avec les `helpReference` saisis dans les scripts
- * de patch (préfixe = identifiant du document avant le " §" ou " Fiche").
- */
-const SOURCE_BY_PREFIX: Record<string, string> = {
-  DC03969:
-    "Modes opératoires des agents-circulation — Tome 1 (13-09-2022)",
-  DC07202: "Communications de sécurité — DC07202 v2 (07-10-2025)",
-  DC01506:
-    "Gare temporaire DV BA — Reprise/cessation — DC01506 v2 (30-07-2025)",
-  DC01503: "Incidents de circulation — DC01503 v5 (07-10-2025)",
-  DC01505:
-    "DV et voies banalisées — Circulation, secours, VUT, contre-voie — DC01505 v11 (29-09-2025)",
-  DC08043:
-    "Traction électrique — Consignation C / Protection C — DC08043 v4 (07-10-2021)",
-  DC01792:
-    "Acheminement transports particuliers (TE, MD radioactives, météo extrêmes) — DC01792 v2 (29-09-2025)",
-  DC01556:
-    "Shuntage — Circulations catégorie A, B, C — DC01556 v4 (13-03-2025)",
-  DC01560: "Poste tout Relais à Transit Souple (PRS) — DC01560 v12 (07-01-2026)",
-  DC03858:
-    "Poste d'aiguillage à leviers individuels — DC03858 v2 (26-03-2014)",
-  DC01510:
-    "Service de la circulation (Organisation et méthode) — DC01510 v3 (07-04-2023)",
-};
-
-function sourceForReference(reference: string | null): string {
-  if (!reference) return "Référentiel SNCF Réseau";
-  const m = reference.match(/^([A-Z]{2,}\d+)/);
-  const key = m?.[1];
-  return (key && SOURCE_BY_PREFIX[key]) || "Référentiel SNCF Réseau";
-}
+// Mapping centralisé : voir src/lib/regSources.ts
 export default function HelpBadge({
   reference,
   text,

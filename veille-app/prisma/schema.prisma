@@ -647,6 +647,12 @@ model ChecklistItem {
   requireCommentIfKO Boolean @default(false)
   /// Photo obligatoire si non conforme.
   requirePhotoIfKO   Boolean @default(false)
+  /// Référence réglementaire pointée par la pastille "?" du libellé
+  /// (ex. "DC03969 § 8.4.1"). Affichée dans le popover d'aide.
+  helpReference String?
+  /// Texte d'explication courte (1-3 phrases) affiché dans le popover
+  /// d'aide. Décrit ce qu'on vérifie, pas comment.
+  helpText      String?
   /// % historique de conformité (peut être enrichi plus tard).
   historicConformPct Int?
   historicSampleSize Int?

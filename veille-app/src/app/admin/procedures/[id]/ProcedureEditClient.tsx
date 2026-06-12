@@ -9,6 +9,10 @@ type Item = {
   gravity: number | null;
   requireCommentIfKO: boolean;
   requirePhotoIfKO: boolean;
+  /// Réf. réglementaire pour la pastille "?" (ex. "DC03969 § 8.4.1").
+  helpReference: string | null;
+  /// Texte d'explication affiché dans le popover de la pastille "?".
+  helpText: string | null;
 };
 type Proc = {
   id: string;
@@ -46,6 +50,8 @@ export default function ProcedureEditClient({ proc: initial }: { proc: Proc }) {
           gravity: null,
           requireCommentIfKO: false,
           requirePhotoIfKO: false,
+          helpReference: null,
+          helpText: null,
         },
       ],
     }));
@@ -219,6 +225,32 @@ export default function ProcedureEditClient({ proc: initial }: { proc: Proc }) {
                 />
                 Photo si NC
               </label>
+            </div>
+            <div className="grid gap-2 mt-2 pt-2 border-t border-slate-100">
+              <label className="block text-[11px] font-mono uppercase tracking-wider text-slate-500">
+                Aide « ? » — référence réglementaire
+              </label>
+              <input
+                value={it.helpReference ?? ""}
+                onChange={(e) =>
+                  updateItem(idx, {
+                    helpReference: e.target.value.trim() || null,
+                  })
+                }
+                placeholder="ex. DC03969 § 8.4.1"
+                className="input"
+              />
+              <label className="block text-[11px] font-mono uppercase tracking-wider text-slate-500">
+                Aide « ? » — explication (1–3 phrases)
+              </label>
+              <textarea
+                value={it.helpText ?? ""}
+                onChange={(e) =>
+                  updateItem(idx, { helpText: e.target.value || null })
+                }
+                placeholder="Décrire ce qu'on vérifie, pas comment."
+                className="input min-h-[60px]"
+              />
             </div>
           </li>
         ))}

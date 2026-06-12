@@ -40,6 +40,8 @@ const updateSchema = z.object({
         gravity: z.number().int().min(0).max(4).nullable().optional(),
         requireCommentIfKO: z.boolean().default(false),
         requirePhotoIfKO: z.boolean().default(false),
+        helpReference: z.string().nullable().optional(),
+        helpText: z.string().nullable().optional(),
         isActive: z.boolean().default(true),
       })
     )
@@ -110,6 +112,8 @@ export async function PATCH(
               gravity: it.gravity ?? null,
               requireCommentIfKO: it.requireCommentIfKO,
               requirePhotoIfKO: it.requirePhotoIfKO,
+              helpReference: it.helpReference ?? null,
+              helpText: it.helpText ?? null,
               sortOrder: i,
               isActive: it.isActive,
             },
@@ -122,6 +126,8 @@ export async function PATCH(
               gravity: it.gravity ?? null,
               requireCommentIfKO: it.requireCommentIfKO,
               requirePhotoIfKO: it.requirePhotoIfKO,
+              helpReference: it.helpReference ?? null,
+              helpText: it.helpText ?? null,
               sortOrder: i,
             },
           });

@@ -34,6 +34,8 @@ export default async function EditProcedurePage({
           gravity: i.gravity,
           requireCommentIfKO: i.requireCommentIfKO,
           requirePhotoIfKO: i.requirePhotoIfKO,
+          helpReference: i.helpReference,
+          helpText: i.helpText,
         })),
       }}
     />

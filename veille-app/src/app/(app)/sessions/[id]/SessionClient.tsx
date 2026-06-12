@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import AgentAutocomplete from "@/components/AgentAutocomplete";
+import HelpBadge from "@/components/HelpBadge";
 
 type ChecklistItem = {
   id: string;
@@ -11,6 +12,10 @@ type ChecklistItem = {
   gravity: number | null;
   requireCommentIfKO: boolean;
   requirePhotoIfKO: boolean;
+  /// Référence réglementaire (ex. "DC03969 § 8.4.1") — pastille "?".
+  helpReference: string | null;
+  /// Explication courte affichée dans le popover de la pastille "?".
+  helpText: string | null;
 };
 type ObservationItem = {
   id: string;
@@ -467,6 +472,10 @@ function ItemRow({
         </button>
         <div className="flex-1 text-sm leading-snug">
           {obs.checklistItem.label}
+          <HelpBadge
+            reference={obs.checklistItem.helpReference}
+            text={obs.checklistItem.helpText}
+          />
           {obs.checklistItem.gravity != null && (
             <span className={`gpill g${obs.checklistItem.gravity} ml-2`}>
               G{obs.checklistItem.gravity}

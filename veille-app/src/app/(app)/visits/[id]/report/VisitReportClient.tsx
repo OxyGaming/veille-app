@@ -1312,20 +1312,22 @@ function renderInventory(
         column: { index: number };
         row: { index: number };
       }) => {
-        // Case Date "non périssable" → barrée en diagonale, comme sur la
-        // fiche papier d'origine. On retrouve l'item via row.index puisque
-        // les rows sont alignées sur `eqs`.
+        // Case Date "non périssable" → entièrement noircie. On retrouve
+        // l'item via row.index (les rows sont alignées sur `eqs`).
+        // Petit padding pour préserver la bordure visible du tableau.
         if (data.section !== "body") return;
         if (data.column.index !== 2) return;
         const eq = eqs[data.row.index];
         if (!eq || eq.isPerishable) return;
-        const x1 = data.cell.x + 2;
-        const y1 = data.cell.y + 2;
-        const x2 = data.cell.x + data.cell.width - 2;
-        const y2 = data.cell.y + data.cell.height - 2;
-        doc.setDrawColor(60, 60, 60);
-        doc.setLineWidth(0.8);
-        doc.line(x1, y1, x2, y2);
+        const pad = 0.6;
+        doc.setFillColor(0, 0, 0);
+        doc.rect(
+          data.cell.x + pad,
+          data.cell.y + pad,
+          data.cell.width - 2 * pad,
+          data.cell.height - 2 * pad,
+          "F"
+        );
       },
     });
     // @ts-expect-error lastAutoTable

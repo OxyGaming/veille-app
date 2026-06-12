@@ -15,13 +15,35 @@ import { createPortal } from "react-dom";
  *     entièrement visible quel que soit le conteneur.
  *   - Fermeture : backdrop transparent fullscreen (clic ailleurs) ou
  *     touche Escape.
- *   - Source en pied : "Modes opératoires des agents-circulation —
- *     Tome 1 (13-09-2022)".
+ *   - Source en pied : déduite du préfixe de `reference` via
+ *     `sourceForReference()` (voir mapping ci-dessous). Fallback :
+ *     "Référentiel SNCF Réseau" pour les documents non répertoriés.
  *
  * Le symbole "i" (italique) est utilisé plutôt que "?" pour éviter la
  * confusion avec l'indicateur de statut "Non observé" de la session,
  * qui utilise déjà "?" pour signaler un item pas encore noté.
  */
+
+/**
+ * Mapping préfixe document → libellé court du référentiel source.
+ * Doit rester aligné avec les `helpReference` saisis dans les scripts
+ * de patch (préfixe = identifiant du document avant le " §" ou " Fiche").
+ */
+const SOURCE_BY_PREFIX: Record<string, string> = {
+  DC03969:
+    "Modes opératoires des agents-circulation — Tome 1 (13-09-2022)",
+  DC07202: "Communications de sécurité — DC07202 v2 (07-10-2025)",
+  DC01506:
+    "Gare temporaire DV BA — Reprise/cessation — DC01506 v2 (30-07-2025)",
+  DC01503: "Incidents de circulation — DC01503 v5 (07-10-2025)",
+};
+
+function sourceForReference(reference: string | null): string {
+  if (!reference) return "Référentiel SNCF Réseau";
+  const m = reference.match(/^([A-Z]{2,}\d+)/);
+  const key = m?.[1];
+  return (key && SOURCE_BY_PREFIX[key]) || "Référentiel SNCF Réseau";
+}
 export default function HelpBadge({
   reference,
   text,
@@ -92,7 +114,7 @@ export default function HelpBadge({
                 <span className="block whitespace-pre-line">{text}</span>
               )}
               <span className="block mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400 font-mono">
-                Modes opératoires des agents-circulation — Tome 1 (13-09-2022)
+                {sourceForReference(reference)}
               </span>
             </div>
           </>,

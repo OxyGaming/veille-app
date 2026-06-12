@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser, siteScope } from "@/lib/auth";
 import AgentActionsClient from "@/app/(app)/agents/[id]/AgentActionsClient";
+import SiteEquipmentsClient from "./SiteEquipmentsClient";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
@@ -62,6 +63,11 @@ export default async function SitePage({
       photos: { select: { id: true, storagePath: true, legend: true } },
     },
   });
+  const equipments = await prisma.siteEquipment.findMany({
+    where: { siteId: id, isActive: true },
+    orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { label: "asc" }],
+  });
+  const canEdit = u.role === "ADMIN" || u.role === "EDITOR";
 
   const today = new Date();
   const sevenDays = new Date(today.getTime() + 7 * 24 * 3600 * 1000);
@@ -162,6 +168,22 @@ export default async function SitePage({
       </section>
 
       <div className="grid gap-6 mt-6 lg:grid-cols-2">
+        <SiteEquipmentsClient
+          siteId={site.id}
+          siteName={site.name}
+          canEdit={canEdit}
+          initial={equipments.map((e) => ({
+            id: e.id,
+            label: e.label,
+            category: e.category,
+            expectedQuantity: e.expectedQuantity,
+            isPerishable: e.isPerishable,
+            expirationDate: e.expirationDate?.toISOString() ?? null,
+            notes: e.notes,
+            sortOrder: e.sortOrder,
+            isActive: e.isActive,
+          }))}
+        />
         <section>
           <h2 className="text-base font-bold mb-2.5 flex items-center gap-2">
             <Icon.ClipboardCheck className="w-4 h-4 text-indigo-600" /> Visites

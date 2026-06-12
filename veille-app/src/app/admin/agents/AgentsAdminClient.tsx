@@ -170,12 +170,35 @@ export default function AgentsAdminClient({
                     {a.isVisible ? "Visible" : "Masqué"}
                   </button>
                 </td>
-                <td className="px-4 py-2.5 text-right">
+                <td className="px-4 py-2.5 text-right whitespace-nowrap">
                   <button
                     onClick={() => setEditing(a)}
-                    className="text-xs text-indigo-600 underline"
+                    className="text-xs text-slate-500 hover:text-indigo-700 px-2 py-1 rounded hover:bg-indigo-50"
                   >
                     Équipes
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ok = confirm(
+                        `Supprimer définitivement « ${a.lastName} ${a.firstName} » ?\n\n` +
+                          `Refusé si l'agent a déjà des sessions, vu, actions ou validations.`
+                      );
+                      if (!ok) return;
+                      const res = await fetch(
+                        `/api/admin/agents/${a.id}?mode=hard`,
+                        { method: "DELETE" }
+                      );
+                      if (res.ok) {
+                        setAgents((arr) => arr.filter((x) => x.id !== a.id));
+                      } else {
+                        const j = await res.json().catch(() => ({}));
+                        alert(j.error || "Suppression refusée");
+                      }
+                    }}
+                    className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50"
+                    title="Supprimer définitivement (refusé si données rattachées)"
+                  >
+                    <Icon.Trash className="w-4 h-4 inline" />
                   </button>
                 </td>
               </tr>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Icon } from "@/components/icons";
 
 type Team = {
   id: string;
@@ -52,6 +53,23 @@ export default function TeamsClient({ initial }: { initial: Team[] }) {
       setTeams((arr) =>
         arr.map((x) => (x.id === t.id ? { ...x, isActive: !x.isActive } : x))
       );
+    }
+  }
+
+  async function hardDelete(t: Team) {
+    const ok = confirm(
+      `Supprimer définitivement l'équipe « ${t.name} » ?\n\n` +
+        `Refusé si l'équipe a encore des utilisateurs, agents, sites, sessions ou visites.`
+    );
+    if (!ok) return;
+    const res = await fetch(`/api/admin/teams/${t.id}?mode=hard`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      setTeams((arr) => arr.filter((x) => x.id !== t.id));
+    } else {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error || "Suppression refusée");
     }
   }
 
@@ -146,18 +164,25 @@ export default function TeamsClient({ initial }: { initial: Team[] }) {
                     {t.isActive ? "Active" : "Inactive"}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-right space-x-3">
+                <td className="px-4 py-2.5 text-right whitespace-nowrap">
                   <a
                     href={`/admin/teams/${t.id}`}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+                    className="text-xs text-slate-500 hover:text-indigo-700 px-2 py-1 rounded hover:bg-indigo-50"
                   >
                     Composition
                   </a>
                   <button
                     onClick={() => toggleActive(t)}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+                    className="text-xs text-slate-500 hover:text-indigo-700 px-2 py-1 rounded hover:bg-indigo-50"
                   >
                     {t.isActive ? "Désactiver" : "Activer"}
+                  </button>
+                  <button
+                    onClick={() => hardDelete(t)}
+                    className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50"
+                    title="Supprimer définitivement (refusé si données rattachées)"
+                  >
+                    <Icon.Trash className="w-4 h-4 inline" />
                   </button>
                 </td>
               </tr>

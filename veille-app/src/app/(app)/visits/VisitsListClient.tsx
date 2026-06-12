@@ -47,16 +47,40 @@ const DEFAULT_THEME = {
 
 export default function VisitsListClient({ visits }: { visits: Visit[] }) {
   const [q, setQ] = useState("");
-  const filtered = useMemo(
+  const [list, setList] = useState(visits);
+  const filteredLive = useMemo(
     () =>
-      visits.filter((v) =>
+      list.filter((v) =>
         matchesQuery(
           q,
           `${v.siteName} ${v.siteCode ?? ""} ${v.templateName} ${v.observerName} ${v.status}`
         )
       ),
-    [visits, q]
+    [list, q]
   );
+
+  async function archive(v: Visit) {
+    if (!confirm(`Archiver la visite « ${v.siteName} » ?\n\nElle restera consultable mais n'apparaîtra plus dans la liste courante.`))
+      return;
+    const res = await fetch(`/api/visits/${v.id}?mode=soft`, {
+      method: "DELETE",
+    });
+    if (res.ok) setList((arr) => arr.filter((x) => x.id !== v.id));
+    else alert("Erreur");
+  }
+
+  async function hardDelete(v: Visit) {
+    if (!confirm(`Supprimer DÉFINITIVEMENT la visite « ${v.siteName} » ?\n\nObservations, NCs et participants seront supprimés en cascade. Les actions générées par les NCs seront marquées OBSOLETE.`))
+      return;
+    const res = await fetch(`/api/visits/${v.id}?mode=hard`, {
+      method: "DELETE",
+    });
+    if (res.ok) setList((arr) => arr.filter((x) => x.id !== v.id));
+    else {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error || "Suppression refusée");
+    }
+  }
 
   return (
     <>
@@ -65,12 +89,12 @@ export default function VisitsListClient({ visits }: { visits: Visit[] }) {
           value={q}
           onChange={setQ}
           placeholder="Rechercher (site, modèle, observateur, statut)…"
-          totalCount={visits.length}
-          filteredCount={filtered.length}
+          totalCount={list.length}
+          filteredCount={filteredLive.length}
         />
       </div>
       <ul className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        {filtered.map((v) => {
+        {filteredLive.map((v) => {
           const theme = TEMPLATE_THEME[v.templateSlug] ?? DEFAULT_THEME;
           return (
             <li key={v.id}>
@@ -123,11 +147,37 @@ export default function VisitsListClient({ visits }: { visits: Visit[] }) {
                     Observateur : {v.observerName}
                   </div>
                 </div>
+                <div className="flex flex-col items-center justify-center gap-1 pr-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      archive(v);
+                    }}
+                    className="text-[10px] text-slate-400 hover:text-slate-700 hover:bg-slate-100 px-1.5 py-0.5 rounded"
+                    title="Archiver (consultable plus tard)"
+                  >
+                    Archiver
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      hardDelete(v);
+                    }}
+                    className="text-rose-400 hover:text-rose-700 hover:bg-rose-50 p-1 rounded"
+                    title="Supprimer définitivement (cascade observations, NCs, photos)"
+                  >
+                    <Icon.Trash className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </Link>
             </li>
           );
         })}
-        {filtered.length === 0 && (
+        {filteredLive.length === 0 && (
           <li className="col-span-full text-center py-16 text-slate-500">
             <Icon.ClipboardCheck className="w-10 h-10 mx-auto mb-2 text-slate-300" />
             {visits.length === 0

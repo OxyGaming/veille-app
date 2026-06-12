@@ -40,6 +40,8 @@ const SOURCE_BY_PREFIX: Record<string, string> = {
     "DV et voies banalisées — Circulation, secours, VUT, contre-voie — DC01505 v11 (29-09-2025)",
   DC08043:
     "Traction électrique — Consignation C / Protection C — DC08043 v4 (07-10-2021)",
+  DC01792:
+    "Acheminement transports particuliers (TE, MD radioactives, météo extrêmes) — DC01792 v2 (29-09-2025)",
 };
 
 function sourceForReference(reference: string | null): string {

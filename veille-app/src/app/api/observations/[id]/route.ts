@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createHash } from "crypto";
 import { addMonths } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { requireUser, teamScope } from "@/lib/auth";
+import { requireUser, assertTeamAccess } from "@/lib/auth";
 import { encodeTags, normalizeTag } from "@/lib/tags";
 
 const STATUSES = [
@@ -57,11 +57,7 @@ export async function PATCH(
     },
   });
   if (!obs) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
-  const scope = teamScope(u);
-  if (
-    "teamId" in scope &&
-    scope.teamId !== obs.procedureObservation.session.teamId
-  ) {
+  if (!assertTeamAccess(u, obs.procedureObservation.session.teamId)) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   }
 

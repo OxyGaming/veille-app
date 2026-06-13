@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireUser, teamScope } from "@/lib/auth";
+import { requireUser, assertTeamAccess } from "@/lib/auth";
 
 const schema = z.object({
   comment: z.string().nullable().optional(),
@@ -21,8 +21,7 @@ export async function POST(
   const { id } = await ctx.params;
   const action = await prisma.importedAction.findUnique({ where: { id } });
   if (!action) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
-  const scope = teamScope(u);
-  if ("teamId" in scope && scope.teamId !== action.teamId) {
+  if (!assertTeamAccess(u, action.teamId)) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   }
   let body: unknown;

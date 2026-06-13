@@ -137,6 +137,33 @@ export function teamScope(u: SessionUser): {
 }
 
 /**
+ * Vérifie qu'un utilisateur a accès à une donnée scopée par teamId.
+ *
+ * À utiliser dans les route handlers APRÈS un `findUnique`, pour
+ * autoriser ou refuser l'accès à une entité dont on connaît le teamId :
+ *
+ *   const row = await prisma.foo.findUnique({ where: { id }});
+ *   if (!row) return 404;
+ *   if (!assertTeamAccess(u, row.teamId)) return 403;
+ *
+ * Règles :
+ *  - ADMIN ou viewAllTeams : accès global (true)
+ *  - sinon : accès si teamId ∈ u.teamIds
+ *
+ * Remplace le pattern buggé `teamScope` + comparaison stricte :
+ *   const scope = teamScope(u);
+ *   if ("teamId" in scope && scope.teamId !== row.teamId) → 403
+ * qui renvoyait systématiquement 403 pour les utilisateurs multi-équipes
+ * (scope.teamId est alors `{ in: string[] }`, jamais égal à un string).
+ *
+ * Cf. AUDIT.md §C2 / BACKLOG-V2.md US-1.3.
+ */
+export function assertTeamAccess(u: SessionUser, teamId: string): boolean {
+  if (u.role === "ADMIN" || u.viewAllTeams) return true;
+  return u.teamIds.includes(teamId);
+}
+
+/**
  * Filtre Prisma pour les requêtes sur `Agent` (et tout modèle qui s'y rattache).
  * Un agent est visible si au moins une de ses équipes est dans le scope de
  * l'utilisateur.

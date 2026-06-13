@@ -26,6 +26,9 @@ build/
 *.sqlite
 *.sqlite-journal
 
+# Backups SQLite produits par scripts/backup-sqlite.sh
+backups/
+
 # Logs
 *.log
 npm-debug.log*

@@ -3,9 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import SearchInput, { matchesQuery } from "@/components/SearchInput";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/icons";
 
 type Visit = {
@@ -48,6 +50,7 @@ const DEFAULT_THEME = {
 
 export default function VisitsListClient({ visits }: { visits: Visit[] }) {
   const router = useRouter();
+  const { dialog, ask } = useConfirmDialog();
   const [q, setQ] = useState("");
   const [list, setList] = useState(visits);
   const filteredLive = useMemo(
@@ -62,30 +65,48 @@ export default function VisitsListClient({ visits }: { visits: Visit[] }) {
   );
 
   async function archive(v: Visit) {
-    if (!confirm(`Archiver la visite « ${v.siteName} » ?\n\nElle restera consultable mais n'apparaîtra plus dans la liste courante.`))
-      return;
+    const ok = await ask({
+      title: `Archiver la visite « ${v.siteName} » ?`,
+      description:
+        "Elle restera consultable depuis l'historique mais n'apparaîtra plus dans la liste courante.",
+      confirmLabel: "Archiver",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/visits/${v.id}?mode=soft`, {
       method: "DELETE",
     });
-    if (res.ok) setList((arr) => arr.filter((x) => x.id !== v.id));
-    else alert("Erreur");
+    if (res.ok) {
+      setList((arr) => arr.filter((x) => x.id !== v.id));
+      toast.success("Visite archivée");
+    } else {
+      toast.error("Impossible d'archiver la visite");
+    }
   }
 
   async function hardDelete(v: Visit) {
-    if (!confirm(`Supprimer DÉFINITIVEMENT la visite « ${v.siteName} » ?\n\nObservations, NCs et participants seront supprimés en cascade. Les actions générées par les NCs seront marquées OBSOLETE.`))
-      return;
+    const ok = await ask({
+      title: `Supprimer définitivement la visite « ${v.siteName} » ?`,
+      description:
+        "Observations, NCs et participants seront supprimés en cascade.\nLes actions générées par les NCs seront marquées OBSOLETE.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/visits/${v.id}?mode=hard`, {
       method: "DELETE",
     });
-    if (res.ok) setList((arr) => arr.filter((x) => x.id !== v.id));
-    else {
+    if (res.ok) {
+      setList((arr) => arr.filter((x) => x.id !== v.id));
+      toast.success("Visite supprimée");
+    } else {
       const j = await res.json().catch(() => ({}));
-      alert(j.error || "Suppression refusée");
+      toast.error(j.error || "Suppression refusée");
     }
   }
 
   return (
     <>
+      {dialog}
       <div className="mb-3">
         <SearchInput
           value={q}

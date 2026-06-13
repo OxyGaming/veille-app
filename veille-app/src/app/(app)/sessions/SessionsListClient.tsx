@@ -3,9 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import SearchInput, { matchesQuery } from "@/components/SearchInput";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/icons";
 
 type Session = {
@@ -24,6 +26,7 @@ export default function SessionsListClient({
   sessions: Session[];
 }) {
   const router = useRouter();
+  const { dialog, ask } = useConfirmDialog();
   const [q, setQ] = useState("");
   const [list, setList] = useState(sessions);
   const filtered = useMemo(
@@ -38,23 +41,43 @@ export default function SessionsListClient({
   );
 
   async function archive(s: Session) {
-    if (!confirm(`Archiver la session de ${s.agentName ?? "sans agent"} ?\n\nElle ne sera plus affichée ici mais reste consultable.`)) return;
+    const ok = await ask({
+      title: `Archiver la session de ${s.agentName ?? "sans agent"} ?`,
+      description:
+        "Elle ne sera plus affichée ici mais reste consultable depuis l'historique.",
+      confirmLabel: "Archiver",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/sessions/${s.id}?mode=soft`, { method: "DELETE" });
-    if (res.ok) setList((arr) => arr.filter((x) => x.id !== s.id));
-    else alert("Erreur");
+    if (res.ok) {
+      setList((arr) => arr.filter((x) => x.id !== s.id));
+      toast.success("Session archivée");
+    } else {
+      toast.error("Impossible d'archiver la session");
+    }
   }
   async function hardDelete(s: Session) {
-    if (!confirm(`Supprimer DÉFINITIVEMENT la session de ${s.agentName ?? "sans agent"} ?\n\nRefusé si la session est clôturée ou contient des observations.`)) return;
+    const ok = await ask({
+      title: `Supprimer définitivement la session de ${s.agentName ?? "sans agent"} ?`,
+      description:
+        "Cette action est irréversible. Refusée par le serveur si la session est clôturée ou contient des observations.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/sessions/${s.id}?mode=hard`, { method: "DELETE" });
-    if (res.ok) setList((arr) => arr.filter((x) => x.id !== s.id));
-    else {
+    if (res.ok) {
+      setList((arr) => arr.filter((x) => x.id !== s.id));
+      toast.success("Session supprimée");
+    } else {
       const j = await res.json().catch(() => ({}));
-      alert(j.error || "Suppression refusée");
+      toast.error(j.error || "Suppression refusée");
     }
   }
 
   return (
     <>
+      {dialog}
       <div className="mb-3">
         <SearchInput
           value={q}

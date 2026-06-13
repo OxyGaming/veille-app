@@ -43,6 +43,18 @@
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
   --shadow-md: 0 4px 16px -4px rgba(15, 23, 42, 0.08);
   --shadow-lg: 0 12px 32px -12px rgba(15, 23, 42, 0.18);
+
+  /* Alias de compatibilité — utilisés dans 4 fichiers historiques
+     (offline, not-found, ProcedureEditClient, ReportClient session).
+     Sans ces alias, ces pages rendaient blanc-sur-blanc, bordures
+     absentes, bouton CTA invisible. Cf. AUDIT.md §C5 / DECISIONS-SPRINT1.md commit 1.
+     À refactorer vers --color-* directement quand on touchera ces fichiers. */
+  --steel: var(--color-primary);
+  --surface: var(--color-surface);
+  --muted: var(--color-text-muted);
+  --muted-2: var(--color-text-soft);
+  --line: var(--color-border);
+  --line-d: var(--color-border-strong);
 }
 
 @theme inline {

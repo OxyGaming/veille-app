@@ -57,7 +57,17 @@ const nextConfig: NextConfig = {
   },
 
   async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
+    return [
+      { source: "/(.*)", headers: securityHeaders },
+      // Mitigation tactique US-1.5 — empêche l'indexation par moteurs de
+      // recherche et le suivi des URL d'uploads en attendant le refactor
+      // complet (route streaming + auth + stockage hors `public/`) prévu
+      // Sprint 3. Cf. AUDIT.md §C1 / DECISIONS-SPRINT1.md commit 8.
+      {
+        source: "/uploads/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
+    ];
   },
 };
 

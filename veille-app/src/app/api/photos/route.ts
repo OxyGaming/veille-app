@@ -87,8 +87,12 @@ export async function POST(req: Request) {
   }
 
   // Persistence disque.
+  // Nom de fichier : timestamp + 64 chars hex (256 bits d'entropie).
+  // Mitigation tactique US-1.5 — anti-énumération en attendant le refactor
+  // complet (route streaming auth + stockage hors `public/`) prévu Sprint 3.
+  // Cf. AUDIT.md §C1 / DECISIONS-SPRINT1.md commit 8.
   const buf = Buffer.from(await file.arrayBuffer());
-  const name = `${Date.now()}_${randomBytes(6).toString("hex")}.jpg`;
+  const name = `${Date.now()}_${randomBytes(32).toString("hex")}.jpg`;
   const dir = join(UPLOAD_DIR, "photos");
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, name), buf);

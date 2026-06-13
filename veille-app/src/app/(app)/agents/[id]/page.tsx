@@ -3,6 +3,9 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { agentScope, getSessionUser } from "@/lib/auth";
 import AgentActionsClient from "./AgentActionsClient";
+import RecentValidations, {
+  type ValidationEntry,
+} from "./RecentValidations";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
@@ -240,29 +243,19 @@ export default async function AgentPage({
             <Icon.Check className="w-4 h-4 text-emerald-600" /> Historique des
             validations
           </h2>
-          <ul className="grid gap-2">
-            {validated.map((v) => (
-              <li key={v.id} className="card px-3.5 py-2.5">
-                <div className="text-[11px] font-mono text-slate-500">
-                  {format(v.realizedAt, "PPp", { locale: fr })} ·{" "}
-                  {v.validatedBy.name}
-                </div>
-                <div className="text-sm font-semibold mt-0.5">
-                  {v.action.keyPoint ?? v.action.externalId}
-                </div>
-                {v.comment && (
-                  <div className="text-xs text-slate-600 mt-1">
-                    « {v.comment} »
-                  </div>
-                )}
-              </li>
-            ))}
-            {!validated.length && (
-              <li className="text-xs text-slate-500">
-                Aucune validation pour le moment.
-              </li>
-            )}
-          </ul>
+          <RecentValidations
+            initial={validated.map<ValidationEntry>((v) => ({
+              id: v.id,
+              realizedAt: v.realizedAt.toISOString(),
+              createdAt: v.createdAt.toISOString(),
+              validatedById: v.validatedById,
+              validatedByName: v.validatedBy.name,
+              comment: v.comment,
+              actionLabel: v.action.keyPoint ?? v.action.externalId,
+            }))}
+            currentUserId={u.id}
+            currentUserRole={u.role}
+          />
         </section>
 
         <section className="lg:col-span-2">

@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireUser, teamScope } from "@/lib/auth";
+import { requireUser, teamScope, assertTeamAccess } from "@/lib/auth";
+
+/**
+ * Fenêtre d'annulation libre d'une validation depuis l'UI (US-1.12).
+ * Au-delà, l'icône poubelle disparaît côté agent/[id], et le DELETE
+ * renvoie 410 — sauf si ADMIN, qui garde la possibilité de corriger
+ * en cas d'erreur opérationnelle.
+ */
+const CANCEL_WINDOW_MS = 5 * 60 * 1000;
 
 const patchSchema = z.object({
   comment: z.string().nullable().optional(),
@@ -62,7 +70,12 @@ export async function PATCH(
  * Annulation d'une validation. Repasse l'action correspondante en ACTIVE si
  * c'était la seule validation, et la libère.
  *
- * Réservé ADMIN/EDITOR.
+ * Règles d'autorisation (US-1.12) :
+ *  - USER     : peut annuler sa propre validation pendant 5 min.
+ *  - EDITOR   : peut annuler toute validation de son périmètre pendant 5 min.
+ *  - ADMIN    : peut annuler à tout moment (filet de sécurité opérationnel).
+ *
+ * Toute annulation est tracée dans `AuditLog` (action = "ACTION_VALIDATION_CANCELLED").
  */
 export async function DELETE(
   _req: Request,
@@ -74,16 +87,41 @@ export async function DELETE(
   } catch (r) {
     return r as Response;
   }
-  if (u.role !== "ADMIN" && u.role !== "EDITOR") {
-    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
-  }
   const { id } = await ctx.params;
-  const existing = await prisma.actionValidation.findFirst({
-    where: { id, ...teamScope(u) },
-    select: { id: true, actionId: true },
+  const existing = await prisma.actionValidation.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      actionId: true,
+      teamId: true,
+      validatedById: true,
+      createdAt: true,
+    },
   });
   if (!existing)
     return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+
+  // Périmètre équipe — refus systématique si la validation n'est pas dans
+  // les équipes de l'utilisateur (sauf ADMIN ou viewAllTeams).
+  if (!assertTeamAccess(u, existing.teamId)) {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+
+  // USER : doit être l'auteur de sa propre validation. EDITOR/ADMIN peuvent
+  // corriger l'erreur d'autrui dans leur périmètre.
+  if (u.role === "USER" && existing.validatedById !== u.id) {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+
+  // Fenêtre de 5 min pour USER + EDITOR. ADMIN bypass pour filet opérationnel.
+  const ageMs = Date.now() - existing.createdAt.getTime();
+  if (u.role !== "ADMIN" && ageMs > CANCEL_WINDOW_MS) {
+    return NextResponse.json(
+      { error: "Délai d'annulation dépassé (5 minutes)" },
+      { status: 410 }
+    );
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.actionValidation.delete({ where: { id } });
     // Si l'action n'a plus de validation, on la repasse en ACTIVE.
@@ -98,6 +136,20 @@ export async function DELETE(
         });
       }
     }
+    await tx.auditLog.create({
+      data: {
+        userId: u.id,
+        userEmail: u.email,
+        action: "ACTION_VALIDATION_CANCELLED",
+        entity: "ActionValidation",
+        entityId: id,
+        details: JSON.stringify({
+          actionId: existing.actionId,
+          ageMs,
+          byAuthor: existing.validatedById === u.id,
+        }),
+      },
+    });
   });
   return NextResponse.json({ ok: true });
 }

@@ -2,9 +2,11 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 
 type Item = { id: string; label: string };
 type Section = {
@@ -60,6 +62,7 @@ const STATUS_SECTION = [
 
 export default function VisitClient({ visit: initial }: { visit: Visit }) {
   const router = useRouter();
+  const { dialog, ask } = useConfirmDialog();
   const [visit, setVisit] = useState<Visit>(initial);
   const completed = visit.status === "completed" || visit.status === "archived";
 
@@ -107,7 +110,7 @@ export default function VisitClient({ visit: initial }: { visit: Visit }) {
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j.error || "Erreur");
+      toast.error(j.error || "Erreur");
       return;
     }
     const updated: Observation = await res.json();
@@ -188,7 +191,13 @@ export default function VisitClient({ visit: initial }: { visit: Visit }) {
     }
   }
   async function removeNC(ncId: string) {
-    if (!confirm("Supprimer cette non-conformité ?")) return;
+    const ok = await ask({
+      title: "Supprimer cette non-conformité ?",
+      description: "Cette action est irréversible.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(
       `/api/visits/${visit.id}/non-conformities/${ncId}`,
       { method: "DELETE" }
@@ -198,12 +207,20 @@ export default function VisitClient({ visit: initial }: { visit: Visit }) {
         ...v,
         nonConformities: v.nonConformities.filter((n) => n.id !== ncId),
       }));
+      toast.success("Non-conformité supprimée");
+    } else {
+      toast.error("Impossible de supprimer la non-conformité");
     }
   }
 
   async function finish() {
-    if (!confirm("Clôturer la visite ? Les saisies seront verrouillées."))
-      return;
+    const ok = await ask({
+      title: "Clôturer la visite ?",
+      description:
+        "Les saisies seront verrouillées après clôture.\nVous pourrez toujours consulter le rapport généré.",
+      confirmLabel: "Clôturer",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/visits/${visit.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -211,11 +228,15 @@ export default function VisitClient({ visit: initial }: { visit: Visit }) {
     });
     if (res.ok) {
       router.push(`/visits/${visit.id}/report`);
+    } else {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || "Impossible de clôturer la visite");
     }
   }
 
   return (
     <div className="pb-32">
+      {dialog}
       <header className="sticky top-0 z-20 bg-white border-b border-slate-200 no-print">
         <div className="px-4 lg:px-8 py-3 flex items-center gap-3">
           <button

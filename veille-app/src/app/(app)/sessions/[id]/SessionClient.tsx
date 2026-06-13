@@ -2,9 +2,11 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Icon } from "@/components/icons";
 import AgentAutocomplete from "@/components/AgentAutocomplete";
 import HelpBadge from "@/components/HelpBadge";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 
 type ChecklistItem = {
   id: string;
@@ -69,6 +71,7 @@ export default function SessionClient({
   agents: { id: string; label: string }[];
 }) {
   const router = useRouter();
+  const { dialog, ask } = useConfirmDialog();
   const [session, setSession] = useState<Session>(initial);
   const [saving, setSaving] = useState<string | null>(null);
   const [generalOpen, setGeneralOpen] = useState(false);
@@ -102,7 +105,7 @@ export default function SessionClient({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j.error || "Erreur lors de l'enregistrement.");
+        toast.error(j.error || "Erreur lors de l'enregistrement.");
         return;
       }
       const updated = await res.json();
@@ -171,17 +174,29 @@ export default function SessionClient({
   }
 
   async function finishSession() {
-    if (!confirm("Clôturer la session ? Les saisies seront verrouillées.")) return;
+    const ok = await ask({
+      title: "Clôturer la session ?",
+      description:
+        "Les saisies seront verrouillées après clôture.\nVous pourrez toujours consulter le rapport généré.",
+      confirmLabel: "Clôturer",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/sessions/${session.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "completed" }),
     });
-    if (res.ok) router.push(`/sessions/${session.id}/report`);
+    if (res.ok) {
+      router.push(`/sessions/${session.id}/report`);
+    } else {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || "Impossible de clôturer la session");
+    }
   }
 
   return (
     <div className="pb-32">
+      {dialog}
       {/* Header session */}
       <header className="sticky top-0 lg:top-0 z-20 bg-white border-b border-slate-200 no-print">
         <div className="px-4 lg:px-8 py-3 flex items-center gap-3">
@@ -561,7 +576,7 @@ function PhotoControls({
         const p = await res.json();
         setPhotos((ps) => [...ps, p]);
       } else {
-        alert("Échec de l'upload");
+        toast.error("Échec de l'upload");
       }
     } finally {
       setUploading(false);

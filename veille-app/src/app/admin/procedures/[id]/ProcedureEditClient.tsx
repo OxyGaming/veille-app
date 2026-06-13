@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 type Item = {
   id?: string;
@@ -82,18 +83,19 @@ export default function ProcedureEditClient({ proc: initial }: { proc: Proc }) {
         }),
       });
       if (!res.ok) {
-        const j = await res.json();
-        alert(j.error || "Erreur");
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error || "Erreur");
         return;
       }
       if (isCreating) {
         const created = await res.json();
+        toast.success("Procédure créée");
         // Redirection vers la page d'édition pour continuer le paramétrage.
         router.replace(`/admin/procedures/${created.id}`);
         return;
       }
       router.refresh();
-      alert("Enregistré.");
+      toast.success("Enregistré");
     } finally {
       setSaving(false);
     }

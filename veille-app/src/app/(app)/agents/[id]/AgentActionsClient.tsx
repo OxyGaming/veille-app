@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { toast } from "sonner";
 import { addMonths, format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
@@ -85,12 +86,13 @@ export default function AgentActionsClient({
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
-          alert(j.error || "Erreur de validation");
+          toast.error(j.error || "Erreur de validation");
           return;
         }
       }
       setActions((arr) => arr.filter((x) => x.id !== validating.id));
       setValidating(null);
+      toast.success("Action validée");
       router.refresh();
     } finally {
       setBusy(false);

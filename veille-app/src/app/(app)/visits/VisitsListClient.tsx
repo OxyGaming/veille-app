@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import SearchInput, { matchesQuery } from "@/components/SearchInput";
@@ -46,6 +47,7 @@ const DEFAULT_THEME = {
 };
 
 export default function VisitsListClient({ visits }: { visits: Visit[] }) {
+  const router = useRouter();
   const [q, setQ] = useState("");
   const [list, setList] = useState(visits);
   const filteredLive = useMemo(
@@ -146,6 +148,20 @@ export default function VisitsListClient({ visits }: { visits: Visit[] }) {
                   <div className="text-[10px] text-slate-400 mt-1.5">
                     Observateur : {v.observerName}
                   </div>
+                  {v.status === "completed" && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        router.push(`/visits/${v.id}/report`);
+                      }}
+                      className="mt-2 w-full text-xs font-semibold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-100 bg-indigo-50 border border-indigo-100 rounded-md px-3 py-2 flex items-center justify-center gap-1.5"
+                    >
+                      <Icon.FileText className="w-3.5 h-3.5" />
+                      Voir le rapport
+                    </button>
+                  )}
                 </div>
                 <div className="flex flex-col items-center justify-center gap-1 pr-2">
                   <button

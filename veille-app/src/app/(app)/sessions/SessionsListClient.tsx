@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import SearchInput, { matchesQuery } from "@/components/SearchInput";
@@ -22,6 +23,7 @@ export default function SessionsListClient({
 }: {
   sessions: Session[];
 }) {
+  const router = useRouter();
   const [q, setQ] = useState("");
   const [list, setList] = useState(sessions);
   const filtered = useMemo(
@@ -123,6 +125,20 @@ export default function SessionsListClient({
                   <Icon.Trash className="w-3.5 h-3.5" />
                 </button>
               </div>
+              {s.status === "completed" && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    router.push(`/sessions/${s.id}/report`);
+                  }}
+                  className="mt-2 w-full text-xs font-semibold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-100 bg-indigo-50 border border-indigo-100 rounded-md px-3 py-2 flex items-center justify-center gap-1.5"
+                >
+                  <Icon.FileText className="w-3.5 h-3.5" />
+                  Voir le rapport
+                </button>
+              )}
             </Link>
           </li>
         ))}

@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Icon } from "@/components/icons";
 import { matchesQuery } from "@/components/SearchInput";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 
 type Contact = {
   id: string;
@@ -40,6 +42,7 @@ export default function ContactsClient({
   initial: Contact[];
   teams: { id: string; name: string }[];
 }) {
+  const { dialog, ask } = useConfirmDialog();
   const [contacts, setContacts] = useState(initial);
   const [editing, setEditing] = useState<Contact | null>(null);
   const [q, setQ] = useState("");
@@ -82,15 +85,27 @@ export default function ContactsClient({
   }
 
   async function remove(c: Contact) {
-    if (!confirm(`Supprimer le contact « ${c.name} » ?`)) return;
+    const ok = await ask({
+      title: `Supprimer le contact « ${c.name} » ?`,
+      description: "Cette action est irréversible.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/admin/contacts?id=${c.id}`, {
       method: "DELETE",
     });
-    if (res.ok) setContacts((arr) => arr.filter((x) => x.id !== c.id));
+    if (res.ok) {
+      setContacts((arr) => arr.filter((x) => x.id !== c.id));
+      toast.success("Contact supprimé");
+    } else {
+      toast.error("Impossible de supprimer le contact");
+    }
   }
 
   return (
     <div>
+      {dialog}
       <div className="mb-4">
         <h1 className="text-2xl font-bold">Contacts</h1>
         <p className="text-sm text-slate-500 mt-0.5">

@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Icon } from "@/components/icons";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 
 type Agent = {
   id: string;
@@ -24,6 +26,7 @@ export default function AgentsAdminClient({
   initial: Agent[];
   teams: Team[];
 }) {
+  const { dialog, ask } = useConfirmDialog();
   const [agents, setAgents] = useState(initial);
   const [query, setQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
@@ -76,6 +79,7 @@ export default function AgentsAdminClient({
 
   return (
     <div>
+      {dialog}
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
@@ -179,10 +183,13 @@ export default function AgentsAdminClient({
                   </button>
                   <button
                     onClick={async () => {
-                      const ok = confirm(
-                        `Supprimer définitivement « ${a.lastName} ${a.firstName} » ?\n\n` +
-                          `Refusé si l'agent a déjà des sessions, vu, actions ou validations.`
-                      );
+                      const ok = await ask({
+                        title: `Supprimer définitivement « ${a.lastName} ${a.firstName} » ?`,
+                        description:
+                          "Refusé par le serveur si l'agent a déjà des sessions, vu, actions ou validations.",
+                        confirmLabel: "Supprimer",
+                        tone: "danger",
+                      });
                       if (!ok) return;
                       const res = await fetch(
                         `/api/admin/agents/${a.id}?mode=hard`,
@@ -190,9 +197,10 @@ export default function AgentsAdminClient({
                       );
                       if (res.ok) {
                         setAgents((arr) => arr.filter((x) => x.id !== a.id));
+                        toast.success("Agent supprimé");
                       } else {
                         const j = await res.json().catch(() => ({}));
-                        alert(j.error || "Suppression refusée");
+                        toast.error(j.error || "Suppression refusée");
                       }
                     }}
                     className="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50"

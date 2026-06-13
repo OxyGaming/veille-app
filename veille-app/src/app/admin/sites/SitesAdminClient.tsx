@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { Icon } from "@/components/icons";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 
 type Site = {
   id: string;
@@ -26,6 +28,7 @@ export default function SitesAdminClient({
   initial: Site[];
   teams: Team[];
 }) {
+  const { dialog, ask } = useConfirmDialog();
   const [sites, setSites] = useState(initial);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
@@ -57,20 +60,23 @@ export default function SitesAdminClient({
 
   async function hardDelete(s: Site) {
     setError(null);
-    const ok = confirm(
-      `Supprimer définitivement « ${s.name} » ?\n\n` +
-        `Refusé si le site a déjà des visites, actions, validations ou vu/notes. ` +
-        `Pour ne plus le voir sans casser l'historique, utilise le toggle Visibilité.`
-    );
+    const ok = await ask({
+      title: `Supprimer définitivement « ${s.name} » ?`,
+      description:
+        "Refusé par le serveur si le site a déjà des visites, actions, validations ou vu/notes.\nPour le masquer sans casser l'historique, utilisez plutôt le toggle Visibilité.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
     if (!ok) return;
     const res = await fetch(`/api/admin/sites/${s.id}?mode=hard`, {
       method: "DELETE",
     });
     if (res.ok) {
       setSites((arr) => arr.filter((x) => x.id !== s.id));
+      toast.success("Site supprimé");
     } else {
       const j = await res.json().catch(() => ({}));
-      setError(j.error || "Suppression refusée");
+      toast.error(j.error || "Suppression refusée");
     }
   }
 
@@ -159,6 +165,7 @@ export default function SitesAdminClient({
 
   return (
     <div>
+      {dialog}
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Sites</h1>

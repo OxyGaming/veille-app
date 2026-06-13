@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { Icon } from "@/components/icons";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 
 type Team = {
   id: string;
@@ -14,6 +16,7 @@ type Team = {
 };
 
 export default function TeamsClient({ initial }: { initial: Team[] }) {
+  const { dialog, ask } = useConfirmDialog();
   const [teams, setTeams] = useState(initial);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", code: "" });
@@ -57,24 +60,29 @@ export default function TeamsClient({ initial }: { initial: Team[] }) {
   }
 
   async function hardDelete(t: Team) {
-    const ok = confirm(
-      `Supprimer définitivement l'équipe « ${t.name} » ?\n\n` +
-        `Refusé si l'équipe a encore des utilisateurs, agents, sites, sessions ou visites.`
-    );
+    const ok = await ask({
+      title: `Supprimer définitivement l'équipe « ${t.name} » ?`,
+      description:
+        "Refusé par le serveur si l'équipe a encore des utilisateurs, agents, sites, sessions ou visites.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
     if (!ok) return;
     const res = await fetch(`/api/admin/teams/${t.id}?mode=hard`, {
       method: "DELETE",
     });
     if (res.ok) {
       setTeams((arr) => arr.filter((x) => x.id !== t.id));
+      toast.success("Équipe supprimée");
     } else {
       const j = await res.json().catch(() => ({}));
-      alert(j.error || "Suppression refusée");
+      toast.error(j.error || "Suppression refusée");
     }
   }
 
   return (
     <div>
+      {dialog}
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">Équipes</h1>

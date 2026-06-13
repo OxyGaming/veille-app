@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Icon } from "@/components/icons";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 
 type LinkItem = {
   id: string;
@@ -91,6 +93,7 @@ export default function LinksAdminClient({
 }: {
   initial: Category[];
 }) {
+  const { dialog, ask } = useConfirmDialog();
   const [cats, setCats] = useState(initial);
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCat, setEditingCat] = useState<Category | null>(null);
@@ -193,21 +196,31 @@ export default function LinksAdminClient({
   }
 
   async function deleteCategory(c: Category) {
-    if (
-      !confirm(
-        `Supprimer la thématique « ${c.name} » et ses ${c.links.length} lien(s) ?`
-      )
-    )
-      return;
+    const ok = await ask({
+      title: `Supprimer la thématique « ${c.name} » ?`,
+      description: `Les ${c.links.length} lien(s) rattaché(s) seront supprimés en cascade.`,
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/admin/links/${c.id}?kind=category`, {
       method: "DELETE",
     });
     if (res.ok) {
       setCats((arr) => arr.filter((x) => x.id !== c.id));
+      toast.success("Thématique supprimée");
+    } else {
+      toast.error("Impossible de supprimer la thématique");
     }
   }
   async function deleteLink(l: LinkItem) {
-    if (!confirm(`Supprimer le lien « ${l.label} » ?`)) return;
+    const ok = await ask({
+      title: `Supprimer le lien « ${l.label} » ?`,
+      description: "Cette action est irréversible.",
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/admin/links/${l.id}?kind=link`, {
       method: "DELETE",
     });
@@ -219,6 +232,9 @@ export default function LinksAdminClient({
             : c
         )
       );
+      toast.success("Lien supprimé");
+    } else {
+      toast.error("Impossible de supprimer le lien");
     }
   }
 
@@ -250,6 +266,7 @@ export default function LinksAdminClient({
 
   return (
     <div>
+      {dialog}
       <div className="mb-4">
         <h1 className="text-2xl font-bold">Liens utiles</h1>
         <p className="text-sm text-slate-500 mt-0.5">

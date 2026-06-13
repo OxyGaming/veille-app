@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { Icon } from "@/components/icons";
+import { useConfirmDialog } from "@/components/ConfirmDialog";
 
 type User = {
   id: string;
@@ -23,6 +25,7 @@ export default function UsersClient({
   initial: User[];
   teams: { id: string; name: string }[];
 }) {
+  const { dialog, ask } = useConfirmDialog();
   const [users, setUsers] = useState(initial);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
@@ -134,26 +137,30 @@ export default function UsersClient({
 
   async function hardDelete(u: User) {
     setError(null);
-    const ok = confirm(
-      `Supprimer définitivement « ${u.name} » (${u.email}) ?\n\n` +
-        `Cette action est irréversible. Elle est refusée si l'utilisateur a ` +
-        `créé des sessions, observations, validations, vu ou visites — dans ` +
-        `ce cas, désactivez-le plutôt.`
-    );
+    const ok = await ask({
+      title: `Supprimer définitivement « ${u.name} » ?`,
+      description:
+        `Email : ${u.email}\n\n` +
+        `Cette action est irréversible. Elle est refusée si l'utilisateur a déjà créé des sessions, observations, validations, vu ou visites — dans ce cas, désactivez-le plutôt.`,
+      confirmLabel: "Supprimer",
+      tone: "danger",
+    });
     if (!ok) return;
     const res = await fetch(`/api/admin/users/${u.id}?mode=hard`, {
       method: "DELETE",
     });
     if (res.ok) {
       setUsers((arr) => arr.filter((x) => x.id !== u.id));
+      toast.success("Utilisateur supprimé");
     } else {
       const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Suppression refusée");
+      toast.error(j.error ?? "Suppression refusée");
     }
   }
 
   return (
     <div>
+      {dialog}
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">Utilisateurs</h1>

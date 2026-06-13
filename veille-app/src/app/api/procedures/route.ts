@@ -19,11 +19,11 @@ export async function GET() {
 
 const createSchema = z.object({
   domain: z.string().min(1),
-  theme: z.string().optional(),
+  theme: z.string().optional().nullable(),
   title: z.string().min(1),
   gravity: z.number().int().min(0).max(4).default(3),
   documents: z.array(z.string()).default([]),
-  risk: z.string().optional(),
+  risk: z.string().optional().nullable(),
   requireGeneralComment: z.boolean().default(false),
   items: z
     .array(
@@ -32,6 +32,8 @@ const createSchema = z.object({
         gravity: z.number().int().min(0).max(4).nullable().optional(),
         requireCommentIfKO: z.boolean().default(false),
         requirePhotoIfKO: z.boolean().default(false),
+        helpReference: z.string().nullable().optional(),
+        helpText: z.string().nullable().optional(),
       })
     )
     .default([]),
@@ -60,11 +62,11 @@ export async function POST(req: Request) {
   const proc = await prisma.procedure.create({
     data: {
       domain: data.domain,
-      theme: data.theme,
+      theme: data.theme ?? undefined,
       title: data.title,
       gravity: data.gravity,
       documents: JSON.stringify(data.documents),
-      risk: data.risk,
+      risk: data.risk ?? undefined,
       requireGeneralComment: data.requireGeneralComment,
       items: {
         create: data.items.map((it, i) => ({
@@ -72,6 +74,8 @@ export async function POST(req: Request) {
           gravity: it.gravity ?? null,
           requireCommentIfKO: it.requireCommentIfKO,
           requirePhotoIfKO: it.requirePhotoIfKO,
+          helpReference: it.helpReference ?? null,
+          helpText: it.helpText ?? null,
           sortOrder: i,
         })),
       },

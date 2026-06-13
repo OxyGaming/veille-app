@@ -15,7 +15,8 @@ type Item = {
   helpText: string | null;
 };
 type Proc = {
-  id: string;
+  /// `null` = mode création (POST). Sinon, mode édition (PATCH).
+  id: string | null;
   domain: string;
   theme: string | null;
   title: string;
@@ -30,6 +31,7 @@ export default function ProcedureEditClient({ proc: initial }: { proc: Proc }) {
   const router = useRouter();
   const [proc, setProc] = useState(initial);
   const [saving, setSaving] = useState(false);
+  const isCreating = proc.id === null;
 
   function update(patch: Partial<Proc>) {
     setProc((p) => ({ ...p, ...patch }));
@@ -63,8 +65,10 @@ export default function ProcedureEditClient({ proc: initial }: { proc: Proc }) {
   async function save() {
     setSaving(true);
     try {
-      const res = await fetch(`/api/procedures/${proc.id}`, {
-        method: "PATCH",
+      const url = isCreating ? `/api/procedures` : `/api/procedures/${proc.id}`;
+      const method = isCreating ? "POST" : "PATCH";
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           domain: proc.domain,
@@ -82,6 +86,12 @@ export default function ProcedureEditClient({ proc: initial }: { proc: Proc }) {
         alert(j.error || "Erreur");
         return;
       }
+      if (isCreating) {
+        const created = await res.json();
+        // Redirection vers la page d'édition pour continuer le paramétrage.
+        router.replace(`/admin/procedures/${created.id}`);
+        return;
+      }
       router.refresh();
       alert("Enregistré.");
     } finally {
@@ -92,13 +102,15 @@ export default function ProcedureEditClient({ proc: initial }: { proc: Proc }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold">Modifier la procédure</h1>
+        <h1 className="text-xl font-bold">
+          {isCreating ? "Nouvelle procédure" : "Modifier la procédure"}
+        </h1>
         <button
           onClick={save}
-          disabled={saving}
-          className="bg-[var(--steel)] text-white font-semibold px-4 py-2 rounded-lg"
+          disabled={saving || !proc.domain.trim() || !proc.title.trim()}
+          className="bg-[var(--steel)] text-white font-semibold px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {saving ? "…" : "Enregistrer"}
+          {saving ? "…" : isCreating ? "Créer" : "Enregistrer"}
         </button>
       </div>
 

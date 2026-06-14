@@ -45,6 +45,10 @@ export type SessionUser = {
   /** Toutes les équipes auxquelles l'utilisateur appartient (via UserTeam). */
   teamIds: string[];
   viewAllTeams: boolean;
+  /** Sprint 6 C2 — préférence ADMIN de périmètre (null pour les autres rôles). */
+  adminScopeMode: string | null;
+  /** Sprint 6 C2 — équipe choisie quand adminScopeMode = "TEAM". */
+  adminTeamId: string | null;
 };
 
 export async function getSessionUser(): Promise<SessionUser | null> {
@@ -62,6 +66,8 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       teamId: true,
       viewAllTeams: true,
       isActive: true,
+      adminScopeMode: true,
+      adminTeamId: true,
       memberships: { select: { teamId: true } },
     },
   });
@@ -79,6 +85,8 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     teamId: user.teamId,
     teamIds,
     viewAllTeams: user.viewAllTeams,
+    adminScopeMode: user.adminScopeMode,
+    adminTeamId: user.adminTeamId,
   };
 }
 

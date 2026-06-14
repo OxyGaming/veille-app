@@ -18,6 +18,8 @@ function makeUser(overrides: Partial<SessionUser> = {}): SessionUser {
     teamId: null,
     teamIds: [],
     viewAllTeams: false,
+    adminScopeMode: null,
+    adminTeamId: null,
     ...overrides,
   };
 }

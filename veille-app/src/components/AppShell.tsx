@@ -3,14 +3,22 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { AdminScopeSelector } from "@/components/AdminScopeSelector";
 import { Icon } from "@/components/icons";
 import { NotificationsBell } from "@/components/NotificationsBell";
+import type { ResolvedAdminScope } from "@/lib/admin-scope";
 
 type Props = {
   user: { id: string; name: string; role: string; teamId: string | null };
   children: React.ReactNode;
   todayEnabled?: boolean;
   echeancesEnabled?: boolean;
+  /** Sprint 6 C4 — null pour USER/EDITOR, scope résolu pour ADMIN. */
+  adminScope?: ResolvedAdminScope | null;
+  /** Sprint 6 C4 — liste des équipes pour le dropdown TEAM (ADMIN). */
+  adminTeams?: { id: string; name: string }[];
+  /** Sprint 6 C4 — true si l'ADMIN a au moins une membership. */
+  adminHasMemberships?: boolean;
 };
 
 const TODAY_ITEM = { href: "/today", label: "Aujourd'hui", icon: Icon.Home };
@@ -50,6 +58,9 @@ export default function AppShell({
   children,
   todayEnabled = false,
   echeancesEnabled = false,
+  adminScope = null,
+  adminTeams = [],
+  adminHasMemberships = false,
 }: Props) {
   const isAdmin = user.role === "ADMIN";
   const isEditor = isAdmin || user.role === "EDITOR";
@@ -192,6 +203,16 @@ export default function AppShell({
               <div className="text-[10px] font-mono text-slate-400 truncate">
                 {user.role}
               </div>
+              {isAdmin && adminScope && (
+                <div className="mt-1.5">
+                  <AdminScopeSelector
+                    scope={adminScope}
+                    teams={adminTeams}
+                    hasMemberships={adminHasMemberships}
+                    appearance="sidebar"
+                  />
+                </div>
+              )}
             </div>
             <NotificationsBell appearance="sidebar" />
             <button
@@ -237,6 +258,14 @@ export default function AppShell({
                 <span className="bg-white/20 px-1 rounded">{pendingCount}</span>
               )}
             </div>
+            {isAdmin && adminScope && (
+              <AdminScopeSelector
+                scope={adminScope}
+                teams={adminTeams}
+                hasMemberships={adminHasMemberships}
+                appearance="header"
+              />
+            )}
             {isEditor && (
               <Link
                 href="/admin"

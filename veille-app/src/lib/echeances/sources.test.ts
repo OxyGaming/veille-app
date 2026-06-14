@@ -43,6 +43,8 @@ const USER: SessionUser = {
   teamId: "tA",
   teamIds: ["tA", "tB"],
   viewAllTeams: false,
+  adminScopeMode: null,
+  adminTeamId: null,
 };
 
 // ─── Visites ────────────────────────────────────────────────────────────────

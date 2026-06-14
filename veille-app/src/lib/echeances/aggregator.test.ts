@@ -52,6 +52,8 @@ const EDITOR: SessionUser = {
   teamId: "tA",
   teamIds: ["tA", "tB"],
   viewAllTeams: false,
+  adminScopeMode: null,
+  adminTeamId: null,
 };
 
 const ADMIN: SessionUser = {

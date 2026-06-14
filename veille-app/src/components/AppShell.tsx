@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/icons";
+import { NotificationsBell } from "@/components/NotificationsBell";
 
 type Props = {
   user: { id: string; name: string; role: string; teamId: string | null };
@@ -185,6 +186,7 @@ export default function AppShell({
                 {user.role}
               </div>
             </div>
+            <NotificationsBell appearance="sidebar" />
             <button
               onClick={logout}
               className="text-slate-400 hover:text-white p-1.5 rounded-md hover:bg-white/5"
@@ -236,6 +238,7 @@ export default function AppShell({
                 {isAdmin ? "ADMIN" : "EDIT"}
               </Link>
             )}
+            <NotificationsBell appearance="header" />
             <button
               onClick={logout}
               className="text-slate-300 hover:text-white p-1.5 rounded-md hover:bg-white/5"

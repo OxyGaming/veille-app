@@ -6,6 +6,7 @@ import {
   defaultMessageFor,
   recordActivitySafe,
 } from "@/lib/activityFeed";
+import { notifyActionValidated } from "@/lib/notifications-generators";
 
 const schema = z.object({
   comment: z.string().nullable().optional(),
@@ -119,6 +120,17 @@ export async function POST(
       validationId: result.id,
       realizedAt: realizedAt.toISOString(),
     },
+  });
+
+  // Notification personnelle (Sprint 5 C3) — non-bloquante.
+  await notifyActionValidated({
+    actionId: action.id,
+    agentId: action.agentId,
+    siteId: action.siteId,
+    teamIds: [...teamIdSet],
+    validatorId: u.id,
+    validatorName: u.name,
+    actionLabel: label,
   });
 
   return NextResponse.json(result);

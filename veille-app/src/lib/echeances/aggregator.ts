@@ -24,6 +24,22 @@ import type {
 } from "./types";
 import { groupByUrgency, sortByDueAt } from "./urgency";
 
+/**
+ * Renvoie les items critiques (D13) sur le périmètre de l'utilisateur.
+ * Utilisé par le compteur Today + le générateur de notifications (S5-C3).
+ */
+export async function getCriticalEcheancesItems(
+  user: SessionUser,
+  now: Date,
+): Promise<EcheanceItem[]> {
+  const [visits, equipments, actions] = await Promise.all([
+    getVisitEcheances(user, now),
+    getEquipmentEcheances(user, now),
+    getActionEcheances(user, now),
+  ]);
+  return [...visits, ...equipments, ...actions].filter((i) => i.isCritical);
+}
+
 /** Liste les équipes accessibles à l'utilisateur — peuple le filtre D5. */
 async function getTeamsAvailable(
   user: SessionUser,
@@ -188,10 +204,6 @@ export async function getCriticalEcheancesCount(
   user: SessionUser,
   now: Date,
 ): Promise<number> {
-  const [visits, equipments, actions] = await Promise.all([
-    getVisitEcheances(user, now),
-    getEquipmentEcheances(user, now),
-    getActionEcheances(user, now),
-  ]);
-  return countCriticalEcheances([...visits, ...equipments, ...actions]);
+  const items = await getCriticalEcheancesItems(user, now);
+  return countCriticalEcheances(items);
 }

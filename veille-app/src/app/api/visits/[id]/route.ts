@@ -14,6 +14,7 @@ import {
   defaultMessageFor,
   recordActivitySafe,
 } from "@/lib/activityFeed";
+import { notifyVisitFinished } from "@/lib/notifications-generators";
 
 async function loadScoped(
   id: string,
@@ -154,6 +155,16 @@ export async function PATCH(
         observationsCount: existing.observations.length,
         nonConformitiesCount: ncCount,
       },
+    });
+
+    // Notification personnelle (Sprint 5 C3) — non-bloquante.
+    await notifyVisitFinished({
+      visitId: updated.id,
+      siteId: existing.siteId,
+      siteName: existing.site.name,
+      teamIds,
+      observerId: u.id,
+      observerName: u.name,
     });
   }
 

@@ -14,6 +14,7 @@ import {
   defaultMessageFor,
   recordActivitySafe,
 } from "@/lib/activityFeed";
+import { notifyActionAssigned } from "@/lib/notifications-generators";
 
 /**
  * Création manuelle d'une action depuis la fiche d'un agent.
@@ -137,6 +138,16 @@ export async function POST(
       title,
       dueAt: dueAt.toISOString(),
     },
+  });
+
+  // Notification personnelle (Sprint 5 C3) — non-bloquante.
+  await notifyActionAssigned({
+    actionId: created.id,
+    agentId,
+    agentName,
+    teamIds,
+    authorId: u.id,
+    actionLabel: title,
   });
 
   return NextResponse.json({ id: created.id, externalId, title, tags });

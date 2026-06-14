@@ -6,7 +6,12 @@
  */
 
 import type { SessionUser } from "@/lib/auth";
-import { getCriticalEcheancesCount } from "@/lib/echeances/aggregator";
+import { after } from "next/server";
+import {
+  getCriticalEcheancesCount,
+  getCriticalEcheancesItems,
+} from "@/lib/echeances/aggregator";
+import { notifyEcheancesCriticalForUser } from "@/lib/notifications-generators";
 import { topItems } from "./priority";
 import {
   getAdminAlerts,
@@ -70,8 +75,11 @@ export async function aggregateEditor(
   user: SessionUser,
   now: Date,
 ): Promise<EditorPayload> {
-  // Le compteur d'échéances critiques (D13) est fan-outé en parallèle
-  // — wall-clock identique à l'agrégation existante. Coût série ~0.
+  // Échéances critiques fetchées une seule fois (items + count) puis
+  // diffusées dans :
+  //  - le payload (criticalEcheancesCount, badge Today),
+  //  - le générateur de notifications (Sprint 5 C3) — side-effect
+  //    non-bloquant, dédup par dedupKey.
   const [
     perimeter,
     diagnostic,
@@ -79,7 +87,7 @@ export async function aggregateEditor(
     agents,
     sites,
     activityFeed,
-    criticalEcheancesCount,
+    criticalEcheancesItems,
   ] = await Promise.all([
     getEditorPerimeter(user),
     getEditorDiagnostic(user, now),
@@ -87,8 +95,18 @@ export async function aggregateEditor(
     getAgentsToReview(user, now),
     getSitesWithoutVisit(user, now),
     getTeamActivity(user, now, 8),
-    getCriticalEcheancesCount(user, now),
+    getCriticalEcheancesItems(user, now),
   ]);
+  const criticalEcheancesCount = criticalEcheancesItems.length;
+
+  // Side-effect post-réponse via `after()` (Next 15+) — garantit que la
+  // promise n'est pas annulée à la fin du request lifecycle.
+  after(() => {
+    notifyEcheancesCriticalForUser(user.id, criticalEcheancesItems).catch(
+      () => {},
+    );
+  });
+
   return {
     role: "EDITOR",
     now: now.toISOString(),

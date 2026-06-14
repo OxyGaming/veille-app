@@ -6,6 +6,8 @@ import { TodayHeader } from "./components/TodayHeader";
 import { CurrentWorkCard } from "./components/CurrentWorkCard";
 import { TodoSection } from "./components/TodoSection";
 import { EditorDashboard } from "./components/EditorDashboard";
+import { UserShortcuts } from "./components/UserShortcuts";
+import { RecentActivitySection } from "./components/RecentActivitySection";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,8 @@ export default async function TodayPage() {
         <>
           <CurrentWorkCard current={payload.current} />
           <TodoSection items={payload.todoList} total={payload.todoTotal} />
+          <UserShortcuts />
+          <RecentActivitySection items={payload.recent} />
         </>
       )}
 
@@ -37,7 +41,7 @@ export default async function TodayPage() {
 
 function Placeholder({ role }: { role: "USER" | "EDITOR" | "ADMIN" }) {
   const items: Record<typeof role, string[]> = {
-    USER: ["Raccourcis (C9)", "Dernières activités (C9)"],
+    USER: [],
     EDITOR: [],
     ADMIN: [
       "État système & alertes (C10)",

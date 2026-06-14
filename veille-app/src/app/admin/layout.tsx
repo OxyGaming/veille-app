@@ -3,10 +3,19 @@ import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 
-const SECTIONS = [
+type Section = {
+  href: string;
+  label: string;
+  icon: (typeof Icon)[keyof typeof Icon];
+  /** Si défini, lien visible uniquement pour ces rôles. */
+  roles?: ("ADMIN" | "EDITOR")[];
+};
+
+const SECTIONS: Section[] = [
   { href: "/admin", label: "Tableau de bord", icon: Icon.Home },
   { href: "/admin/procedures", label: "Procédures", icon: Icon.ClipboardCheck },
   { href: "/admin/imports", label: "Imports actions", icon: Icon.Upload },
+  { href: "/admin/actions", label: "Actions (obsolescence)", icon: Icon.Trash, roles: ["ADMIN"] },
   { href: "/admin/teams", label: "Équipes", icon: Icon.Building },
   { href: "/admin/users", label: "Utilisateurs", icon: Icon.Users },
   { href: "/admin/agents", label: "Agents", icon: Icon.User },
@@ -14,6 +23,7 @@ const SECTIONS = [
   { href: "/admin/visit-templates", label: "Modèles de visite", icon: Icon.FileText },
   { href: "/admin/links", label: "Liens utiles", icon: Icon.Link },
   { href: "/admin/contacts", label: "Contacts", icon: Icon.Phone },
+  { href: "/admin/audit", label: "Audit", icon: Icon.Shield, roles: ["ADMIN"] },
 ];
 
 export default async function AdminLayout({
@@ -47,7 +57,9 @@ export default async function AdminLayout({
           </div>
         </div>
         <nav className="p-3 grid grid-cols-2 lg:block gap-1">
-          {SECTIONS.map((s) => (
+          {SECTIONS.filter(
+            (s) => !s.roles || s.roles.includes(u.role as "ADMIN" | "EDITOR"),
+          ).map((s) => (
             <Link
               key={s.href}
               href={s.href}

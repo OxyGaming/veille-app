@@ -41,6 +41,7 @@ model User {
   siteSightings    SiteSighting[]
   icareMarks       IcareEntry[]
   hiddenAgents     UserAgentHidden[]
+  teamActivities   TeamActivity[]
 
   @@index([teamId])
   @@index([isActive])
@@ -127,6 +128,7 @@ model Team {
   visits          SiteVisit[]
   sightings       AgentSighting[]
   siteSightings   SiteSighting[]
+  activities      TeamActivity[]
 }
 
 // ─── Référentiel métier (commun à toutes les équipes) ─────────────────────────
@@ -1002,4 +1004,62 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+}
+
+/// Flux d'activité équipe — alimente l'écran Today EDITOR pour que les
+/// DPX et assistants voient en temps réel ce que l'autre a fait
+/// (sessions terminées, visites, commentaires agent, actions validées,
+/// événements équipement, etc.).
+///
+/// Stratégie multi-équipes (MVP) : DUPLICATION.
+/// Quand un événement concerne un site rattaché à plusieurs équipes,
+/// le helper `recordActivity()` insère une ligne par équipe concernée.
+/// Conséquence : un site dans N équipes produit N lignes pour un même
+/// événement, mais chaque équipe voit son propre flux indépendamment
+/// avec un simple `WHERE teamId = ?`.
+/// Alternative écartée pour le MVP : table d'association
+/// `TeamActivityTeam` (1-N), plus économe en stockage mais plus lourde
+/// à interroger. À revoir si la volumétrie explose.
+///
+/// Append-only V1 : pas de purge automatique pour le moment, pas de
+/// statut « lu », pas de marquage de notification.
+model TeamActivity {
+  id          String   @id @default(cuid())
+  /// Équipe destinataire de l'événement. Dupliqué pour les sites
+  /// multi-équipes (cf. commentaire du modèle).
+  teamId      String
+  createdAt   DateTime @default(now())
+  /// Auteur de l'action métier (null si système : import auto, cron, etc.).
+  actorId     String?
+  /// Nom de l'auteur figé au moment de l'événement — survit à la
+  /// suppression de l'utilisateur ou au changement de nom.
+  actorName   String?
+  /// Type d'événement, ex. SESSION_FINISHED, VISIT_FINISHED,
+  /// AGENT_NOTE, AGENT_SIGHTED, ACTION_CREATED, ACTION_VALIDATED,
+  /// EQUIPMENT_NON_COMPLIANT, EQUIPMENT_REPLACED, EQUIPMENT_ADDED.
+  /// Convention : SCREAMING_SNAKE_CASE. Liste exhaustive maintenue
+  /// dans src/lib/activityFeed.ts (`ACTIVITY_TYPES`).
+  type        String
+  /// Type d'entité cible (session, visit, agent, action, equipment,
+  /// site). Liste maintenue dans `ACTIVITY_ENTITY_TYPES`.
+  entityType  String
+  /// Identifiant Prisma de l'entité cible.
+  entityId    String
+  /// Libellé court figé au moment de l'événement (nom agent, nom site,
+  /// keyPoint action…). Sert si l'entité est supprimée ou renommée.
+  entityLabel String?
+  /// Phrase humaine prête à afficher dans le flux.
+  message     String
+  /// URL de navigation au clic (rapport, fiche, etc.). Si null, la
+  /// ligne reste non cliquable.
+  targetUrl   String?
+  /// Données techniques additionnelles (JSON souple, pas indexé).
+  metadata    String   @default("{}")
+
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  actor       User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([teamId, createdAt])
+  @@index([actorId])
+  @@index([type])
 }

@@ -1,10 +1,13 @@
+import Link from "next/link";
 import type { EditorPayload, WatchlistItem } from "@/lib/today/types";
+import { Icon } from "@/components/icons";
+import { ActivityFeedSection } from "./ActivityFeedSection";
+import { CriticalEcheancesBadge } from "./CriticalEcheancesBadge";
 import { DiagnosticBanner } from "./DiagnosticBanner";
 import { KpiCard } from "./KpiCard";
 import { KpiSection } from "./KpiSection";
-import { WatchlistSection } from "./WatchlistSection";
 import { WatchlistRow } from "./WatchlistRow";
-import { ActivityFeedSection } from "./ActivityFeedSection";
+import { WatchlistSection } from "./WatchlistSection";
 
 type Props = { payload: EditorPayload };
 
@@ -23,6 +26,8 @@ export function EditorDashboard({ payload }: Props) {
   return (
     <>
       <DiagnosticBanner state={d.state} lines={diagnosticLines} />
+
+      <CriticalEcheancesBadge count={payload.criticalEcheancesCount} />
 
       <KpiSection title="Périmètre">
         <KpiCard
@@ -96,6 +101,16 @@ export function EditorDashboard({ payload }: Props) {
           />
         ))}
       </WatchlistSection>
+
+      <div className="px-4 lg:px-8 mt-3">
+        <Link
+          href="/echeances"
+          className="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+        >
+          Voir toutes les échéances
+          <Icon.ChevronRight className="w-4 h-4" aria-hidden />
+        </Link>
+      </div>
 
       <ActivityFeedSection items={payload.activityFeed} now={payload.now} />
     </>

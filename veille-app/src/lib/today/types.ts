@@ -203,6 +203,12 @@ export type EditorPayload = {
   sitesWithoutVisitTotal: number;
   /** Flux d'activité équipe — chronologique DESC, dédupliqué multi-team. */
   activityFeed: TeamActivityEvent[];
+  /**
+   * Compteur transverse d'échéances critiques (D13 Sprint 4).
+   * Calculé en parallèle de l'agrégation EDITOR — pas de coût série.
+   * Cliquable depuis Today EDITOR vers `/echeances?urgency=critical`.
+   */
+  criticalEcheancesCount: number;
 };
 
 /** Alerte système ADMIN. */

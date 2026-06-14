@@ -2,20 +2,44 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks Prisma ────────────────────────────────────────────────────────────
 const findFirst = vi.fn();
+const findMany = vi.fn();
 const update = vi.fn();
+const updateMany = vi.fn();
 const createAudit = vi.fn();
-const transaction = vi.fn(async (ops: unknown[]) => ops);
+
+// Le helper batch utilise la forme interactive `prisma.$transaction(fn)` ;
+// les variantes unitaires utilisent la forme tableau `prisma.$transaction([...])`.
+// Le mock détecte la forme et délègue.
+const txClient = {
+  importedAction: {
+    update: (...a: unknown[]) => update(...a),
+    updateMany: (...a: unknown[]) => updateMany(...a),
+  },
+  auditLog: {
+    create: (...a: unknown[]) => createAudit(...a),
+  },
+};
+const transaction = vi.fn(
+  async (arg: unknown[] | ((tx: typeof txClient) => Promise<unknown>)) => {
+    if (typeof arg === "function") return arg(txClient);
+    return arg;
+  },
+);
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     importedAction: {
       findFirst: (...a: unknown[]) => findFirst(...a),
+      findMany: (...a: unknown[]) => findMany(...a),
       update: (...a: unknown[]) => update(...a),
+      updateMany: (...a: unknown[]) => updateMany(...a),
     },
     auditLog: {
       create: (...a: unknown[]) => createAudit(...a),
     },
-    $transaction: (...a: unknown[]) => transaction(...(a as [unknown[]])),
+    $transaction: (
+      arg: unknown[] | ((tx: typeof txClient) => Promise<unknown>),
+    ) => transaction(arg),
   },
 }));
 
@@ -28,7 +52,11 @@ vi.mock("@/lib/auth", async () => {
 });
 
 import type { SessionUser } from "@/lib/auth";
-import { obsoleteAction } from "./action-obsolete";
+import {
+  BATCH_OBSOLETE_MAX,
+  batchObsoleteActions,
+  obsoleteAction,
+} from "./action-obsolete";
 
 const EDITOR: SessionUser = {
   id: "u_editor",
@@ -63,10 +91,15 @@ const baseRow = {
 
 beforeEach(() => {
   findFirst.mockReset();
+  findMany.mockReset();
   update.mockReset();
+  updateMany.mockReset();
   createAudit.mockReset();
   transaction.mockReset();
-  transaction.mockImplementation(async (ops: unknown[]) => ops);
+  transaction.mockImplementation(async (arg) => {
+    if (typeof arg === "function") return arg(txClient);
+    return arg;
+  });
   actionScopeMock.mockClear();
 });
 
@@ -216,5 +249,129 @@ describe("obsoleteAction — AuditLog payload", () => {
     findFirst.mockResolvedValue({ ...baseRow, localStatus: "OBSOLETE" });
     await obsoleteAction(EDITOR, "act_1");
     expect(createAudit).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Sprint 7 C3 — batchObsoleteActions ─────────────────────────────────────
+
+describe("batchObsoleteActions — dédup / vide / plafond", () => {
+  it("[] → renvoie tout vide sans appel Prisma", async () => {
+    const out = await batchObsoleteActions(EDITOR, []);
+    expect(out).toEqual({
+      ok: true,
+      requested: [],
+      updated: [],
+      skipped: [],
+      forbidden: [],
+      alreadyObsolete: [],
+    });
+    expect(findMany).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("déduplique les IDs reçus avant requête", async () => {
+    findMany.mockResolvedValue([]);
+    await batchObsoleteActions(EDITOR, ["a", "a", "b", "b", "c"]);
+    expect(findMany.mock.calls[0][0].where.id.in.sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("tronque au plafond BATCH_OBSOLETE_MAX", async () => {
+    findMany.mockResolvedValue([]);
+    const many = Array.from({ length: BATCH_OBSOLETE_MAX + 50 }, (_, i) => `a${i}`);
+    const out = await batchObsoleteActions(EDITOR, many);
+    expect(out.requested).toHaveLength(BATCH_OBSOLETE_MAX);
+  });
+});
+
+describe("batchObsoleteActions — répartition des statuts", () => {
+  it("ACTIVE/REPLACED → updated, OBSOLETE → alreadyObsolete, VALIDATED_LOCAL → skipped, hors scope → forbidden", async () => {
+    findMany.mockResolvedValue([
+      { id: "a1", localStatus: "ACTIVE" },
+      { id: "a2", localStatus: "REPLACED" },
+      { id: "a3", localStatus: "OBSOLETE" },
+      { id: "a4", localStatus: "VALIDATED_LOCAL" },
+      // a5 absent → forbidden
+    ]);
+    const out = await batchObsoleteActions(EDITOR, [
+      "a1",
+      "a2",
+      "a3",
+      "a4",
+      "a5",
+    ]);
+    expect(out.updated.sort()).toEqual(["a1", "a2"]);
+    expect(out.alreadyObsolete).toEqual(["a3"]);
+    expect(out.skipped).toEqual(["a4"]);
+    expect(out.forbidden).toEqual(["a5"]);
+    expect(out.requested.sort()).toEqual(["a1", "a2", "a3", "a4", "a5"]);
+  });
+
+  it("scope appliqué (actionScope appelé)", async () => {
+    findMany.mockResolvedValue([]);
+    await batchObsoleteActions(ADMIN, ["x"]);
+    expect(actionScopeMock).toHaveBeenCalledWith(ADMIN);
+    expect(findMany.mock.calls[0][0].where).toMatchObject({
+      id: { in: ["x"] },
+      __scope: true,
+    });
+  });
+});
+
+describe("batchObsoleteActions — transaction et audit", () => {
+  it("updateMany appelé uniquement quand au moins 1 ID est éligible", async () => {
+    findMany.mockResolvedValue([
+      { id: "a1", localStatus: "ACTIVE" },
+      { id: "a2", localStatus: "ACTIVE" },
+    ]);
+    await batchObsoleteActions(EDITOR, ["a1", "a2"]);
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(updateMany.mock.calls[0][0]).toMatchObject({
+      where: { id: { in: ["a1", "a2"] } },
+      data: { localStatus: "OBSOLETE" },
+    });
+  });
+
+  it("updateMany NON appelé si 0 ID éligible (seul l'audit est créé)", async () => {
+    findMany.mockResolvedValue([
+      { id: "a1", localStatus: "VALIDATED_LOCAL" },
+      { id: "a2", localStatus: "OBSOLETE" },
+    ]);
+    await batchObsoleteActions(EDITOR, ["a1", "a2"]);
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(createAudit).toHaveBeenCalledTimes(1);
+  });
+
+  it("AuditLog unique ACTION_BATCH_OBSOLETE avec details JSON complet", async () => {
+    findMany.mockResolvedValue([
+      { id: "a1", localStatus: "ACTIVE" },
+      { id: "a2", localStatus: "OBSOLETE" },
+      { id: "a3", localStatus: "VALIDATED_LOCAL" },
+    ]);
+    await batchObsoleteActions(EDITOR, ["a1", "a2", "a3", "a4"]);
+    expect(createAudit).toHaveBeenCalledTimes(1);
+    const arg = createAudit.mock.calls[0][0];
+    expect(arg.data).toMatchObject({
+      userId: "u_editor",
+      userEmail: "editor@x",
+      action: "ACTION_BATCH_OBSOLETE",
+      entity: "ImportedAction",
+      entityId: null,
+    });
+    const details = JSON.parse(arg.data.details);
+    expect(details).toMatchObject({
+      actorId: "u_editor",
+      count: 1,
+      requestedCount: 4,
+      actionIds: ["a1"],
+      skipped: ["a3"],
+      forbidden: ["a4"],
+      alreadyObsolete: ["a2"],
+    });
+  });
+
+  it("transaction Prisma utilisée pour la cohérence update + audit", async () => {
+    findMany.mockResolvedValue([{ id: "a1", localStatus: "ACTIVE" }]);
+    await batchObsoleteActions(EDITOR, ["a1"]);
+    expect(transaction).toHaveBeenCalledTimes(1);
   });
 });

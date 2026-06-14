@@ -129,3 +129,115 @@ export async function obsoleteAction(
     noop: false,
   };
 }
+
+/** Plafond de sécurité pour `batchObsoleteActions` (Sprint 7 C3). */
+export const BATCH_OBSOLETE_MAX = 500;
+
+/**
+ * Résultat d'un batch — D8 PO : 200 même si partiel, détail complet.
+ */
+export type BatchObsoleteOutcome = {
+  ok: true;
+  /** Liste des IDs reçus, dédupés. */
+  requested: string[];
+  /** IDs effectivement transitionnés vers OBSOLETE (ACTIVE / REPLACED). */
+  updated: string[];
+  /** IDs refusés métier (VALIDATED_LOCAL). */
+  skipped: string[];
+  /** IDs introuvables OU hors scope (404). */
+  forbidden: string[];
+  /** IDs déjà OBSOLETE (idempotent). */
+  alreadyObsolete: string[];
+};
+
+/**
+ * Marque un lot d'actions comme OBSOLETE en une transaction Prisma.
+ *
+ * Lecture scopée via `actionScope(user)` — les IDs hors scope sont
+ * comptés dans `forbidden` sans fuite d'existence.
+ *
+ * Statuts (cohérents avec `obsoleteAction`) :
+ *  - `ACTIVE` / `REPLACED` → `updated`
+ *  - `OBSOLETE`            → `alreadyObsolete` (idempotent)
+ *  - `VALIDATED_LOCAL`     → `skipped`
+ *
+ * AuditLog **unique** `ACTION_BATCH_OBSOLETE` créé dans la même
+ * transaction quand au moins une opération a eu lieu OU au moins un ID
+ * a été vu (forbidden compte comme tentative tracée). Si `requested`
+ * est vide, aucun audit n'est créé.
+ */
+export async function batchObsoleteActions(
+  user: SessionUser,
+  actionIds: string[],
+): Promise<BatchObsoleteOutcome> {
+  const requested = Array.from(new Set(actionIds)).slice(0, BATCH_OBSOLETE_MAX);
+  if (requested.length === 0) {
+    return {
+      ok: true,
+      requested: [],
+      updated: [],
+      skipped: [],
+      forbidden: [],
+      alreadyObsolete: [],
+    };
+  }
+
+  const accessible = await prisma.importedAction.findMany({
+    where: { id: { in: requested }, ...actionScope(user) },
+    select: {
+      id: true,
+      localStatus: true,
+    },
+  });
+  const seenIds = new Set(accessible.map((a) => a.id));
+  const forbidden = requested.filter((id) => !seenIds.has(id));
+
+  const updated: string[] = [];
+  const skipped: string[] = [];
+  const alreadyObsolete: string[] = [];
+  for (const a of accessible) {
+    if (a.localStatus === "VALIDATED_LOCAL") skipped.push(a.id);
+    else if (a.localStatus === "OBSOLETE") alreadyObsolete.push(a.id);
+    else updated.push(a.id);
+  }
+
+  // Transaction interactive : updateMany (conditionnel) + 1 AuditLog.
+  // Pas d'écriture inutile si aucune action n'est éligible — seul le
+  // log d'audit est créé pour traçabilité de la tentative.
+  await prisma.$transaction(async (tx) => {
+    if (updated.length > 0) {
+      await tx.importedAction.updateMany({
+        where: { id: { in: updated } },
+        data: { localStatus: "OBSOLETE" },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        userEmail: user.email,
+        action: "ACTION_BATCH_OBSOLETE",
+        entity: "ImportedAction",
+        entityId: null,
+        details: JSON.stringify({
+          actorId: user.id,
+          count: updated.length,
+          requestedCount: requested.length,
+          actionIds: updated,
+          skipped,
+          forbidden,
+          alreadyObsolete,
+        }),
+      },
+    });
+  });
+
+  return {
+    ok: true,
+    requested,
+    updated,
+    skipped,
+    forbidden,
+    alreadyObsolete,
+  };
+}
+

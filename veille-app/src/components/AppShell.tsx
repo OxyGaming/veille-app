@@ -39,6 +39,12 @@ const BASE_NAV_DESKTOP = [
   { href: "/contacts", label: "Contacts", icon: Icon.Phone },
 ];
 
+const PILOTAGE_ITEM = {
+  href: "/dashboard",
+  label: "Pilotage",
+  icon: Icon.Filter,
+};
+
 export default function AppShell({
   user,
   children,
@@ -57,6 +63,7 @@ export default function AppShell({
   const navDesktop = [
     ...(todayEnabled ? [TODAY_ITEM] : []),
     ...(showEcheances ? [ECHEANCES_ITEM] : []),
+    ...(isEditor ? [PILOTAGE_ITEM] : []),
     ...BASE_NAV_DESKTOP,
   ];
   const NAV = navMobile;

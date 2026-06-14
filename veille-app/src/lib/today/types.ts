@@ -113,9 +113,14 @@ export type UserPayload = {
 /** Bannière diagnostic EDITOR (cf. TODAY-V1.md §5.4 B). */
 export type EditorDiagnostic = {
   state: "green" | "yellow" | "red";
+  /** Actions ACTIVE dont la dueAt est dépassée de plus de 7 jours. */
   lateActions7d: number;
+  /** Sites sans visite trimestrielle depuis > 90 j (heuristique V1). */
   lateVisits: number;
+  /** Équipements dont expirationDate &lt; today (déjà périmés). */
   expiredEquipments: number;
+  /** Équipements expirant dans les 30 prochains jours (à surveiller). */
+  expiringEquipments: number;
 };
 
 /** Compteurs hebdo simples — pas de ratio/objectif en V1 (décision PO). */

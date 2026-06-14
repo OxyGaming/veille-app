@@ -369,30 +369,52 @@ export async function getEditorDiagnostic(
   user: SessionUser,
   now: Date,
 ): Promise<EditorDiagnostic> {
-  const [lateActions7d, expiredEquipments, lateVisits] = await Promise.all([
-    prisma.importedAction.count({
-      where: {
-        ...actionScope(user),
-        localStatus: "ACTIVE",
-        dueAt: { lt: subDays(now, 7) },
-      },
-    }),
-    prisma.siteEquipment.count({
-      where: {
-        isActive: true,
-        expirationDate: { not: null, lt: now },
-        site: siteScope(user),
-      },
-    }),
-    countLateVisits(user, now),
-  ]);
-  const state: EditorDiagnostic["state"] =
-    lateActions7d + expiredEquipments + lateVisits === 0
-      ? "green"
-      : lateActions7d > 0 || expiredEquipments > 0
-        ? "red"
-        : "yellow";
-  return { state, lateActions7d, lateVisits, expiredEquipments };
+  const [lateActions7d, expiredEquipments, expiringEquipments, lateVisits] =
+    await Promise.all([
+      prisma.importedAction.count({
+        where: {
+          ...actionScope(user),
+          localStatus: "ACTIVE",
+          dueAt: { lt: subDays(now, 7) },
+        },
+      }),
+      prisma.siteEquipment.count({
+        where: {
+          isActive: true,
+          expirationDate: { not: null, lt: now },
+          site: siteScope(user),
+        },
+      }),
+      prisma.siteEquipment.count({
+        where: {
+          isActive: true,
+          expirationDate: {
+            not: null,
+            gte: now,
+            lte: addDays(now, EQUIPMENT_EXPIRATION_WINDOW_DAYS),
+          },
+          site: siteScope(user),
+        },
+      }),
+      countLateVisits(user, now),
+    ]);
+  // Règles V1 (cf. TODAY-V1.md §5.4) :
+  //  - 🔴 si des actions actives sont en retard > 7 j ou des équipements
+  //    sont déjà périmés (impact réglementaire immédiat).
+  //  - 🟡 sinon si des visites sont en retard ou des équipements vont
+  //    expirer dans les 30 jours (alerte préventive).
+  //  - 🟢 sinon : tout est sous contrôle.
+  let state: EditorDiagnostic["state"];
+  if (lateActions7d > 0 || expiredEquipments > 0) state = "red";
+  else if (lateVisits > 0 || expiringEquipments > 0) state = "yellow";
+  else state = "green";
+  return {
+    state,
+    lateActions7d,
+    lateVisits,
+    expiredEquipments,
+    expiringEquipments,
+  };
 }
 
 /**

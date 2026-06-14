@@ -5,6 +5,7 @@ import { aggregateToday } from "@/lib/today/aggregator";
 import { TodayHeader } from "./components/TodayHeader";
 import { CurrentWorkCard } from "./components/CurrentWorkCard";
 import { TodoSection } from "./components/TodoSection";
+import { EditorDashboard } from "./components/EditorDashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,9 @@ export default async function TodayPage() {
         </>
       )}
 
-      {/* Placeholders pour les sections C6-C10. Retirés au fil des commits. */}
+      {payload.role === "EDITOR" && <EditorDashboard payload={payload} />}
+
+      {/* Placeholders pour les sections restant à livrer. */}
       <Placeholder role={payload.role} />
     </div>
   );
@@ -34,15 +37,8 @@ export default async function TodayPage() {
 
 function Placeholder({ role }: { role: "USER" | "EDITOR" | "ADMIN" }) {
   const items: Record<typeof role, string[]> = {
-    USER: [
-      "Raccourcis (C6)",
-      "Dernières activités (C6)",
-    ],
-    EDITOR: [
-      "Bannière diagnostic (C7)",
-      "Compteurs hebdo (C8)",
-      "Agents à veiller & Sites sans visite (C9)",
-    ],
+    USER: ["Raccourcis (C9)", "Dernières activités (C9)"],
+    EDITOR: ["Agents à veiller & Sites sans visite (C8)"],
     ADMIN: [
       "État système & alertes (C10)",
       "Usage 7j (C10)",

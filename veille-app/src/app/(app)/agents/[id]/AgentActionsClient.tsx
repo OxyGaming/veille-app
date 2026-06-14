@@ -186,14 +186,14 @@ export default function AgentActionsClient({
           .
         </div>
       ) : (
-      <ul className="grid gap-2">
+      <ul className="grid grid-cols-1 gap-2">
         {actions.map((a) => {
           const due = a.dueAt ? new Date(a.dueAt) : null;
           const late = due && due < new Date();
           return (
             <li
               key={a.id}
-              className={`bg-white border rounded-xl px-3 py-3 transition-shadow hover:shadow-sm ${
+              className={`bg-white border rounded-xl px-3 py-3 min-w-0 break-words transition-shadow hover:shadow-sm ${
                 late
                   ? "border-rose-200 bg-rose-50/40"
                   : "border-slate-200"

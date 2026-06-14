@@ -222,7 +222,13 @@ export default function AppShell({ user, children, todayEnabled = false }: Props
           </div>
         </header>
 
-        <main className="flex-1">{children}</main>
+        {/*
+          min-w-0 + overflow-x-clip : empêche un contenu très large (texte
+          long sans wrap, table débordante) de pousser le main au-delà du
+          viewport, ce qui masquait la bottom-nav et créait un scroll
+          horizontal parasite sur les fiches denses (/agents/[id], /sites/[id]).
+        */}
+        <main className="flex-1 min-w-0 overflow-x-clip">{children}</main>
 
         {/*
           Bottom nav mobile — fixée au viewport.

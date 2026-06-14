@@ -79,3 +79,112 @@ export type ScoreContext = {
   user: { id: string; teamIds: string[] };
   now: Date;
 };
+
+// ─── Payloads de l'écran Aujourd'hui (consommés par l'UI C4-C10) ─────────────
+
+/** Travail en cours (carte sticky « EN COURS » pour USER). */
+export type CurrentWork = {
+  kind: "session" | "visit";
+  id: string;
+  title: string;
+  subtitle: string;
+  href: string;
+  startedAt: Date;
+  /** Brouillon dont la dernière modification dépasse `STALE_DRAFT_DAYS`. */
+  isStale: boolean;
+};
+
+/** Variante USER (cf. TODAY-V1.md §4). */
+export type UserPayload = {
+  role: "USER";
+  /** ISO 8601 — `now` côté serveur, utilisé par l'UI pour l'emoji et la date. */
+  now: string;
+  greeting: {
+    name: string;
+    teamName: string | null;
+  };
+  current: CurrentWork | null;
+  todoList: ScoredItem[];
+  /** Nombre total d'items éligibles (avant `slice(limit)`) pour « Voir tous ». */
+  todoTotal: number;
+  recent: RecentActivityItem[];
+};
+
+/** Bannière diagnostic EDITOR (cf. TODAY-V1.md §5.4 B). */
+export type EditorDiagnostic = {
+  state: "green" | "yellow" | "red";
+  lateActions7d: number;
+  lateVisits: number;
+  expiredEquipments: number;
+};
+
+/** Compteurs hebdo simples — pas de ratio/objectif en V1 (décision PO). */
+export type EditorWeekCounters = {
+  visits: number;
+  sessions: number;
+  closedActions: number;
+};
+
+/** Ligne d'une watchlist (agent ou site). */
+export type WatchlistItem = {
+  id: string;
+  name: string;
+  /** Jours depuis la dernière activité (null si jamais). */
+  daysSince: number | null;
+  /** Niveau visuel (rouge / orange / jaune) calculé côté serveur. */
+  level: "red" | "orange" | "yellow";
+  cta: TodoCta;
+};
+
+/** Variante EDITOR (cf. TODAY-V1.md §5). */
+export type EditorPayload = {
+  role: "EDITOR";
+  now: string;
+  tour: {
+    perimeter: {
+      teamsCount: number;
+      sitesCount: number;
+      agentsCount: number;
+    };
+  };
+  diagnostic: EditorDiagnostic;
+  weekCounters: EditorWeekCounters;
+  agentsToReview: WatchlistItem[];
+  agentsToReviewTotal: number;
+  sitesWithoutVisit: WatchlistItem[];
+  sitesWithoutVisitTotal: number;
+};
+
+/** Alerte système ADMIN. */
+export type AdminAlert = {
+  id: string;
+  level: "ok" | "warn" | "error";
+  label: string;
+  href?: string;
+};
+
+/** Compteurs d'usage 7 derniers jours (ADMIN). */
+export type AdminUsage = {
+  sessions: number;
+  visits: number;
+  validatedActions: number;
+  photos: number;
+};
+
+/** Variante ADMIN (cf. TODAY-V1.md §6). */
+export type AdminPayload = {
+  role: "ADMIN";
+  now: string;
+  systemStatus: {
+    state: "ok" | "degraded" | "incident";
+    usersCount: number;
+    teamsCount: number;
+    lastBackupAt: Date | null;
+  };
+  alerts: AdminAlert[];
+  usage7d: AdminUsage;
+  recentActivity: RecentActivityItem[];
+};
+
+/** Union — le payload renvoyé par `GET /api/today` selon `user.role`. */
+export type TodayPayload = UserPayload | EditorPayload | AdminPayload;

@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser, siteScope } from "@/lib/auth";
+import {
+  defaultMessageFor,
+  recordActivitySafe,
+} from "@/lib/activityFeed";
 
 /**
  * Catalogue d'équipements d'un site (référentiel pour les visites de type
@@ -95,5 +99,48 @@ export async function POST(
       sortOrder: data.sortOrder,
     },
   });
+
+  // Flux d'activité — duplique sur toutes les équipes du site.
+  // targetUrl pointe vers la fiche site (pas de fiche équipement V1).
+  const siteFull = await prisma.site.findUnique({
+    where: { id: siteId },
+    select: {
+      name: true,
+      teamId: true,
+      memberships: { select: { teamId: true } },
+    },
+  });
+  if (siteFull) {
+    const teamIds = [
+      ...new Set([
+        ...(siteFull.teamId ? [siteFull.teamId] : []),
+        ...siteFull.memberships.map((m) => m.teamId),
+      ]),
+    ];
+    const label = `${data.category.trim()} — ${data.label.trim()}`;
+    await recordActivitySafe({
+      teamIds,
+      actorId: u.id,
+      actorName: u.name,
+      type: "EQUIPMENT_ADDED",
+      entityType: "equipment",
+      entityId: created.id,
+      entityLabel: label,
+      message: defaultMessageFor({
+        type: "EQUIPMENT_ADDED",
+        actorName: u.name,
+        entityLabel: label,
+      }),
+      targetUrl: `/sites/${siteId}`,
+      metadata: {
+        siteId,
+        siteName: siteFull.name,
+        equipmentId: created.id,
+        category: data.category,
+        label: data.label,
+      },
+    });
+  }
+
   return NextResponse.json(created);
 }

@@ -10,6 +10,10 @@ import {
   TAG_OBLIGATOIRE,
   TAG_VEILLE_LEGALE,
 } from "@/lib/tags";
+import {
+  defaultMessageFor,
+  recordActivitySafe,
+} from "@/lib/activityFeed";
 
 /**
  * Création manuelle d'une action depuis la fiche d'un agent.
@@ -104,6 +108,34 @@ export async function POST(
       veilleType: "Agent",
       dueAt,
       tags: encodeTags(tags),
+    },
+  });
+
+  // Flux d'activité — multi-team via les équipes de l'agent.
+  // targetUrl = fiche agent (pas de fiche action dédiée V1).
+  const agentName = `${agent.lastName} ${agent.firstName}`.trim();
+  const teamIds = [
+    ...new Set([teamId, ...agent.memberships.map((m) => m.teamId)]),
+  ];
+  await recordActivitySafe({
+    teamIds,
+    actorId: u.id,
+    actorName: u.name,
+    type: "ACTION_CREATED",
+    entityType: "action",
+    entityId: created.id,
+    entityLabel: agentName,
+    message: defaultMessageFor({
+      type: "ACTION_CREATED",
+      actorName: u.name,
+      entityLabel: agentName,
+    }),
+    targetUrl: `/agents/${agentId}`,
+    metadata: {
+      actionId: created.id,
+      agentId,
+      title,
+      dueAt: dueAt.toISOString(),
     },
   });
 

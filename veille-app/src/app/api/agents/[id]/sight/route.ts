@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { agentScope, requireUser } from "@/lib/auth";
+import {
+  defaultMessageFor,
+  defaultTargetUrlFor,
+  recordActivitySafe,
+} from "@/lib/activityFeed";
 
 /**
  * Crée un « Vu » (kind=SIGHT) ou un « Commentaire personnalisé » (kind=NOTE)
@@ -70,5 +75,37 @@ export async function POST(
         : new Date(),
     },
   });
+
+  // Flux d'activité — duplique sur toutes les équipes de l'agent (un agent
+  // peut être multi-team via AgentTeam, cf. memory/business-rules.md).
+  const agentName = `${agent.lastName} ${agent.firstName}`.trim();
+  const teamIds = [
+    ...new Set([
+      teamId,
+      ...agent.memberships.map((m) => m.teamId),
+    ]),
+  ];
+  const type = parsed.data.kind === "NOTE" ? "AGENT_NOTE" : "AGENT_SIGHTED";
+  await recordActivitySafe({
+    teamIds,
+    actorId: u.id,
+    actorName: u.name,
+    type,
+    entityType: "agent",
+    entityId: agentId,
+    entityLabel: agentName,
+    message: defaultMessageFor({
+      type,
+      actorName: u.name,
+      entityLabel: agentName,
+    }),
+    targetUrl: defaultTargetUrlFor({ entityType: "agent", entityId: agentId }),
+    metadata: {
+      sightingId: sighting.id,
+      kind: parsed.data.kind,
+      hasComment: Boolean(parsed.data.comment?.trim()),
+    },
+  });
+
   return NextResponse.json(sighting);
 }

@@ -12,6 +12,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import { log } from "@/lib/logger";
 
 /** Liste exhaustive des types d'événements suivis V1 + V1.1 équipement. */
 export const ACTIVITY_TYPES = [
@@ -90,6 +91,27 @@ export async function recordActivity(
     })),
   });
   return res.count;
+}
+
+/**
+ * Variante non bloquante de `recordActivity` : capture toute exception et
+ * la logge sans relancer. À utiliser dans les routes mutantes pour que
+ * l'écriture du flux n'invalide jamais l'opération métier.
+ */
+export async function recordActivitySafe(
+  input: RecordActivityInput,
+): Promise<number> {
+  try {
+    return await recordActivity(input);
+  } catch (err) {
+    log.error("activityFeed.recordActivity.failed", {
+      type: input.type,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return 0;
+  }
 }
 
 // ─── Helpers purs (testables sans Prisma) ────────────────────────────────────

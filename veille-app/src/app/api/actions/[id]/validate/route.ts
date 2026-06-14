@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser, assertTeamAccess } from "@/lib/auth";
+import {
+  defaultMessageFor,
+  recordActivitySafe,
+} from "@/lib/activityFeed";
 
 const schema = z.object({
   comment: z.string().nullable().optional(),
@@ -19,7 +23,26 @@ export async function POST(
     return r as Response;
   }
   const { id } = await ctx.params;
-  const action = await prisma.importedAction.findUnique({ where: { id } });
+  const action = await prisma.importedAction.findUnique({
+    where: { id },
+    include: {
+      agent: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          memberships: { select: { teamId: true } },
+        },
+      },
+      site: {
+        select: {
+          id: true,
+          name: true,
+          memberships: { select: { teamId: true } },
+        },
+      },
+    },
+  });
   if (!action) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
   if (!assertTeamAccess(u, action.teamId)) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
@@ -52,6 +75,50 @@ export async function POST(
       data: { localStatus: "VALIDATED_LOCAL", realizedAt },
     });
     return validation;
+  });
+
+  // Flux d'activité — la stratégie multi-team dépend de la cible de l'action :
+  //  - agent : duplique sur toutes les équipes de l'agent ;
+  //  - site  : duplique sur toutes les équipes du site ;
+  //  - sinon : fallback sur l'équipe legacy de l'action.
+  // targetUrl pointe vers la fiche agent si possible, sinon fiche site.
+  const label =
+    action.keyPoint?.trim() ||
+    action.comment?.trim() ||
+    `Action ${action.externalId}`;
+  const teamIdSet = new Set<string>([action.teamId]);
+  if (action.agent) {
+    for (const m of action.agent.memberships) teamIdSet.add(m.teamId);
+  }
+  if (action.site) {
+    for (const m of action.site.memberships) teamIdSet.add(m.teamId);
+  }
+  const targetUrl = action.agent
+    ? `/agents/${action.agent.id}`
+    : action.site
+      ? `/sites/${action.site.id}`
+      : null;
+  await recordActivitySafe({
+    teamIds: [...teamIdSet],
+    actorId: u.id,
+    actorName: u.name,
+    type: "ACTION_VALIDATED",
+    entityType: "action",
+    entityId: action.id,
+    entityLabel: label,
+    message: defaultMessageFor({
+      type: "ACTION_VALIDATED",
+      actorName: u.name,
+      entityLabel: label,
+    }),
+    targetUrl,
+    metadata: {
+      actionId: action.id,
+      agentId: action.agentId,
+      siteId: action.siteId,
+      validationId: result.id,
+      realizedAt: realizedAt.toISOString(),
+    },
   });
 
   return NextResponse.json(result);

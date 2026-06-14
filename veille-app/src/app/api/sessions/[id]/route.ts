@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser, teamScope } from "@/lib/auth";
+import {
+  defaultMessageFor,
+  defaultTargetUrlFor,
+  recordActivitySafe,
+} from "@/lib/activityFeed";
 
 async function loadScoped(id: string, u: Awaited<ReturnType<typeof requireUser>>) {
   const scope = teamScope(u);
@@ -99,6 +104,44 @@ export async function PATCH(
       finishedAt,
     },
   });
+
+  // Flux d'activité équipe — uniquement à la transition vers `completed`.
+  // L'écriture est non bloquante : un échec ne casse pas la mutation.
+  if (data.status === "completed" && existing.status !== "completed") {
+    const agentName = existing.agent
+      ? `${existing.agent.lastName} ${existing.agent.firstName}`.trim()
+      : "Sans agent";
+    let itemsCount = 0;
+    let nonConformitiesCount = 0;
+    for (const po of existing.procedures) {
+      for (const it of po.items) {
+        itemsCount++;
+        if (it.status === "NON_CONFORME") nonConformitiesCount++;
+      }
+    }
+    await recordActivitySafe({
+      teamIds: [updated.teamId],
+      actorId: u.id,
+      actorName: u.name,
+      type: "SESSION_FINISHED",
+      entityType: "session",
+      entityId: updated.id,
+      entityLabel: agentName,
+      message: defaultMessageFor({
+        type: "SESSION_FINISHED",
+        actorName: u.name,
+        entityLabel: agentName,
+      }),
+      targetUrl: `/sessions/${updated.id}/report`,
+      metadata: {
+        agentId: existing.agentId,
+        procedureCount: existing.procedures.length,
+        itemsCount,
+        nonConformitiesCount,
+      },
+    });
+  }
+
   return NextResponse.json(updated);
 }
 

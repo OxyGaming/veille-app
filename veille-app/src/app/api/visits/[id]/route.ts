@@ -10,6 +10,10 @@ import {
   TAG_OBLIGATOIRE,
   TAG_VEILLE_LEGALE,
 } from "@/lib/tags";
+import {
+  defaultMessageFor,
+  recordActivitySafe,
+} from "@/lib/activityFeed";
 
 async function loadScoped(
   id: string,
@@ -110,6 +114,49 @@ export async function PATCH(
     await generateInventoryNonConformities(updated.id, existing.teamId);
   }
 
+  // Flux d'activité équipe — uniquement à la transition vers `completed`.
+  // Multi-team : le site peut être rattaché à plusieurs équipes via SiteTeam.
+  // `recordActivitySafe` duplique l'event sur chaque équipe pour respecter
+  // la stratégie MVP documentée dans memory/business-rules.md.
+  if (data.status === "completed" && existing.status !== "completed") {
+    const siteMemberships = await prisma.siteTeam.findMany({
+      where: { siteId: existing.siteId },
+      select: { teamId: true },
+    });
+    const teamIds = [
+      ...new Set([
+        existing.teamId,
+        ...siteMemberships.map((m) => m.teamId),
+      ]),
+    ];
+    const ncCount = await prisma.siteVisitNonConformity.count({
+      where: { visitId: updated.id },
+    });
+    const label = `${existing.template.name} — ${existing.site.name}`;
+    await recordActivitySafe({
+      teamIds,
+      actorId: u.id,
+      actorName: u.name,
+      type: "VISIT_FINISHED",
+      entityType: "visit",
+      entityId: updated.id,
+      entityLabel: label,
+      message: defaultMessageFor({
+        type: "VISIT_FINISHED",
+        actorName: u.name,
+        entityLabel: label,
+      }),
+      targetUrl: `/visits/${updated.id}/report`,
+      metadata: {
+        siteId: existing.siteId,
+        templateSlug: existing.template.slug,
+        templateKind: existing.template.kind,
+        observationsCount: existing.observations.length,
+        nonConformitiesCount: ncCount,
+      },
+    });
+  }
+
   return NextResponse.json(updated);
 }
 
@@ -204,6 +251,49 @@ async function generateInventoryNonConformities(visitId: string, teamId: string)
         },
       });
     });
+
+    // Flux d'activité — 1 event par NC d'équipement détectée. Multi-team
+    // via les équipes du site. Acteur = système (NC auto-générée).
+    const siteFull = await prisma.site.findUnique({
+      where: { id: visit.siteId },
+      select: {
+        name: true,
+        teamId: true,
+        memberships: { select: { teamId: true } },
+      },
+    });
+    if (siteFull) {
+      const teamIds = [
+        ...new Set([
+          teamId,
+          ...(siteFull.teamId ? [siteFull.teamId] : []),
+          ...siteFull.memberships.map((m) => m.teamId),
+        ]),
+      ];
+      await recordActivitySafe({
+        teamIds,
+        actorId: null,
+        actorName: "Système",
+        type: "EQUIPMENT_NON_COMPLIANT",
+        entityType: "equipment",
+        entityId: o.equipment.id,
+        entityLabel: eqLabel,
+        message: defaultMessageFor({
+          type: "EQUIPMENT_NON_COMPLIANT",
+          actorName: "Système",
+          entityLabel: eqLabel,
+        }),
+        targetUrl: `/sites/${visit.siteId}`,
+        metadata: {
+          visitId,
+          siteId: visit.siteId,
+          siteName: siteFull.name,
+          equipmentId: o.equipment.id,
+          discrepancyType: o.discrepancyType,
+          generatedActionExternalId: externalId,
+        },
+      });
+    }
   }
 }
 

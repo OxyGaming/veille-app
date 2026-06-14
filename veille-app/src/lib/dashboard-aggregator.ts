@@ -29,7 +29,11 @@ export type DashboardPeriod = 30 | 90;
 
 export type DashboardFilters = {
   period: DashboardPeriod;
-  /** ADMIN uniquement : filtre sur une équipe précise (ignoré côté EDITOR). */
+  /**
+   * Sprint 6 C6 — DÉPRÉCIÉ : le scope ADMIN est désormais résolu via
+   * le badge header (`resolveAdminScope`). Conservé pour rétro-compat
+   * du payload mais ignoré dans `aggregateDashboard`. À retirer Sprint 7+.
+   */
   teamId?: string | null;
 };
 
@@ -122,18 +126,29 @@ async function getTeamsAvailable(
 }
 
 /**
- * Compteurs Notification : pour ADMIN = global, pour EDITOR = scope
- * personnel (le user voit ses propres notifs reçues — utile pour son
- * propre pilotage). Documenté comme limite V1.
+ * Compteurs Notification — sémantique par rôle/scope (Sprint 6 C6) :
+ *  - ADMIN GLOBAL : count global (toutes notifs) — vue système
+ *  - ADMIN MY_TEAMS ou TEAM : count personnel — vue cohérente avec le
+ *    périmètre choisi (notifs ECHEANCE_CRITICAL_ON_MY_PERIMETER de
+ *    l'ADMIN sont déjà filtrées par son scope via S6 C5)
+ *  - EDITOR / USER : count personnel (inchangé)
+ *
+ * Sans modèle team-scoped sur Notification, on garde la convention
+ * « ADMIN MY_TEAMS/TEAM ≈ vue EDITOR personnelle » qui reste cohérente
+ * avec ses autres KPI. Cf. memory/decisions.md.
  */
 async function getNotificationCounts(
   user: SessionUser,
   windowStart: Date,
 ): Promise<{ createdAt: Date }[]> {
-  const where: Record<string, unknown> =
-    user.role === "ADMIN"
-      ? { createdAt: { gte: windowStart } }
-      : { userId: user.id, createdAt: { gte: windowStart } };
+  const isAdminGlobal =
+    user.role === "ADMIN" &&
+    (user.adminScopeMode === null ||
+      user.adminScopeMode === undefined ||
+      user.adminScopeMode === "GLOBAL");
+  const where: Record<string, unknown> = isAdminGlobal
+    ? { createdAt: { gte: windowStart } }
+    : { userId: user.id, createdAt: { gte: windowStart } };
   return prisma.notification.findMany({
     where,
     select: { createdAt: true },
@@ -153,15 +168,11 @@ export async function aggregateDashboard(
   );
   windowStart.setHours(0, 0, 0, 0);
 
-  // 1. Échéances (matière brute) — réutilise l'agrégateur Sprint 4
-  //    avec filter éventuel teamId (ADMIN). Pour EDITOR : pas de teamId
-  //    forcé, le scope multi-équipes via siteScope s'applique
-  //    naturellement.
-  const echeancesFilters: { teamId?: string } = {};
-  if (user.role === "ADMIN" && filters.teamId) {
-    echeancesFilters.teamId = filters.teamId;
-  }
-
+  // 1. Échéances (matière brute) — réutilise l'agrégateur Sprint 4.
+  //    Sprint 6 C6 : le filtre teamId local est désormais supplanté par
+  //    le scope ADMIN persisté (badge header). Les helpers Prisma
+  //    (siteScope / actionScope) appliquent déjà la restriction via
+  //    C5. On n'a plus rien à passer ici.
   const [
     echeances,
     openActionsCount,
@@ -172,7 +183,7 @@ export async function aggregateDashboard(
     validationsRows,
     teamsAvailable,
   ] = await Promise.all([
-    aggregateEcheances(user, now, echeancesFilters),
+    aggregateEcheances(user, now),
     prisma.importedAction.count({
       where: { ...actionScope(user), localStatus: "ACTIVE" },
     }),
@@ -235,7 +246,8 @@ export async function aggregateDashboard(
   };
 
   return {
-    filters: { period, teamId: filters.teamId ?? null },
+    // Sprint 6 C6 : teamId neutralisé (le scope ADMIN supplante).
+    filters: { period, teamId: null },
     kpis,
     trends: {
       activity: {

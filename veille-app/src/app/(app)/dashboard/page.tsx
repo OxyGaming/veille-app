@@ -37,15 +37,22 @@ export default async function DashboardPage({
 
   const raw = await searchParams;
   const period = parsePeriod(raw.period);
-  const teamId =
-    user.role === "ADMIN" && typeof raw.teamId === "string" && raw.teamId
-      ? raw.teamId
-      : null;
+  // Sprint 6 C6 : le filtre teamId local a été retiré. Le scope ADMIN
+  // est désormais résolu via le badge header (resolveAdminScope).
 
   const payload = await aggregateDashboard(user, new Date(), {
     period,
-    teamId,
   });
+
+  // Sprint 6 C6 : sous-titre dynamique selon le mode ADMIN actuel.
+  const subtitle =
+    user.role === "ADMIN"
+      ? user.adminScopeMode === "MY_TEAMS"
+        ? "Périmètre de mes équipes (sélecteur header)."
+        : user.adminScopeMode === "TEAM"
+          ? "Équipe sélectionnée via le sélecteur header."
+          : "Vue globale toutes équipes."
+      : "Périmètre de mes équipes.";
 
   return (
     <div className="max-w-5xl mx-auto pb-10">
@@ -54,18 +61,9 @@ export default async function DashboardPage({
           Pilotage
         </p>
         <h1 className="text-2xl font-bold text-slate-900 mt-1">Dashboard</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {user.role === "ADMIN"
-            ? "Vue globale toutes équipes."
-            : "Périmètre de mes équipes."}
-        </p>
+        <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
       </header>
-      <DashboardFiltersBar
-        period={payload.filters.period}
-        teamId={payload.filters.teamId ?? null}
-        teamsAvailable={payload.teamsAvailable}
-        showTeamFilter={user.role === "ADMIN"}
-      />
+      <DashboardFiltersBar period={payload.filters.period} />
       <DashboardKpiGrid kpis={payload.kpis} />
       <DashboardTrends trends={payload.trends} period={payload.filters.period} />
     </div>

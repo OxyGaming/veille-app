@@ -9,9 +9,15 @@ type Props = {
   user: { id: string; name: string; role: string; teamId: string | null };
   children: React.ReactNode;
   todayEnabled?: boolean;
+  echeancesEnabled?: boolean;
 };
 
 const TODAY_ITEM = { href: "/today", label: "Aujourd'hui", icon: Icon.Home };
+const ECHEANCES_ITEM = {
+  href: "/echeances",
+  label: "Échéances",
+  icon: Icon.Calendar,
+};
 
 const BASE_NAV_MOBILE = [
   { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
@@ -32,14 +38,35 @@ const BASE_NAV_DESKTOP = [
   { href: "/contacts", label: "Contacts", icon: Icon.Phone },
 ];
 
-export default function AppShell({ user, children, todayEnabled = false }: Props) {
-  const navMobile = todayEnabled ? [TODAY_ITEM, ...BASE_NAV_MOBILE] : BASE_NAV_MOBILE;
-  const navDesktop = todayEnabled
-    ? [TODAY_ITEM, ...BASE_NAV_DESKTOP]
-    : BASE_NAV_DESKTOP;
+export default function AppShell({
+  user,
+  children,
+  todayEnabled = false,
+  echeancesEnabled = false,
+}: Props) {
+  const isAdmin = user.role === "ADMIN";
+  const isEditor = isAdmin || user.role === "EDITOR";
+  const showEcheances = echeancesEnabled && isEditor;
+
+  const navMobile = [
+    ...(todayEnabled ? [TODAY_ITEM] : []),
+    ...(showEcheances ? [ECHEANCES_ITEM] : []),
+    ...BASE_NAV_MOBILE,
+  ];
+  const navDesktop = [
+    ...(todayEnabled ? [TODAY_ITEM] : []),
+    ...(showEcheances ? [ECHEANCES_ITEM] : []),
+    ...BASE_NAV_DESKTOP,
+  ];
   const NAV = navMobile;
   const NAV_DESKTOP = navDesktop;
-  const mobileGridClass = todayEnabled ? "grid-cols-6" : "grid-cols-5";
+  // grid-cols varie selon le nombre d'entrées mobile (5 → 7).
+  const mobileGridClass =
+    navMobile.length === 7
+      ? "grid-cols-7"
+      : navMobile.length === 6
+        ? "grid-cols-6"
+        : "grid-cols-5";
 
   const pathname = usePathname();
   const router = useRouter();
@@ -75,9 +102,6 @@ export default function AppShell({ user, children, todayEnabled = false }: Props
     router.replace("/login");
     router.refresh();
   }
-
-  const isAdmin = user.role === "ADMIN";
-  const isEditor = isAdmin || user.role === "EDITOR";
 
   return (
     <div className="min-h-dvh bg-slate-50 lg:flex">

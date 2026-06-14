@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import AppShell from "@/components/AppShell";
-import { isTodayEnabled } from "@/lib/featureFlags";
+import { isEcheancesEnabled, isTodayEnabled } from "@/lib/featureFlags";
 
 export default async function AppLayout({
   children,
@@ -19,6 +19,7 @@ export default async function AppLayout({
         teamId: user.teamId,
       }}
       todayEnabled={isTodayEnabled()}
+      echeancesEnabled={isEcheancesEnabled()}
     >
       {children}
     </AppShell>

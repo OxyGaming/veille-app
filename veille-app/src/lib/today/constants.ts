@@ -86,3 +86,47 @@ export const URGENCY_THRESHOLDS = {
   soonMaxDays: 7,
   laterMaxDays: 30,
 } as const;
+
+/**
+ * Cadence métier d'une visite — utilisée pour distinguer les retards
+ * dans Today et le futur Hub Échéances.
+ *  - `quarterly` : 90 j pour TOUS les sites (cadence trimestrielle).
+ *  - `planned`   : 180 j si occupé, 365 j si inoccupé.
+ *  - `other`     : autres modèles (INVENTORY, etc.) — non suivis ici.
+ */
+export type VisitCadenceType = "quarterly" | "planned" | "other";
+
+/**
+ * Convention de nommage actuelle des templates seedés :
+ *  - `trimestrielle-*`  → cadence trimestrielle (90 j).
+ *  - `planifiee-*`      → cadence planifiée (180/365 j selon Site.isOccupied).
+ *  - tout autre slug    → "other" (INVENTORY, templates custom non typés).
+ *
+ * Pourra évoluer le jour où `SiteVisitTemplate` aura un champ `cadenceType`
+ * explicite ; conserver la signature de cette fonction pour faciliter la
+ * migration.
+ */
+export function classifyVisitTemplateSlug(slug: string): VisitCadenceType {
+  const s = slug.toLowerCase();
+  if (s.startsWith("trimestrielle")) return "quarterly";
+  if (s.startsWith("planifiee") || s.startsWith("planifi")) return "planned";
+  return "other";
+}
+
+/**
+ * Cadence applicable à un site pour le type donné, en jours.
+ * Trimestrielle = 90 j toujours.
+ * Planifiée = 180 j si occupé, 365 j si inoccupé.
+ */
+export function visitFrequencyDays(
+  cadence: VisitCadenceType,
+  isOccupied: boolean,
+): number {
+  if (cadence === "quarterly") return QUARTERLY_VISIT_DAYS;
+  if (cadence === "planned") {
+    return isOccupied
+      ? OCCUPIED_PLANNED_VISIT_DAYS
+      : UNOCCUPIED_PLANNED_VISIT_DAYS;
+  }
+  return DEFAULT_VISIT_FREQUENCY_DAYS;
+}

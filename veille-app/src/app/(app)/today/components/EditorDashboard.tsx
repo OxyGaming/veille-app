@@ -107,11 +107,22 @@ function freshnessLabelForAgent(item: WatchlistItem): string {
 }
 
 function freshnessLabelForSite(item: WatchlistItem): string {
-  if (item.daysSince === null) return "Jamais visité";
-  const over90 = item.daysSince - 90;
-  if (over90 > 0)
-    return `${item.daysSince} jours · trimestrielle dépassée de ${over90}`;
-  return `Visité il y a ${item.daysSince} jours`;
+  const types = item.badges?.overdueVisitTypes ?? [];
+  // Compose un libellé qui reflète la (les) cadence(s) en retard. Les
+  // détails par cadence (Trimestrielle / Planifiée) sont affichés en
+  // badges sous la ligne, on garde ici une phrase courte.
+  if (item.daysSince === null) {
+    if (types.length === 0) return "Jamais visité";
+    return types.length === 2
+      ? "Jamais visité · trimestrielle et planifiée à faire"
+      : types[0] === "quarterly"
+        ? "Jamais visité · trimestrielle à faire"
+        : "Jamais visité · planifiée à faire";
+  }
+  const ago = `Dernière visite il y a ${item.daysSince} jour${item.daysSince > 1 ? "s" : ""}`;
+  if (types.length === 0) return ago;
+  if (types.length === 2) return `${ago} · 2 cadences à rattraper`;
+  return `${ago} · ${types[0] === "quarterly" ? "trimestrielle" : "planifiée"} en retard`;
 }
 
 /**

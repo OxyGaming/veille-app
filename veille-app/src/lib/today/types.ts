@@ -148,6 +148,14 @@ export type WatchlistItem = {
     openActions?: number;
     /** Équipements périmés OU expirant ≤ 30 j sur le site. */
     equipmentAlerts?: number;
+    /**
+     * Types d'échéances de visite déclenchant la remontée dans la
+     * watchlist Sites (cf. memory/business-rules.md §Visites).
+     * Présent uniquement pour les sites.
+     */
+    overdueVisitTypes?: ("quarterly" | "planned")[];
+    /** Vrai si le site est marqué inoccupé (affichage différenciant). */
+    isUnoccupied?: boolean;
   };
 };
 

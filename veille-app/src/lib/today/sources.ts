@@ -19,6 +19,9 @@ import {
   DEFAULT_VISIT_FREQUENCY_DAYS,
   EQUIPMENT_EXPIRATION_WINDOW_DAYS,
   STALE_DRAFT_DAYS,
+  classifyVisitTemplateSlug,
+  visitFrequencyDays,
+  type VisitCadenceType,
 } from "./constants";
 import type {
   AdminAlert,
@@ -418,34 +421,109 @@ export async function getEditorDiagnostic(
 }
 
 /**
- * Visites en retard — V1 : on dérive `lastVisitDate` par sous-requête
- * et on compare à `DEFAULT_VISIT_FREQUENCY_DAYS` (90 j).
- * Aucun champ `Site.isOccupied` n'existe encore : on applique la cadence
- * trimestrielle conservative pour tous les sites du scope.
+ * Visites en retard — un site est compté si trimestrielle OU planifiée est
+ * dépassée. Les deux cadences sont suivies SÉPARÉMENT
+ * (cf. memory/business-rules.md §Visites) :
+ *  - trimestrielle : 90 j pour tous les sites ;
+ *  - planifiée    : 180 j si occupé / 365 j si inoccupé.
+ * Un site « jamais visité (cadence X) » est considéré en retard sur X.
  */
 async function countLateVisits(user: SessionUser, now: Date): Promise<number> {
-  const threshold = subDays(now, DEFAULT_VISIT_FREQUENCY_DAYS);
-  // Sites du scope ayant aucune visite finie OU dont la dernière est avant
-  // le seuil. On charge les ids puis on filtre côté Node : SQLite ne fait pas
-  // toujours bon ménage des subqueries corrélées via Prisma.
-  const sites = await prisma.site.findMany({
+  const sites = await fetchSitesWithRecentVisits(user);
+  let count = 0;
+  for (const s of sites) {
+    const status = computeSiteVisitStatus(s, now);
+    if (status.overdueTypes.length > 0) count++;
+  }
+  return count;
+}
+
+/** Charge tous les sites du scope + leurs dernières visites complètes par cadence. */
+async function fetchSitesWithRecentVisits(user: SessionUser) {
+  return prisma.site.findMany({
     where: { isActive: true, ...siteScope(user) },
     select: {
       id: true,
+      name: true,
+      isOccupied: true,
+      // On prend les 20 dernières visites complètes : assez pour trouver la
+      // dernière trimestrielle ET la dernière planifiée, même si elles sont
+      // imbriquées avec d'autres types (INVENTORY, etc.).
       visits: {
         where: { status: "completed", finishedAt: { not: null } },
         orderBy: { finishedAt: "desc" },
-        take: 1,
-        select: { finishedAt: true },
+        take: 20,
+        select: {
+          finishedAt: true,
+          template: { select: { slug: true } },
+        },
       },
     },
+    take: 500,
   });
-  let count = 0;
-  for (const s of sites) {
-    const last = s.visits[0]?.finishedAt;
-    if (!last || last < threshold) count++;
+}
+
+type SiteWithVisits = Awaited<ReturnType<typeof fetchSitesWithRecentVisits>>[number];
+
+type SiteVisitStatus = {
+  lastQuarterly: Date | null;
+  lastPlanned: Date | null;
+  /** Date la plus récente toutes cadences confondues (utile pour `daysSince`). */
+  lastAny: Date | null;
+  quarterlyOverdueDays: number | null; // null si à jour
+  plannedOverdueDays: number | null;   // null si à jour
+  overdueTypes: ("quarterly" | "planned")[];
+};
+
+/**
+ * Calcule l'état de retard d'un site sur les deux cadences indépendantes.
+ * Un site « jamais visité (cadence X) » est en retard maximal sur X.
+ */
+function computeSiteVisitStatus(
+  s: { isOccupied: boolean; visits: SiteWithVisits["visits"] },
+  now: Date,
+): SiteVisitStatus {
+  let lastQuarterly: Date | null = null;
+  let lastPlanned: Date | null = null;
+  let lastAny: Date | null = null;
+  for (const v of s.visits) {
+    if (!v.finishedAt) continue;
+    if (!lastAny || v.finishedAt > lastAny) lastAny = v.finishedAt;
+    const cadence = classifyVisitTemplateSlug(v.template.slug);
+    if (cadence === "quarterly" && !lastQuarterly) lastQuarterly = v.finishedAt;
+    else if (cadence === "planned" && !lastPlanned) lastPlanned = v.finishedAt;
   }
-  return count;
+  const quarterlyThreshold = visitFrequencyDays("quarterly", s.isOccupied);
+  const plannedThreshold = visitFrequencyDays("planned", s.isOccupied);
+  const daysSinceQuarterly = lastQuarterly
+    ? Math.floor((now.getTime() - lastQuarterly.getTime()) / DAY_MS)
+    : null;
+  const daysSincePlanned = lastPlanned
+    ? Math.floor((now.getTime() - lastPlanned.getTime()) / DAY_MS)
+    : null;
+  const quarterlyOverdueDays =
+    daysSinceQuarterly === null
+      ? quarterlyThreshold + 1
+      : daysSinceQuarterly > quarterlyThreshold
+        ? daysSinceQuarterly - quarterlyThreshold
+        : null;
+  const plannedOverdueDays =
+    daysSincePlanned === null
+      ? plannedThreshold + 1
+      : daysSincePlanned > plannedThreshold
+        ? daysSincePlanned - plannedThreshold
+        : null;
+  const overdueTypes: ("quarterly" | "planned")[] = [];
+  if (quarterlyOverdueDays !== null) overdueTypes.push("quarterly");
+  if (plannedOverdueDays !== null) overdueTypes.push("planned");
+  return {
+    lastQuarterly,
+    lastPlanned,
+    lastAny,
+    quarterlyOverdueDays,
+    plannedOverdueDays,
+    overdueTypes,
+  };
 }
 
 /**
@@ -556,59 +634,60 @@ async function countOpenActionsForAgents(
 }
 
 /**
- * Top N sites sans visite récente. Dérive `lastVisitDate` par sous-requête.
+ * Top N sites à visiter — suit les deux mécanismes INDÉPENDANTS de
+ * visite (cf. memory/business-rules.md §Visites) :
+ *  - trimestrielle : 90 j pour tous les sites ;
+ *  - planifiée    : 180 j (occupé) / 365 j (inoccupé).
+ *
+ * Un site est inclus dans la watchlist si au moins une des deux cadences
+ * est dépassée. Le tri se fait par retard maximal toutes cadences
+ * confondues (« le plus en retard d'abord »). Les sites jamais visités
+ * sur une cadence sont considérés en retard maximal sur cette cadence.
  */
 export async function getSitesWithoutVisit(
   user: SessionUser,
   now: Date,
   limit = 5,
 ): Promise<{ items: WatchlistItem[]; total: number }> {
-  const sites = await prisma.site.findMany({
-    where: { isActive: true, ...siteScope(user) },
-    select: {
-      id: true,
-      name: true,
-      visits: {
-        where: { status: "completed", finishedAt: { not: null } },
-        orderBy: { finishedAt: "desc" },
-        take: 1,
-        select: { finishedAt: true },
-      },
-    },
-    take: 500,
-  });
+  const sites = await fetchSitesWithRecentVisits(user);
   const enriched = sites.map((s) => {
-    const last = s.visits[0]?.finishedAt ?? null;
-    const daysSince = last
-      ? Math.floor((now.getTime() - last.getTime()) / DAY_MS)
+    const status = computeSiteVisitStatus(s, now);
+    const maxOverdue = Math.max(
+      status.quarterlyOverdueDays ?? 0,
+      status.plannedOverdueDays ?? 0,
+    );
+    // daysSince exposé = jours depuis la dernière visite quelle que soit
+    // la cadence (préserve la signature de WatchlistItem).
+    const daysSinceLastAny = status.lastAny
+      ? Math.floor((now.getTime() - status.lastAny.getTime()) / DAY_MS)
       : null;
-    return { id: s.id, name: s.name, daysSince };
+    return { site: s, status, maxOverdue, daysSinceLastAny };
   });
-  enriched.sort((a, b) => {
-    if (a.daysSince === null && b.daysSince === null) return 0;
-    if (a.daysSince === null) return -1;
-    if (b.daysSince === null) return 1;
-    return b.daysSince - a.daysSince;
+  // Filtre : au moins une cadence en retard.
+  const watchlist = enriched.filter((e) => e.status.overdueTypes.length > 0);
+  // Tri : le plus en retard d'abord (tie-break sur lastAny null first).
+  watchlist.sort((a, b) => {
+    if (b.maxOverdue !== a.maxOverdue) return b.maxOverdue - a.maxOverdue;
+    if (a.daysSinceLastAny === null && b.daysSinceLastAny !== null) return -1;
+    if (b.daysSinceLastAny === null && a.daysSinceLastAny !== null) return 1;
+    return (b.daysSinceLastAny ?? 0) - (a.daysSinceLastAny ?? 0);
   });
-  // On ne retient que les sites réellement « à visiter » : jamais visités
-  // OU dont la dernière visite trimestrielle dépasse 90 jours
-  // (DEFAULT_VISIT_FREQUENCY_DAYS, heuristique V1).
-  const watchlist = enriched.filter(
-    (s) => (s.daysSince ?? Infinity) > DEFAULT_VISIT_FREQUENCY_DAYS,
-  );
   const top = watchlist.slice(0, limit);
-  // Compteur d'équipements en alerte (périmé OU expirant ≤ 30 j) par site.
   const equipmentAlertsBySite = await countEquipmentAlertsForSites(
-    top.map((s) => s.id),
+    top.map((e) => e.site.id),
     now,
   );
-  const items: WatchlistItem[] = top.map((s) => ({
-    id: s.id,
-    name: s.name,
-    daysSince: s.daysSince,
-    level: levelForVisitOverdue(s.daysSince),
-    cta: { label: "Visiter", href: `/visits/new?siteId=${s.id}` },
-    badges: { equipmentAlerts: equipmentAlertsBySite.get(s.id) ?? 0 },
+  const items: WatchlistItem[] = top.map((e) => ({
+    id: e.site.id,
+    name: e.site.name,
+    daysSince: e.daysSinceLastAny,
+    level: levelForVisitOverdue(e.maxOverdue, e.site.isOccupied),
+    cta: { label: "Visiter", href: `/visits/new?siteId=${e.site.id}` },
+    badges: {
+      equipmentAlerts: equipmentAlertsBySite.get(e.site.id) ?? 0,
+      overdueVisitTypes: e.status.overdueTypes,
+      isUnoccupied: !e.site.isOccupied,
+    },
   }));
   return { items, total: watchlist.length };
 }
@@ -655,10 +734,17 @@ const levelForFreshness = (daysSince: number | null): "red" | "orange" | "yellow
   return "yellow";
 };
 
-const levelForVisitOverdue = (daysSince: number | null): "red" | "orange" | "yellow" => {
-  if (daysSince === null) return "red";
-  if (daysSince > DEFAULT_VISIT_FREQUENCY_DAYS) return "red";
-  if (daysSince > DEFAULT_VISIT_FREQUENCY_DAYS - 14) return "orange";
+/**
+ * Niveau visuel d'un site en retard de visite.
+ * `overdueDays` = nombre de jours de retard sur la cadence la plus
+ * contraignante. `isOccupied` permet d'ajuster les seuils si besoin.
+ */
+const levelForVisitOverdue = (
+  overdueDays: number,
+  _isOccupied: boolean,
+): "red" | "orange" | "yellow" => {
+  if (overdueDays > 30) return "red";
+  if (overdueDays > 7) return "orange";
   return "yellow";
 };
 

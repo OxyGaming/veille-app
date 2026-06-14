@@ -34,6 +34,26 @@ export function WatchlistRow({ item, freshnessLabel, detailHref }: Props) {
         <p className="mt-0.5 text-xs text-slate-600">{freshnessLabel}</p>
         {hasBadges(item) && (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {item.badges?.overdueVisitTypes?.includes("quarterly") ? (
+              <span
+                className="inline-flex items-center gap-1 rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-800"
+                title="Visite trimestrielle (90 j) dépassée"
+              >
+                Trimestrielle
+              </span>
+            ) : null}
+            {item.badges?.overdueVisitTypes?.includes("planned") ? (
+              <span
+                className="inline-flex items-center gap-1 rounded-md bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-800"
+                title={
+                  item.badges?.isUnoccupied
+                    ? "Visite planifiée (365 j site inoccupé) dépassée"
+                    : "Visite planifiée (180 j site occupé) dépassée"
+                }
+              >
+                Planifiée{item.badges?.isUnoccupied ? " · inoccupé" : ""}
+              </span>
+            ) : null}
             {item.badges?.openActions ? (
               <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
                 {item.badges.openActions} action
@@ -62,7 +82,11 @@ export function WatchlistRow({ item, freshnessLabel, detailHref }: Props) {
 
 function hasBadges(item: WatchlistItem): boolean {
   if (!item.badges) return false;
-  return Boolean(item.badges.openActions || item.badges.equipmentAlerts);
+  return Boolean(
+    item.badges.openActions ||
+      item.badges.equipmentAlerts ||
+      item.badges.overdueVisitTypes?.length,
+  );
 }
 
 const DOT: Record<WatchlistItem["level"], string> = {

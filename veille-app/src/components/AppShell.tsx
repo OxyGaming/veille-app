@@ -8,16 +8,19 @@ import { Icon } from "@/components/icons";
 type Props = {
   user: { id: string; name: string; role: string; teamId: string | null };
   children: React.ReactNode;
+  todayEnabled?: boolean;
 };
 
-const NAV_MOBILE = [
+const TODAY_ITEM = { href: "/today", label: "Aujourd'hui", icon: Icon.Home };
+
+const BASE_NAV_MOBILE = [
   { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
   { href: "/visits", label: "Visites", icon: Icon.FileText },
   { href: "/agents", label: "Agents", icon: Icon.Users },
   { href: "/sites", label: "Sites", icon: Icon.Building },
   { href: "/history", label: "Histo.", icon: Icon.Clipboard },
 ];
-const NAV_DESKTOP = [
+const BASE_NAV_DESKTOP = [
   { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
   { href: "/visits", label: "Visites", icon: Icon.FileText },
   { href: "/sessions", label: "Sessions", icon: Icon.ClipboardCheck },
@@ -28,9 +31,16 @@ const NAV_DESKTOP = [
   { href: "/links", label: "Liens utiles", icon: Icon.Link },
   { href: "/contacts", label: "Contacts", icon: Icon.Phone },
 ];
-const NAV = NAV_MOBILE;
 
-export default function AppShell({ user, children }: Props) {
+export default function AppShell({ user, children, todayEnabled = false }: Props) {
+  const navMobile = todayEnabled ? [TODAY_ITEM, ...BASE_NAV_MOBILE] : BASE_NAV_MOBILE;
+  const navDesktop = todayEnabled
+    ? [TODAY_ITEM, ...BASE_NAV_DESKTOP]
+    : BASE_NAV_DESKTOP;
+  const NAV = navMobile;
+  const NAV_DESKTOP = navDesktop;
+  const mobileGridClass = todayEnabled ? "grid-cols-6" : "grid-cols-5";
+
   const pathname = usePathname();
   const router = useRouter();
   const [online, setOnline] = useState(true);
@@ -211,7 +221,7 @@ export default function AppShell({ user, children }: Props) {
 
         {/* Bottom nav mobile */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 no-print z-30">
-          <div className="grid grid-cols-5">
+          <div className={`grid ${mobileGridClass}`}>
             {NAV.map((n) => {
               const active =
                 pathname === n.href || pathname.startsWith(n.href + "/");

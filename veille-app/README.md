@@ -134,6 +134,17 @@ Build :
 npm run build && npm start
 ```
 
+## Feature flags
+
+Les flags sont lus côté serveur depuis `process.env` (cf. `src/lib/featureFlags.ts`).
+
+| Variable | Défaut | Effet |
+|---|---|---|
+| `ENABLE_TODAY` | `true` | Active l'écran `/today` et redirige `/` vers `/today`. Mettre à `false` pour rollback vers `/procedures` (legacy). |
+
+Pour exposer un flag côté client, le passer en prop depuis un Server Component
+vers un Client Component (cf. `app/(app)/layout.tsx` → `AppShell`).
+
 ## Prochaines évolutions suggérées
 
 - **Tableaux de bord** : agrégats NC/AR par domaine, taux conformité par agent.

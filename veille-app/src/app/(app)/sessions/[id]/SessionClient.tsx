@@ -593,7 +593,7 @@ function PhotoControls({
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={p.storagePath}
+              src={`/api/photos/${p.id}/file`}
               alt={p.legend ?? ""}
               className="w-full h-full object-cover"
             />

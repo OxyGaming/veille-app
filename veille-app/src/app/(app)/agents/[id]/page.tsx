@@ -294,14 +294,14 @@ export default async function AgentPage({
                     {s.photos.map((p) => (
                       <a
                         key={p.id}
-                        href={p.storagePath}
+                        href={`/api/photos/${p.id}/file`}
                         target="_blank"
                         rel="noreferrer"
                         className="shrink-0 w-16 h-16 rounded-md overflow-hidden border border-slate-200 bg-slate-100"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={p.storagePath}
+                          src={`/api/photos/${p.id}/file`}
                           alt={p.legend ?? ""}
                           className="w-full h-full object-cover"
                         />

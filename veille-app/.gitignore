@@ -18,6 +18,7 @@ public/sw.js
 public/sw.js.map
 public/swe-worker-*.js
 public/uploads/
+data/uploads/
 
 .DS_Store
 Thumbs.db

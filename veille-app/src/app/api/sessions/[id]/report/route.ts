@@ -56,7 +56,7 @@ export async function GET(
         gravity: i.checklistItem.gravity ?? po.procedure.gravity,
         helpReference: i.checklistItem.helpReference,
         helpText: i.checklistItem.helpText,
-        photos: i.photos.map((p) => p.storagePath),
+        photos: i.photos.map((p) => `/api/photos/${p.id}/file`),
       }))
   );
 
@@ -92,14 +92,14 @@ export async function GET(
         helpReference: i.checklistItem.helpReference,
         helpText: i.checklistItem.helpText,
         photos: i.photos.map((p) => ({
-          path: p.storagePath,
+          path: `/api/photos/${p.id}/file`,
           legend: p.legend,
         })),
       })),
     })),
     nonConform: ncItems,
     sessionPhotos: session.photos.map((p) => ({
-      path: p.storagePath,
+      path: `/api/photos/${p.id}/file`,
       legend: p.legend,
     })),
   });

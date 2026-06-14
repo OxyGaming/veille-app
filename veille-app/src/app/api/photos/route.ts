@@ -4,10 +4,10 @@ import { join } from "path";
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { requireUser, teamScope } from "@/lib/auth";
-
-const UPLOAD_DIR =
-  process.env.VEILLE_UPLOAD_DIR ||
-  join(process.cwd(), "public", "uploads");
+import {
+  PRIVATE_UPLOAD_DIR,
+  buildPrivateStoragePath,
+} from "@/lib/photoStorage";
 
 export async function POST(req: Request) {
   let u;
@@ -86,17 +86,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   }
 
-  // Persistence disque.
-  // Nom de fichier : timestamp + 64 chars hex (256 bits d'entropie).
-  // Mitigation tactique US-1.5 — anti-énumération en attendant le refactor
-  // complet (route streaming auth + stockage hors `public/`) prévu Sprint 3.
-  // Cf. AUDIT.md §C1 / DECISIONS-SPRINT1.md commit 8.
+  // Persistence disque — dossier PRIVÉ (hors `public/`).
+  // Nom : timestamp + 64 chars hex (256 bits) — anti-énumération préservée.
+  // Lecture obligatoire via la route auth `/api/photos/[id]/file`.
+  // Cf. Sprint 3 C9 / lib/photoStorage.ts pour la résolution multi-format.
   const buf = Buffer.from(await file.arrayBuffer());
   const name = `${Date.now()}_${randomBytes(32).toString("hex")}.jpg`;
-  const dir = join(UPLOAD_DIR, "photos");
+  const dir = join(PRIVATE_UPLOAD_DIR, "photos");
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, name), buf);
-  const storagePath = `/uploads/photos/${name}`;
+  const storagePath = buildPrivateStoragePath(name);
 
   const created = await prisma.photo.create({
     data: {

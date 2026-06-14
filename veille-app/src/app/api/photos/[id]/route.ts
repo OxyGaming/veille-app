@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
 import { unlink } from "fs/promises";
-import { join } from "path";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
-
-const UPLOAD_DIR =
-  process.env.VEILLE_UPLOAD_DIR ||
-  join(process.cwd(), "public", "uploads");
+import { resolvePhotoFilePath } from "@/lib/photoStorage";
 
 const patchSchema = z.object({
   legend: z.string().nullable().optional(),
@@ -77,17 +73,14 @@ export async function DELETE(
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   }
 
-  // Suppression du fichier disque : on accepte ENOENT (déjà absent) pour ne
-  // pas bloquer la suppression de la row.
-  if (photo.storagePath && photo.storagePath.startsWith("/uploads/")) {
-    const rel = photo.storagePath.replace(/^\/uploads\//, "");
-    // Garde-fou path traversal : pas de `..` autorisé.
-    if (!rel.includes("..")) {
-      const absolute = join(UPLOAD_DIR, rel);
-      await unlink(absolute).catch((e: NodeJS.ErrnoException) => {
-        if (e.code !== "ENOENT") throw e;
-      });
-    }
+  // Suppression du fichier disque : multi-format (private/legacy) via le
+  // helper. On accepte ENOENT (déjà absent) pour ne pas bloquer la
+  // suppression de la row.
+  const loc = resolvePhotoFilePath(photo.storagePath);
+  if (loc) {
+    await unlink(loc.absolutePath).catch((e: NodeJS.ErrnoException) => {
+      if (e.code !== "ENOENT") throw e;
+    });
   }
   await prisma.photo.delete({ where: { id } });
   return NextResponse.json({ ok: true });

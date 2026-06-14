@@ -134,6 +134,15 @@ Build :
 npm run build && npm start
 ```
 
+## Règles métier & décisions PO
+
+Les règles métier validées et les décisions PO en vigueur sont consignées à la racine du dépôt et **font foi** en cas d'écart avec n'importe quel autre document de conception (audits, vision, backlogs) :
+
+- [`memory/business-rules.md`](../memory/business-rules.md) — cadences de visites (trimestrielle 90 j, planifiées 180/365 j selon `Site.isOccupied`), multi-équipes sites, notifications équipe, audio abandonné.
+- [`memory/decisions.md`](../memory/decisions.md) — état des sprints, capacités livrées, capacités déférées.
+
+À consulter avant tout développement métier (Hub Échéances, modélisation, notifications, etc.).
+
 ## Feature flags
 
 Les flags sont lus côté serveur depuis `process.env` (cf. `src/lib/featureFlags.ts`).

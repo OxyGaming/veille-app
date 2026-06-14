@@ -1,0 +1,88 @@
+import type { TodayPayload } from "@/lib/today/types";
+
+type Props = { payload: TodayPayload };
+
+/**
+ * En-tête de l'écran Aujourd'hui — varie selon le rôle.
+ * Server component pur (pas d'interaction). Le `now` vient du payload pour
+ * rester cohérent avec ce que l'agrégateur a calculé.
+ */
+export function TodayHeader({ payload }: Props) {
+  const now = new Date(payload.now);
+  const dateLabel = formatFrenchDate(now);
+
+  if (payload.role === "USER") {
+    const firstName = payload.greeting.name.split(" ")[0] || payload.greeting.name;
+    const emoji = parisHourIsDaylight(now) ? "☀️" : "🌙";
+    return (
+      <header className="px-4 lg:px-8 pt-5 lg:pt-8 pb-2">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">
+          Bonjour {firstName} <span aria-hidden>{emoji}</span>
+        </h1>
+        <p className="mt-1 text-sm text-slate-600">
+          {dateLabel}
+          {payload.greeting.teamName ? ` · ${payload.greeting.teamName}` : ""}
+        </p>
+      </header>
+    );
+  }
+
+  if (payload.role === "EDITOR") {
+    const { teamsCount, sitesCount, agentsCount } = payload.tour.perimeter;
+    return (
+      <header className="px-4 lg:px-8 pt-5 lg:pt-8 pb-2">
+        <p className="text-[11px] font-mono tracking-wider text-slate-500 uppercase">
+          Ma tournée
+        </p>
+        <h1 className="mt-1 text-2xl lg:text-3xl font-bold text-slate-900">
+          {dateLabel}
+        </h1>
+        <p className="mt-1 text-sm text-slate-600">
+          {pluralize(teamsCount, "équipe")} · {pluralize(sitesCount, "site")} ·{" "}
+          {pluralize(agentsCount, "agent")}
+        </p>
+      </header>
+    );
+  }
+
+  // ADMIN
+  return (
+    <header className="px-4 lg:px-8 pt-5 lg:pt-8 pb-2">
+      <p className="text-[11px] font-mono tracking-wider text-slate-500 uppercase">
+        Pilotage système
+      </p>
+      <h1 className="mt-1 text-2xl lg:text-3xl font-bold text-slate-900">
+        {dateLabel}
+      </h1>
+    </header>
+  );
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function formatFrenchDate(date: Date): string {
+  // Locale fr-FR + timeZone Paris pour un rendu déterministe quel que soit
+  // le fuseau du serveur.
+  return new Intl.DateTimeFormat("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "Europe/Paris",
+  }).format(date);
+}
+
+function parisHourIsDaylight(date: Date): boolean {
+  // Récupère l'heure (0-23) en Europe/Paris pour choisir l'emoji.
+  const hourStr = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris",
+    hour: "2-digit",
+    hour12: false,
+  }).format(date);
+  const hour = parseInt(hourStr.replace(/[^0-9]/g, ""), 10);
+  if (Number.isNaN(hour)) return true;
+  return hour >= 7 && hour < 19;
+}
+
+function pluralize(n: number, word: string): string {
+  return `${n} ${word}${n > 1 ? "s" : ""}`;
+}

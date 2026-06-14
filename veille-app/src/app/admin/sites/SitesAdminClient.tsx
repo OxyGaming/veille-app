@@ -180,6 +180,12 @@ export default function SitesAdminClient({
         )
       );
       setEditTeams(null);
+      toast.success(
+        `Équipes mises à jour (${newNames.length} équipe${newNames.length > 1 ? "s" : ""})`,
+      );
+    } else {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || "Mise à jour refusée");
     }
   }
 
@@ -321,13 +327,19 @@ export default function SitesAdminClient({
                         <span
                           key={n}
                           className="bg-indigo-50 border border-indigo-200 text-indigo-700 px-1.5 py-0.5 rounded font-mono text-[10px]"
+                          title={`Équipe rattachée : ${n}`}
                         >
                           {n}
                         </span>
                       ))}
                     </span>
                   ) : (
-                    <span className="text-slate-400">—</span>
+                    <span
+                      className="inline-flex items-center gap-1 rounded bg-rose-50 border border-rose-200 text-rose-700 px-1.5 py-0.5 font-mono text-[10px]"
+                      title="Site sans équipe — accessible uniquement aux ADMIN. Cliquez sur « Équipes » pour rattacher."
+                    >
+                      Sans équipe
+                    </span>
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono">
@@ -385,8 +397,9 @@ export default function SitesAdminClient({
                   <button
                     onClick={() => setEditTeams(s)}
                     className="text-xs text-slate-500 hover:text-indigo-700 px-2 py-1 rounded hover:bg-indigo-50"
+                    title="Modifier les équipes rattachées à ce site"
                   >
-                    Équipes
+                    Équipes ({s.teamNames.length})
                   </button>
                   <button
                     onClick={() => hardDelete(s)}
@@ -549,20 +562,32 @@ function TeamPicker({
   onCancel: () => void;
   onSave: (ids: string[]) => void;
 }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set(site.teamIds));
+  const initial = new Set(site.teamIds);
+  const [selected, setSelected] = useState<Set<string>>(initial);
+  const count = selected.size;
+  const initialCount = initial.size;
+  const willRemoveAll = count === 0;
+  const dirty =
+    selected.size !== initial.size ||
+    [...selected].some((id) => !initial.has(id));
   return (
     <>
       <div className="fixed inset-0 bg-slate-900/40 z-50" onClick={onCancel} />
       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden">
         <header className="px-4 py-3 border-b border-slate-200">
           <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
-            Équipes
+            Équipes affectées
           </div>
           <div className="text-sm font-bold">{site.name}</div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            Un site peut appartenir à plusieurs équipes. Toutes les équipes
+            rattachées verront le site.
+          </div>
         </header>
         <div className="p-3 space-y-1 max-h-80 overflow-auto">
           {teams.map((t) => {
             const sel = selected.has(t.id);
+            const wasInitial = initial.has(t.id);
             return (
               <label
                 key={t.id}
@@ -580,21 +605,45 @@ function TeamPicker({
                     setSelected(next);
                   }}
                 />
-                <span className="text-sm">{t.name}</span>
+                <span className="text-sm flex-1">{t.name}</span>
+                {wasInitial && (
+                  <span className="text-[10px] font-mono text-slate-500">
+                    déjà rattachée
+                  </span>
+                )}
               </label>
             );
           })}
         </div>
-        <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+        {willRemoveAll && (
+          <div
+            role="alert"
+            className="mx-3 mb-2 rounded-md bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-800"
+          >
+            Au moins une équipe est requise. Le site doit rester rattaché à
+            un périmètre.
+          </div>
+        )}
+        <div className="px-4 py-3 border-t border-slate-200 flex items-center gap-2">
+          <span className="text-[11px] font-mono text-slate-500">
+            {count} équipe{count > 1 ? "s" : ""} sélectionnée{count > 1 ? "s" : ""}
+            {dirty && (
+              <span className="ml-2 text-indigo-600">
+                · {count - initialCount > 0 ? "+" : ""}
+                {count - initialCount}
+              </span>
+            )}
+          </span>
           <button
             onClick={onCancel}
-            className="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-slate-100"
+            className="ml-auto text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-slate-100"
           >
             Annuler
           </button>
           <button
             onClick={() => onSave([...selected])}
-            className="btn btn-primary"
+            disabled={willRemoveAll || !dirty}
+            className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Enregistrer
           </button>

@@ -258,6 +258,11 @@ model Site {
   /// Présence d'un local de graissage sur le site. Si false, la section
   /// « 3 - Locaux de graissage » est filtrée du PDF de visite planifiée.
   hasGreasingArea Boolean @default(false)
+  /// Nature occupé/inoccupé du site. Détermine la cadence des visites
+  /// PLANIFIÉES (180 j si occupé / 365 j si inoccupé). N'affecte PAS
+  /// la cadence des visites trimestrielles (toujours 90 j).
+  /// Cf. memory/business-rules.md §Visites.
+  isOccupied      Boolean @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

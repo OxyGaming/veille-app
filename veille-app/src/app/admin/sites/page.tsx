@@ -30,6 +30,7 @@ export default async function SitesAdminPage() {
         isActive: s.isActive,
         isVisible: s.isVisible,
         hasGreasingArea: s.hasGreasingArea,
+        isOccupied: s.isOccupied,
         teamIds: s.memberships.map((m) => m.teamId),
         teamNames: s.memberships.map((m) => m.team.name),
         visitsCount: s._count.visits,

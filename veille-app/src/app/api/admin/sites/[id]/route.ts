@@ -12,6 +12,7 @@ const schema = z.object({
   isVisible: z.boolean().optional(),
   isActive: z.boolean().optional(),
   hasGreasingArea: z.boolean().optional(),
+  isOccupied: z.boolean().optional(),
   teamIds: z.array(z.string()).optional(),
 });
 
@@ -57,6 +58,7 @@ export async function PATCH(
         isVisible: parsed.data.isVisible,
         isActive: parsed.data.isActive,
         hasGreasingArea: parsed.data.hasGreasingArea,
+        isOccupied: parsed.data.isOccupied,
       },
     });
     if (parsed.data.teamIds) {

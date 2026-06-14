@@ -14,6 +14,7 @@ type Site = {
   isActive: boolean;
   isVisible: boolean;
   hasGreasingArea: boolean;
+  isOccupied: boolean;
   teamIds: string[];
   teamNames: string[];
   visitsCount: number;
@@ -102,6 +103,7 @@ export default function SitesAdminClient({
           actionsCount: 0,
           isVisible: true,
           hasGreasingArea: false,
+          isOccupied: true,
         },
       ]);
       setCreating(false);
@@ -139,6 +141,24 @@ export default function SitesAdminClient({
           x.id === s.id
             ? { ...x, hasGreasingArea: !x.hasGreasingArea }
             : x
+        )
+      );
+    }
+  }
+
+  // Occupé/inoccupé : impacte uniquement la cadence des visites planifiées
+  // (180 j si occupé, 365 j si inoccupé). Ne touche pas à la cadence
+  // trimestrielle (toujours 90 j). Cf. memory/business-rules.md §Visites.
+  async function toggleOccupied(s: Site) {
+    const res = await fetch(`/api/admin/sites/${s.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isOccupied: !s.isOccupied }),
+    });
+    if (res.ok) {
+      setSites((arr) =>
+        arr.map((x) =>
+          x.id === s.id ? { ...x, isOccupied: !x.isOccupied } : x
         )
       );
     }
@@ -273,6 +293,12 @@ export default function SitesAdminClient({
               <th className="text-center px-4 py-2.5" title="Local de graissage présent sur le site">
                 Graissage
               </th>
+              <th
+                className="text-center px-4 py-2.5"
+                title="Occupé → visite planifiée tous les 180 j. Inoccupé → tous les 365 j. Cadence trimestrielle (90 j) inchangée."
+              >
+                Occupation
+              </th>
               <th className="text-center px-4 py-2.5">Visibilité</th>
               <th />
             </tr>
@@ -374,7 +400,7 @@ export default function SitesAdminClient({
             ))}
             {!sites.length && (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
                   Aucun site.
                 </td>
               </tr>

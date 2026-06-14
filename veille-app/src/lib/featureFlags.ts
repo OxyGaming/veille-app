@@ -22,3 +22,11 @@ function readBool(value: string | undefined, defaultValue: boolean): boolean {
 export function isTodayEnabled(): boolean {
   return readBool(process.env.ENABLE_TODAY, true);
 }
+
+/**
+ * Hub Échéances (Sprint 4 — US-4.x). Réservé EDITOR + ADMIN (D2).
+ * Activé par défaut. Désactivable via `ENABLE_ECHEANCES=false`.
+ */
+export function isEcheancesEnabled(): boolean {
+  return readBool(process.env.ENABLE_ECHEANCES, true);
+}

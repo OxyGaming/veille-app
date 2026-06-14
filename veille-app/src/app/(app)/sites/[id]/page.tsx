@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser, siteScope } from "@/lib/auth";
 import AgentActionsClient from "@/app/(app)/agents/[id]/AgentActionsClient";
 import SiteEquipmentsClient from "./SiteEquipmentsClient";
+import { SiteEcheancesSection } from "./components/SiteEcheancesSection";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
@@ -153,6 +154,12 @@ export default async function SitePage({
           </Link>
         </div>
       </header>
+
+      <SiteEcheancesSection
+        user={u}
+        siteId={site.id}
+        siteIsOccupied={site.isOccupied}
+      />
 
       <section className="mt-6">
         <h2 className="text-base font-bold mb-2.5 flex items-center gap-2">

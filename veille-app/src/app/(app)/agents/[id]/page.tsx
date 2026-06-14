@@ -192,6 +192,7 @@ export default async function AgentPage({
         <AgentActionsClient
           agentId={id}
           agentName={`${agent.firstName} ${agent.lastName}`}
+          userRole={u.role}
           actions={activeActions.map((a) => ({
             id: a.id,
             externalId: a.externalId,

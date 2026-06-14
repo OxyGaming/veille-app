@@ -41,22 +41,32 @@ export default function AgentActionsClient({
   agentName,
   actions: initial,
   targetKind = "agent",
+  userRole = "USER",
 }: {
   agentId: string;
   agentName: string;
   actions: Action[];
   /** Type de cible : "agent" (par défaut) ou "site". Détermine les endpoints. */
   targetKind?: "agent" | "site";
+  /**
+   * Sprint 7 C2 — rôle de l'utilisateur courant. Conditionne l'affichage
+   * du bouton « Retirer » (EDITOR / ADMIN uniquement, jamais USER).
+   */
+  userRole?: "USER" | "EDITOR" | "ADMIN";
 }) {
   const router = useRouter();
   const [actions, setActions] = useState(initial);
   const [validating, setValidating] = useState<Action | null>(null);
+  const [obsoleting, setObsoleting] = useState<Action | null>(null);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
+  const [obsoleteBusy, setObsoleteBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [sighting, setSighting] = useState(false);
   const [noting, setNoting] = useState(false);
+
+  const canManage = userRole === "EDITOR" || userRole === "ADMIN";
 
   function toggleExpanded(id: string) {
     setExpanded((s) => {
@@ -96,6 +106,43 @@ export default function AgentActionsClient({
       router.refresh();
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Sprint 7 C2 — Marquage obsolète (cascade sur le groupe de doublons).
+  async function confirmObsolete() {
+    if (!obsoleting) return;
+    setObsoleteBusy(true);
+    try {
+      const ids = obsoleting.duplicates.map((d) => d.id);
+      let updated = 0;
+      for (const aid of ids) {
+        const res = await fetch(`/api/actions/${aid}/obsolete`, {
+          method: "POST",
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (res.status === 409 && j?.code === "ACTION_VALIDATED") {
+            toast.error(
+              "Annulez la validation avant de retirer cette action.",
+            );
+            return;
+          }
+          toast.error(j?.error || "Erreur lors du retrait");
+          return;
+        }
+        if (j?.ok && !j.noop) updated++;
+      }
+      setActions((arr) => arr.filter((x) => x.id !== obsoleting.id));
+      setObsoleting(null);
+      toast.success(
+        updated > 0
+          ? "Action retirée du suivi opérationnel"
+          : "Action déjà retirée",
+      );
+      router.refresh();
+    } finally {
+      setObsoleteBusy(false);
     }
   }
 
@@ -319,7 +366,7 @@ export default function AgentActionsClient({
                   </div>
                 </div>
               )}
-              <div className="flex gap-2 mt-2.5">
+              <div className="flex gap-2 mt-2.5 flex-wrap">
                 <button
                   onClick={() => openValidate(a)}
                   className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
@@ -331,6 +378,20 @@ export default function AgentActionsClient({
                     </span>
                   )}
                 </button>
+                {canManage && (
+                  <button
+                    onClick={() => setObsoleting(a)}
+                    className="text-xs bg-white border border-slate-200 text-slate-700 hover:border-rose-300 hover:text-rose-700 font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                    title="Retirer cette action du suivi opérationnel (reste conservée dans l'historique)"
+                  >
+                    <Icon.X className="w-3.5 h-3.5" /> Retirer
+                    {a.duplicateCount > 1 && (
+                      <span className="text-[10px] font-mono text-slate-500">
+                        ×{a.duplicateCount}
+                      </span>
+                    )}
+                  </button>
+                )}
               </div>
             </li>
           );
@@ -348,6 +409,102 @@ export default function AgentActionsClient({
           onClose={() => setValidating(null)}
         />
       )}
+      {obsoleting && (
+        <ObsoleteModal
+          action={obsoleting}
+          busy={obsoleteBusy}
+          onConfirm={confirmObsolete}
+          onClose={() => setObsoleting(null)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Sprint 7 C2 — Confirmation avant `POST /api/actions/[id]/obsolete`.
+ *
+ * Bottom-sheet mobile / modal centré desktop, calqué sur `ValidateModal`
+ * pour cohérence UX. Message PO littéral. Pas de saisie — confirmation pure.
+ */
+function ObsoleteModal({
+  action,
+  busy,
+  onConfirm,
+  onClose,
+}: {
+  action: Action;
+  busy: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-x-0 bottom-0 md:bottom-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-md md:w-full z-50 bg-white rounded-t-2xl md:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+      >
+        <header className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-rose-500" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+              Retirer une action
+            </div>
+            <div className="text-sm font-semibold truncate">
+              {action.keyPoint || action.externalId}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="p-4 space-y-3">
+          <p className="text-sm text-slate-700 leading-relaxed">
+            Cette action sera retirée du suivi opérationnel, mais restera
+            conservée dans l&apos;historique.
+          </p>
+          {action.duplicateCount > 1 && (
+            <div className="text-xs bg-rose-50 border border-rose-200 text-rose-800 rounded-lg px-3 py-2 flex items-start gap-2">
+              <span className="font-mono font-bold">
+                ×{action.duplicateCount}
+              </span>
+              <span>
+                Cette action est présente {action.duplicateCount} fois sous
+                des IDs différents. Toutes les occurrences seront retirées.
+              </span>
+            </div>
+          )}
+          <div className="flex gap-2 justify-end pt-1">
+            <button
+              onClick={onClose}
+              className="text-sm text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-100"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={busy}
+              className="bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg inline-flex items-center gap-1.5"
+            >
+              <Icon.X className="w-4 h-4" />
+              {busy
+                ? "Retrait…"
+                : action.duplicateCount > 1
+                  ? `Retirer les ${action.duplicateCount} occurrences`
+                  : "Confirmer le retrait"}
+            </button>
+          </div>
+        </div>
+      </div>
     </>
   );
 }

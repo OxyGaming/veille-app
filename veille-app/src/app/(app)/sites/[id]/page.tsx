@@ -170,6 +170,7 @@ export default async function SitePage({
           agentId={site.id}
           agentName={site.name}
           targetKind="site"
+          userRole={u.role}
           actions={actionsForClient}
         />
       </section>

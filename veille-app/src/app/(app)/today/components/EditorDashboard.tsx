@@ -4,6 +4,7 @@ import { KpiCard } from "./KpiCard";
 import { KpiSection } from "./KpiSection";
 import { WatchlistSection } from "./WatchlistSection";
 import { WatchlistRow } from "./WatchlistRow";
+import { ActivityFeedSection } from "./ActivityFeedSection";
 
 type Props = { payload: EditorPayload };
 
@@ -95,6 +96,8 @@ export function EditorDashboard({ payload }: Props) {
           />
         ))}
       </WatchlistSection>
+
+      <ActivityFeedSection items={payload.activityFeed} now={payload.now} />
     </>
   );
 }

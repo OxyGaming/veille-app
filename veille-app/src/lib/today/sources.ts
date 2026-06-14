@@ -30,6 +30,7 @@ import type {
   EditorDiagnostic,
   EditorWeekCounters,
   RecentActivityItem,
+  TeamActivityEvent,
   WatchlistItem,
 } from "./types";
 import {
@@ -712,6 +713,75 @@ async function countEquipmentAlertsForSites(
   const m = new Map<string, number>();
   for (const r of rows) m.set(r.siteId, r._count._all);
   return m;
+}
+
+/**
+ * Flux d'activité équipe — derniers événements TeamActivity du périmètre
+ * de l'EDITOR (toutes ses équipes confondues).
+ *
+ * Stratégie multi-équipes (lecture, miroir de C6/C7) :
+ *  - On filtre par `teamId IN [...u.teamIds]`.
+ *  - Comme un événement multi-team est dupliqué côté écriture (1 ligne par
+ *    teamId destinataire), un EDITOR appartenant à N équipes destinataires
+ *    verrait N copies du même event. On déduplique côté lecture sur
+ *    `(type, entityId, createdAt arrondi à la seconde)` pour ne montrer
+ *    qu'une ligne par événement réel.
+ *  - Pour disposer d'assez de candidats après dédup, on fetch `limit * 3`.
+ *
+ * Limite documentée : si un même `entityId` est touché 2 fois la même
+ * seconde, ces deux events seront fusionnés. Acceptable V1.
+ */
+export async function getTeamActivity(
+  user: SessionUser,
+  _now: Date,
+  limit = 8,
+): Promise<TeamActivityEvent[]> {
+  // ADMIN sans équipe propre : on renvoie vide côté EDITOR variant.
+  if (user.teamIds.length === 0) return [];
+  const rows = await prisma.teamActivity.findMany({
+    where: { teamId: { in: user.teamIds } },
+    orderBy: { createdAt: "desc" },
+    take: limit * 3,
+    select: {
+      id: true,
+      teamId: true,
+      createdAt: true,
+      actorName: true,
+      type: true,
+      entityId: true,
+      message: true,
+      targetUrl: true,
+    },
+  });
+  // Dédup par (type, entityId, seconde) — on garde la ligne avec le plus
+  // petit id (déterministe). teamIds est rebâti depuis les doublons.
+  const byKey = new Map<
+    string,
+    { row: (typeof rows)[number]; teamIds: Set<string> }
+  >();
+  for (const r of rows) {
+    const sec = Math.floor(r.createdAt.getTime() / 1000);
+    const key = `${r.type}|${r.entityId}|${sec}`;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.teamIds.add(r.teamId);
+      if (r.id < existing.row.id) existing.row = r;
+    } else {
+      byKey.set(key, { row: r, teamIds: new Set([r.teamId]) });
+    }
+  }
+  return [...byKey.values()]
+    .sort((a, b) => b.row.createdAt.getTime() - a.row.createdAt.getTime())
+    .slice(0, limit)
+    .map(({ row, teamIds }) => ({
+      id: row.id,
+      teamIds: [...teamIds],
+      createdAt: row.createdAt.toISOString(),
+      actorName: row.actorName,
+      type: row.type as TeamActivityEvent["type"],
+      message: row.message,
+      targetUrl: row.targetUrl,
+    }));
 }
 
 /**

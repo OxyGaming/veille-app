@@ -159,6 +159,31 @@ export type WatchlistItem = {
   };
 };
 
+/** Événement du flux d'activité équipe (cf. memory/business-rules.md §Sites). */
+export type TeamActivityEvent = {
+  id: string;
+  /** Liste des équipes destinataires (dédup côté serveur après merge). */
+  teamIds: string[];
+  /** ISO 8601 — date de création de l'événement. */
+  createdAt: string;
+  /** Texte humain prêt à afficher (« Marie a terminé une veille — … »). */
+  message: string;
+  /** Type d'événement, utilisé pour la couleur de la pastille. */
+  type:
+    | "SESSION_FINISHED"
+    | "VISIT_FINISHED"
+    | "AGENT_NOTE"
+    | "AGENT_SIGHTED"
+    | "ACTION_CREATED"
+    | "ACTION_VALIDATED"
+    | "EQUIPMENT_NON_COMPLIANT"
+    | "EQUIPMENT_REPLACED"
+    | "EQUIPMENT_ADDED";
+  /** URL cible au clic — null si non cliquable. */
+  targetUrl: string | null;
+  actorName: string | null;
+};
+
 /** Variante EDITOR (cf. TODAY-V1.md §5). */
 export type EditorPayload = {
   role: "EDITOR";
@@ -176,6 +201,8 @@ export type EditorPayload = {
   agentsToReviewTotal: number;
   sitesWithoutVisit: WatchlistItem[];
   sitesWithoutVisitTotal: number;
+  /** Flux d'activité équipe — chronologique DESC, dédupliqué multi-team. */
+  activityFeed: TeamActivityEvent[];
 };
 
 /** Alerte système ADMIN. */

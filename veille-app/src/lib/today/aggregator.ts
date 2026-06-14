@@ -22,6 +22,7 @@ import {
   getRecentActivityForUser,
   getSitesWithoutVisit,
   getStaleDrafts,
+  getTeamActivity,
 } from "./sources";
 import type {
   AdminPayload,
@@ -68,13 +69,15 @@ export async function aggregateEditor(
   user: SessionUser,
   now: Date,
 ): Promise<EditorPayload> {
-  const [perimeter, diagnostic, weekCounters, agents, sites] = await Promise.all([
-    getEditorPerimeter(user),
-    getEditorDiagnostic(user, now),
-    getEditorWeekCounters(user, now),
-    getAgentsToReview(user, now),
-    getSitesWithoutVisit(user, now),
-  ]);
+  const [perimeter, diagnostic, weekCounters, agents, sites, activityFeed] =
+    await Promise.all([
+      getEditorPerimeter(user),
+      getEditorDiagnostic(user, now),
+      getEditorWeekCounters(user, now),
+      getAgentsToReview(user, now),
+      getSitesWithoutVisit(user, now),
+      getTeamActivity(user, now, 8),
+    ]);
   return {
     role: "EDITOR",
     now: now.toISOString(),
@@ -85,6 +88,7 @@ export async function aggregateEditor(
     agentsToReviewTotal: agents.total,
     sitesWithoutVisit: sites.items,
     sitesWithoutVisitTotal: sites.total,
+    activityFeed,
   };
 }
 

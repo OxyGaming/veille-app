@@ -42,6 +42,7 @@ model User {
   icareMarks       IcareEntry[]
   hiddenAgents     UserAgentHidden[]
   teamActivities   TeamActivity[]
+  notifications    Notification[]
 
   @@index([teamId])
   @@index([isActive])
@@ -1062,4 +1063,48 @@ model TeamActivity {
   @@index([teamId, createdAt])
   @@index([actorId])
   @@index([type])
+}
+
+/// Notification personnelle — alimente le Centre de notifications (Sprint 5).
+///
+/// Une `Notification` cible un utilisateur précis (`userId`) et résulte
+/// d'un événement métier intéressant pour LUI (action assignée, sa
+/// propre action validée, visite terminée sur son site, etc.).
+///
+/// Distinct de `TeamActivity` : TeamActivity est un flux d'équipe,
+/// Notification est personnelle (1 ligne par destinataire).
+///
+/// Dédup multi-équipes via `dedupKey` : un même événement avec la
+/// même `(userId, dedupKey)` n'apparaît qu'une fois grâce à la
+/// contrainte d'unicité. Convention : `{TYPE}:{sourceId}` ou
+/// `{TYPE}:{sourceId}:{YYYY-MM-DD}` pour les types récurrents.
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  createdAt DateTime @default(now())
+  /// `null` = non lue. Date de lecture sinon.
+  readAt    DateTime?
+  /// Type d'événement — cf. src/lib/notifications.ts (`NOTIFICATION_TYPES`).
+  type      String
+  /// Titre court (« Action assignée », « Visite terminée »…).
+  title     String
+  /// Message humain prêt à afficher (« Marie a terminé la visite du site X »).
+  message   String
+  /// URL de navigation au clic. Si null, la ligne reste non cliquable.
+  targetUrl String?
+  /// Clé de dédup utilisée avec `userId` pour empêcher les doublons.
+  /// Convention : `{TYPE}:{sourceId}` ou `{TYPE}:{sourceId}:{date}`.
+  dedupKey  String?
+  /// Données techniques additionnelles (JSON souple, pas indexé).
+  metadata  String?
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Couvre les requêtes typiques : notifs non lues d'un user (badge),
+  /// liste paginée par date desc.
+  @@index([userId, readAt, createdAt])
+  /// Dédup stricte : un même event ne crée pas N notifs au même user.
+  /// SQLite autorise plusieurs NULL pour `dedupKey` → les events sans
+  /// clé créent toujours une nouvelle row.
+  @@unique([userId, dedupKey])
 }

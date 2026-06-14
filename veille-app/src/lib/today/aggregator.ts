@@ -144,14 +144,28 @@ export async function aggregateAdmin(
 }
 
 /**
- * Switch selon le rôle. ADMIN avec scope équipe verra C10 ajouter le bloc
- * EDITOR au-dessus du bloc système ; en V1 on renvoie le payload ADMIN brut.
+ * Switch selon le rôle.
+ *
+ * Sprint 6 C5 — Si un ADMIN a choisi un scope restreint (MY_TEAMS ou
+ * TEAM), on bascule vers `aggregateEditor` afin de présenter une vue
+ * de pilotage adaptée au périmètre. Les filtres Prisma appliqués par
+ * `aggregateEditor` héritent automatiquement de la restriction via
+ * les helpers `teamScope` / `siteScope` / `actionScope` / `agentScope`
+ * étendus dans `src/lib/auth.ts`. ADMIN GLOBAL conserve la vue système.
  */
 export async function aggregateToday(
   user: SessionUser,
   now: Date = new Date(),
 ): Promise<TodayPayload> {
-  if (user.role === "ADMIN") return aggregateAdmin(user, now);
+  if (user.role === "ADMIN") {
+    if (
+      user.adminScopeMode === "MY_TEAMS" ||
+      user.adminScopeMode === "TEAM"
+    ) {
+      return aggregateEditor(user, now);
+    }
+    return aggregateAdmin(user, now);
+  }
   if (user.role === "EDITOR") return aggregateEditor(user, now);
   return aggregateUser(user, now);
 }

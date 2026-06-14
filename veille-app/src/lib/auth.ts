@@ -131,14 +131,48 @@ export async function requireRole(roles: Role | Role[]): Promise<SessionUser> {
 }
 
 /**
+ * Sprint 6 C5 — Si un ADMIN a choisi un scope restreint (MY_TEAMS / TEAM),
+ * renvoie les `teamIds` à appliquer. Sinon `null` (passthrough : USER /
+ * EDITOR / ADMIN GLOBAL conservent leur comportement existant).
+ *
+ * Utilise `resolveAdminScope` (C3) comme source unique. Les fallbacks
+ * (ADMIN sans équipe → GLOBAL, etc.) sont déjà traités par le resolver.
+ */
+function adminScopedTeamIds(u: SessionUser): string[] | null {
+  if (u.role !== "ADMIN") return null;
+  if (
+    u.adminScopeMode !== "MY_TEAMS" &&
+    u.adminScopeMode !== "TEAM"
+  )
+    return null;
+  // `resolveAdminScope` est importé en lazy pour éviter une dépendance
+  // circulaire avec @/lib/admin-scope (qui dépend de @/lib/admin-scope-
+  // preference, lequel touche au type SessionUser).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { resolveAdminScope } = require("./admin-scope") as typeof import("./admin-scope");
+  const scope = resolveAdminScope({
+    role: u.role,
+    teamIds: u.teamIds,
+    adminScopeMode: u.adminScopeMode,
+    adminTeamId: u.adminTeamId,
+  });
+  // Fallback GLOBAL résolu côté C3 → on n'applique pas de restriction.
+  if (scope.isGlobal) return null;
+  return scope.teamIds;
+}
+
+/**
  * Filtre Prisma sur le champ scalaire `teamId` (legacy — sessions, imports,
  * actions où teamId est une colonne directe).
- * ADMIN ou viewAllTeams → pas de filtre.
- * Sinon → `teamId IN (équipes de l'utilisateur)`.
+ * ADMIN GLOBAL ou viewAllTeams → pas de filtre.
+ * ADMIN avec scope restreint (Sprint 6 C5) → `teamId IN (scope.teamIds)`.
+ * Sinon (USER / EDITOR) → `teamId IN (équipes de l'utilisateur)`.
  */
 export function teamScope(u: SessionUser): {
   teamId?: { in: string[] } | string;
 } | Record<string, never> {
+  const adminIds = adminScopedTeamIds(u);
+  if (adminIds) return { teamId: { in: adminIds } };
   if (u.role === "ADMIN" || u.viewAllTeams) return {};
   if (!u.teamIds.length) return { teamId: "__none__" };
   return { teamId: { in: u.teamIds } };
@@ -180,6 +214,9 @@ export function assertTeamAccess(u: SessionUser, teamId: string): boolean {
  *   prisma.agent.findMany({ where: { ...agentScope(u), isVisible: true } });
  */
 export function agentScope(u: SessionUser): Record<string, unknown> {
+  const adminIds = adminScopedTeamIds(u);
+  if (adminIds)
+    return { memberships: { some: { teamId: { in: adminIds } } } };
   if (u.role === "ADMIN" || u.viewAllTeams) return {};
   if (!u.teamIds.length) return { id: "__none__" };
   return { memberships: { some: { teamId: { in: u.teamIds } } } };
@@ -192,6 +229,16 @@ export function agentScope(u: SessionUser): Record<string, unknown> {
  *  - son site (s'il existe) appartient à au moins une équipe du scope.
  */
 export function actionScope(u: SessionUser): Record<string, unknown> {
+  const adminIds = adminScopedTeamIds(u);
+  if (adminIds) {
+    return {
+      OR: [
+        { teamId: { in: adminIds } },
+        { agent: { memberships: { some: { teamId: { in: adminIds } } } } },
+        { site: { memberships: { some: { teamId: { in: adminIds } } } } },
+      ],
+    };
+  }
   if (u.role === "ADMIN" || u.viewAllTeams) return {};
   if (!u.teamIds.length) return { id: "__none__" };
   return {
@@ -208,6 +255,9 @@ export function actionScope(u: SessionUser): Record<string, unknown> {
  * Un site est visible si au moins une de ses équipes est dans le scope.
  */
 export function siteScope(u: SessionUser): Record<string, unknown> {
+  const adminIds = adminScopedTeamIds(u);
+  if (adminIds)
+    return { memberships: { some: { teamId: { in: adminIds } } } };
   if (u.role === "ADMIN" || u.viewAllTeams) return {};
   if (!u.teamIds.length) return { id: "__none__" };
   return { memberships: { some: { teamId: { in: u.teamIds } } } };

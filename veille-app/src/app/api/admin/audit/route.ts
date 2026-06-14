@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth";
 import {
   aggregateAuditLogs,
+  getAuditUserScopeIds,
   type AuditFilters,
 } from "@/lib/audit-aggregator";
 
@@ -20,8 +21,9 @@ function parseDate(raw: string | null): Date | null {
 }
 
 export async function GET(req: Request) {
+  let user;
   try {
-    await requireRole(["ADMIN"]);
+    user = await requireRole(["ADMIN"]);
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;
@@ -34,7 +36,8 @@ export async function GET(req: Request) {
     action: url.searchParams.get("action"),
   };
   const cursor = url.searchParams.get("cursor");
-  const payload = await aggregateAuditLogs({ filters, cursor });
+  const userScope = await getAuditUserScopeIds(user);
+  const payload = await aggregateAuditLogs({ filters, cursor, userScope });
   return NextResponse.json(payload, {
     headers: { "Cache-Control": "private, max-age=10" },
   });

@@ -8,6 +8,7 @@
 import { requireRole } from "@/lib/auth";
 import {
   exportAuditLogs,
+  getAuditUserScopeIds,
   MAX_AUDIT_EXPORT,
   type AuditFilters,
 } from "@/lib/audit-aggregator";
@@ -31,8 +32,9 @@ function csvField(value: unknown): string {
 }
 
 export async function GET(req: Request) {
+  let user;
   try {
-    await requireRole(["ADMIN"]);
+    user = await requireRole(["ADMIN"]);
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;
@@ -44,7 +46,8 @@ export async function GET(req: Request) {
     userId: url.searchParams.get("userId"),
     action: url.searchParams.get("action"),
   };
-  const rows = await exportAuditLogs(filters);
+  const userScope = await getAuditUserScopeIds(user);
+  const rows = await exportAuditLogs(filters, userScope);
 
   const header = [
     "createdAt",

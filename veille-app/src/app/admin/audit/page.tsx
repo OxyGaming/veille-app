@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import {
   aggregateAuditLogs,
+  getAuditUserScopeIds,
   getAuditUsersOptions,
   getDistinctAuditActions,
   type AuditFilters,
@@ -43,17 +44,20 @@ export default async function AdminAuditPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
+  let user;
   try {
-    await requireRole(["ADMIN"]);
+    user = await requireRole(["ADMIN"]);
   } catch {
     redirect("/today");
   }
   const raw = await searchParams;
   const filters = parseFilters(raw);
+  // Sprint 6 C8 — scope ADMIN sur l'audit. GLOBAL → null (audit complet).
+  const userScope = await getAuditUserScopeIds(user);
   const [payload, actions, usersOpts] = await Promise.all([
-    aggregateAuditLogs({ filters }),
-    getDistinctAuditActions(),
-    getAuditUsersOptions(),
+    aggregateAuditLogs({ filters, userScope }),
+    getDistinctAuditActions(userScope),
+    getAuditUsersOptions(userScope),
   ]);
 
   return (

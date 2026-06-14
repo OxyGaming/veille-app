@@ -4,6 +4,7 @@ import { isTodayEnabled } from "@/lib/featureFlags";
 import { aggregateToday } from "@/lib/today/aggregator";
 import { TodayHeader } from "./components/TodayHeader";
 import { CurrentWorkCard } from "./components/CurrentWorkCard";
+import { TodoSection } from "./components/TodoSection";
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +20,13 @@ export default async function TodayPage() {
       <TodayHeader payload={payload} />
 
       {payload.role === "USER" && (
-        <CurrentWorkCard current={payload.current} />
+        <>
+          <CurrentWorkCard current={payload.current} />
+          <TodoSection items={payload.todoList} total={payload.todoTotal} />
+        </>
       )}
 
-      {/* Placeholders pour les sections livrées en C5-C10. Volontairement
-          discrets : un fond gris clair + libellé court. Aucun contenu fictif. */}
+      {/* Placeholders pour les sections C6-C10. Retirés au fil des commits. */}
       <Placeholder role={payload.role} />
     </div>
   );
@@ -32,7 +35,6 @@ export default async function TodayPage() {
 function Placeholder({ role }: { role: "USER" | "EDITOR" | "ADMIN" }) {
   const items: Record<typeof role, string[]> = {
     USER: [
-      "À traiter aujourd'hui (C5)",
       "Raccourcis (C6)",
       "Dernières activités (C6)",
     ],

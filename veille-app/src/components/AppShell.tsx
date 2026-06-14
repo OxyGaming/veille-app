@@ -80,7 +80,7 @@ export default function AppShell({ user, children, todayEnabled = false }: Props
   const isEditor = isAdmin || user.role === "EDITOR";
 
   return (
-    <div className="min-h-screen bg-slate-50 lg:flex">
+    <div className="min-h-dvh bg-slate-50 lg:flex">
       {/* ===== Sidebar desktop ===== */}
       <aside className="hidden lg:flex lg:flex-col lg:w-64 bg-slate-900 text-slate-100 sticky top-0 h-screen no-print">
         <div className="px-5 py-5 border-b border-white/10">
@@ -173,7 +173,12 @@ export default function AppShell({ user, children, todayEnabled = false }: Props
       </aside>
 
       {/* ===== Contenu principal ===== */}
-      <div className="flex-1 flex flex-col lg:min-h-screen min-h-screen pb-[64px] lg:pb-0">
+      {/*
+        - min-h-dvh : hauteur dynamique iOS (s'adapte à la barre URL).
+        - pb mobile = hauteur de la bottom-nav + safe-area iOS (zone gestures).
+          Sans, la dernière carte passe partiellement sous la nav fixed.
+      */}
+      <div className="flex-1 flex flex-col min-h-dvh lg:min-h-screen pb-[calc(64px+env(safe-area-inset-bottom))] lg:pb-0">
         {/* Top bar mobile */}
         <header className="lg:hidden sticky top-0 z-30 bg-slate-900 text-white no-print">
           <div className="px-4 py-3 flex items-center gap-3">
@@ -219,8 +224,13 @@ export default function AppShell({ user, children, todayEnabled = false }: Props
 
         <main className="flex-1">{children}</main>
 
-        {/* Bottom nav mobile */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 no-print z-30">
+        {/*
+          Bottom nav mobile — fixée au viewport.
+          pb-[env(safe-area-inset-bottom)] pousse le contenu au-dessus de la
+          zone de gestures iOS (~34 px sur iPhone X+) sans réduire la cible
+          tactile.
+        */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 no-print z-30 pb-[env(safe-area-inset-bottom)]">
           <div className={`grid ${mobileGridClass}`}>
             {NAV.map((n) => {
               const active =

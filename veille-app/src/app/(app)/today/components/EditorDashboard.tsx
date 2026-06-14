@@ -1,7 +1,9 @@
-import type { EditorPayload } from "@/lib/today/types";
+import type { EditorPayload, WatchlistItem } from "@/lib/today/types";
 import { DiagnosticBanner } from "./DiagnosticBanner";
 import { KpiCard } from "./KpiCard";
 import { KpiSection } from "./KpiSection";
+import { WatchlistSection } from "./WatchlistSection";
+import { WatchlistRow } from "./WatchlistRow";
 
 type Props = { payload: EditorPayload };
 
@@ -61,8 +63,55 @@ export function EditorDashboard({ payload }: Props) {
         <KpiCard label="Visites" value={w.visits} />
         <KpiCard label="Validations" value={w.closedActions} />
       </KpiSection>
+
+      <WatchlistSection
+        title="Agents à veiller"
+        total={payload.agentsToReviewTotal}
+        shown={payload.agentsToReview.length}
+        emptyMessage="Tous les agents ont eu une activité récente."
+      >
+        {payload.agentsToReview.map((item) => (
+          <WatchlistRow
+            key={item.id}
+            item={item}
+            freshnessLabel={freshnessLabelForAgent(item)}
+            detailHref={`/agents/${item.id}`}
+          />
+        ))}
+      </WatchlistSection>
+
+      <WatchlistSection
+        title="Sites à visiter"
+        total={payload.sitesWithoutVisitTotal}
+        shown={payload.sitesWithoutVisit.length}
+        emptyMessage="Aucun site en retard de visite trimestrielle."
+      >
+        {payload.sitesWithoutVisit.map((item) => (
+          <WatchlistRow
+            key={item.id}
+            item={item}
+            freshnessLabel={freshnessLabelForSite(item)}
+            detailHref={`/sites/${item.id}`}
+          />
+        ))}
+      </WatchlistSection>
     </>
   );
+}
+
+function freshnessLabelForAgent(item: WatchlistItem): string {
+  if (item.daysSince === null) return "Jamais veillé";
+  if (item.daysSince === 0) return "Vu aujourd'hui";
+  if (item.daysSince === 1) return "Vu hier";
+  return `Vu il y a ${item.daysSince} jours`;
+}
+
+function freshnessLabelForSite(item: WatchlistItem): string {
+  if (item.daysSince === null) return "Jamais visité";
+  const over90 = item.daysSince - 90;
+  if (over90 > 0)
+    return `${item.daysSince} jours · trimestrielle dépassée de ${over90}`;
+  return `Visité il y a ${item.daysSince} jours`;
 }
 
 /**

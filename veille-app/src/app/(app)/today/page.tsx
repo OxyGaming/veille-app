@@ -38,16 +38,18 @@ export default async function TodayPage() {
 function Placeholder({ role }: { role: "USER" | "EDITOR" | "ADMIN" }) {
   const items: Record<typeof role, string[]> = {
     USER: ["Raccourcis (C9)", "Dernières activités (C9)"],
-    EDITOR: ["Agents à veiller & Sites sans visite (C8)"],
+    EDITOR: [],
     ADMIN: [
       "État système & alertes (C10)",
       "Usage 7j (C10)",
       "Activité récente (C10)",
     ],
   };
+  const labels = items[role];
+  if (labels.length === 0) return null;
   return (
     <div className="px-4 lg:px-8 mt-6 space-y-3">
-      {items[role].map((label) => (
+      {labels.map((label) => (
         <div
           key={label}
           className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-500"

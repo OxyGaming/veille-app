@@ -520,15 +520,39 @@ export async function getAgentsToReview(
     if (b.daysSince === null) return 1;
     return b.daysSince - a.daysSince;
   });
-  const items: WatchlistItem[] = enriched.slice(0, limit).map((a) => ({
+  // On ne garde que les agents réellement « à veiller » : jamais vus OU
+  // dont la dernière session date de plus de 14 jours. Les agents très
+  // récemment veillés ne polluent pas la liste.
+  const watchlist = enriched.filter((a) => (a.daysSince ?? Infinity) > 14);
+  const top = watchlist.slice(0, limit);
+  // Compteur d'actions ouvertes par agent — purement informatif, n'entre
+  // pas dans le tri principal (qui reste basé sur la fraîcheur).
+  const openActionsByAgent = await countOpenActionsForAgents(top.map((a) => a.id));
+  const items: WatchlistItem[] = top.map((a) => ({
     id: a.id,
     name: `${a.lastName ?? ""} ${a.firstName ?? ""}`.trim() || "Agent",
     daysSince: a.daysSince,
     level: levelForFreshness(a.daysSince),
     cta: { label: "Veiller", href: `/sessions/new?agentId=${a.id}` },
+    badges: { openActions: openActionsByAgent.get(a.id) ?? 0 },
   }));
-  const stale = enriched.filter((a) => (a.daysSince ?? Infinity) > 14).length;
-  return { items, total: stale };
+  return { items, total: watchlist.length };
+}
+
+async function countOpenActionsForAgents(
+  agentIds: string[],
+): Promise<Map<string, number>> {
+  if (!agentIds.length) return new Map();
+  const rows = await prisma.importedAction.groupBy({
+    by: ["agentId"],
+    where: { agentId: { in: agentIds }, localStatus: "ACTIVE" },
+    _count: { _all: true },
+  });
+  const m = new Map<string, number>();
+  for (const r of rows) {
+    if (r.agentId) m.set(r.agentId, r._count._all);
+  }
+  return m;
 }
 
 /**
@@ -566,17 +590,49 @@ export async function getSitesWithoutVisit(
     if (b.daysSince === null) return 1;
     return b.daysSince - a.daysSince;
   });
-  const items: WatchlistItem[] = enriched.slice(0, limit).map((s) => ({
+  // On ne retient que les sites réellement « à visiter » : jamais visités
+  // OU dont la dernière visite trimestrielle dépasse 90 jours
+  // (DEFAULT_VISIT_FREQUENCY_DAYS, heuristique V1).
+  const watchlist = enriched.filter(
+    (s) => (s.daysSince ?? Infinity) > DEFAULT_VISIT_FREQUENCY_DAYS,
+  );
+  const top = watchlist.slice(0, limit);
+  // Compteur d'équipements en alerte (périmé OU expirant ≤ 30 j) par site.
+  const equipmentAlertsBySite = await countEquipmentAlertsForSites(
+    top.map((s) => s.id),
+    now,
+  );
+  const items: WatchlistItem[] = top.map((s) => ({
     id: s.id,
     name: s.name,
     daysSince: s.daysSince,
     level: levelForVisitOverdue(s.daysSince),
     cta: { label: "Visiter", href: `/visits/new?siteId=${s.id}` },
+    badges: { equipmentAlerts: equipmentAlertsBySite.get(s.id) ?? 0 },
   }));
-  const late = enriched.filter(
-    (s) => (s.daysSince ?? Infinity) > DEFAULT_VISIT_FREQUENCY_DAYS,
-  ).length;
-  return { items, total: late };
+  return { items, total: watchlist.length };
+}
+
+async function countEquipmentAlertsForSites(
+  siteIds: string[],
+  now: Date,
+): Promise<Map<string, number>> {
+  if (!siteIds.length) return new Map();
+  const rows = await prisma.siteEquipment.groupBy({
+    by: ["siteId"],
+    where: {
+      siteId: { in: siteIds },
+      isActive: true,
+      expirationDate: {
+        not: null,
+        lte: addDays(now, EQUIPMENT_EXPIRATION_WINDOW_DAYS),
+      },
+    },
+    _count: { _all: true },
+  });
+  const m = new Map<string, number>();
+  for (const r of rows) m.set(r.siteId, r._count._all);
+  return m;
 }
 
 /**

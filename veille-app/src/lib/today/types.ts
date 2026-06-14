@@ -139,6 +139,16 @@ export type WatchlistItem = {
   /** Niveau visuel (rouge / orange / jaune) calculé côté serveur. */
   level: "red" | "orange" | "yellow";
   cta: TodoCta;
+  /**
+   * Compteurs contextuels — purement informatifs, n'entrent pas dans le
+   * tri principal (qui reste basé sur daysSince).
+   */
+  badges?: {
+    /** Actions ImportedAction encore ACTIVE liées à cet item. */
+    openActions?: number;
+    /** Équipements périmés OU expirant ≤ 30 j sur le site. */
+    equipmentAlerts?: number;
+  };
 };
 
 /** Variante EDITOR (cf. TODAY-V1.md §5). */

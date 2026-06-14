@@ -7,10 +7,7 @@
 
 import type { SessionUser } from "@/lib/auth";
 import { after } from "next/server";
-import {
-  getCriticalEcheancesCount,
-  getCriticalEcheancesItems,
-} from "@/lib/echeances/aggregator";
+import { getCriticalEcheancesItems } from "@/lib/echeances/aggregator";
 import { notifyEcheancesCriticalForUser } from "@/lib/notifications-generators";
 import { topItems } from "./priority";
 import {
@@ -133,6 +130,24 @@ export async function aggregateAdmin(
     getAdminUsage7d(now),
     getAdminRecentActivity(now),
   ]);
+
+  // Sprint 6 C7 — Notifications critiques de l'ADMIN GLOBAL.
+  // `aggregateAdmin` n'est appelé que pour ADMIN GLOBAL (cf. switch
+  // `aggregateToday` ci-dessous). Les modes MY_TEAMS / TEAM repassent
+  // par `aggregateEditor` qui notifie déjà.
+  // Les sources `getCriticalEcheancesItems` utilisent `siteScope` /
+  // `actionScope` (C5) : pour ADMIN GLOBAL → aucun filtre, items globaux.
+  // Génération hors-blocking via `after()` ; dédup `@@unique(userId,
+  // dedupKey)` garantit zéro doublon entre refresh ou changement de scope.
+  after(async () => {
+    try {
+      const items = await getCriticalEcheancesItems(user, now);
+      await notifyEcheancesCriticalForUser(user.id, items);
+    } catch {
+      /* non-bloquant — voir createNotification.try/catch interne. */
+    }
+  });
+
   return {
     role: "ADMIN",
     now: now.toISOString(),

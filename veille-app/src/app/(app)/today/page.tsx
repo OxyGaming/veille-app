@@ -8,6 +8,7 @@ import { TodoSection } from "./components/TodoSection";
 import { EditorDashboard } from "./components/EditorDashboard";
 import { UserShortcuts } from "./components/UserShortcuts";
 import { RecentActivitySection } from "./components/RecentActivitySection";
+import { AdminDashboard } from "./components/AdminDashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -33,34 +34,7 @@ export default async function TodayPage() {
 
       {payload.role === "EDITOR" && <EditorDashboard payload={payload} />}
 
-      {/* Placeholders pour les sections restant à livrer. */}
-      <Placeholder role={payload.role} />
-    </div>
-  );
-}
-
-function Placeholder({ role }: { role: "USER" | "EDITOR" | "ADMIN" }) {
-  const items: Record<typeof role, string[]> = {
-    USER: [],
-    EDITOR: [],
-    ADMIN: [
-      "État système & alertes (C10)",
-      "Usage 7j (C10)",
-      "Activité récente (C10)",
-    ],
-  };
-  const labels = items[role];
-  if (labels.length === 0) return null;
-  return (
-    <div className="px-4 lg:px-8 mt-6 space-y-3">
-      {labels.map((label) => (
-        <div
-          key={label}
-          className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-500"
-        >
-          {label}
-        </div>
-      ))}
+      {payload.role === "ADMIN" && <AdminDashboard payload={payload} />}
     </div>
   );
 }

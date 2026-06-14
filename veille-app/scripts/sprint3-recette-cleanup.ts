@@ -69,8 +69,10 @@ async function main() {
     where: { observerId: editor?.id, comment: { contains: "RECETTE-S3" } },
   });
   removed.agentSightings = sights.count;
+  // Le POST /api/agents/[id]/actions mappe `title` (input client) sur
+  // `keyPoint` (champ Prisma) — pas de champ `title` sur ImportedAction.
   const acts = await prisma.importedAction.deleteMany({
-    where: { title: { contains: "RECETTE-S3" } },
+    where: { keyPoint: { contains: "RECETTE-S3" } },
   });
   removed.actions = acts.count;
 

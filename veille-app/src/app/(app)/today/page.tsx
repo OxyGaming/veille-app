@@ -9,6 +9,7 @@ import { EditorDashboard } from "./components/EditorDashboard";
 import { UserShortcuts } from "./components/UserShortcuts";
 import { RecentActivitySection } from "./components/RecentActivitySection";
 import { AdminDashboard } from "./components/AdminDashboard";
+import { TodayAutoRefresh } from "./components/TodayAutoRefresh";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,9 @@ export default async function TodayPage() {
       {payload.role === "EDITOR" && <EditorDashboard payload={payload} />}
 
       {payload.role === "ADMIN" && <AdminDashboard payload={payload} />}
+
+      {/* Refresh intelligent — 60 s + visibilitychange + online (C11). */}
+      <TodayAutoRefresh />
     </div>
   );
 }

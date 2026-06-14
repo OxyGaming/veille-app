@@ -24,6 +24,16 @@ model User {
   teamId          String?
   /// Permet à un USER d'utiliser temporairement la vue cross-équipe.
   viewAllTeams    Boolean  @default(false)
+  /// Sprint 6 C2 — préférence ADMIN de périmètre de pilotage.
+  /// Null = comportement par défaut (GLOBAL pour ADMIN, ignoré pour les
+  /// autres rôles). Valeurs : "GLOBAL" | "MY_TEAMS" | "TEAM".
+  adminScopeMode       String?
+  /// Sprint 6 C2 — équipe sélectionnée quand `adminScopeMode = "TEAM"`.
+  /// Forcé à null en mode GLOBAL et MY_TEAMS (cf. helpers lib/).
+  adminTeamId          String?
+  /// Sprint 6 C2 — horodatage du dernier changement de préférence.
+  /// Permet de tracer l'historique côté client sans AuditLog (D7).
+  adminScopeUpdatedAt  DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

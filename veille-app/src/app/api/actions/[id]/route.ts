@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { actionScope, requireRole, requireUser } from "@/lib/auth";
+import { obsoleteAction } from "@/lib/action-obsolete";
 
 const patchSchema = z.object({
   localStatus: z
@@ -90,11 +91,34 @@ export async function DELETE(
   if (!a) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
 
   if (mode === "soft") {
-    await prisma.importedAction.update({
-      where: { id },
-      data: { localStatus: "OBSOLETE" },
+    // Sprint 7 C1 — délégation à la logique métier centrale pour
+    // garantir l'AuditLog ACTION_OBSOLETE + statuts uniformes.
+    const result = await obsoleteAction(u, id);
+    if (result.kind === "validated") {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "ACTION_VALIDATED",
+          error: "Annulez la validation avant de retirer cette action.",
+          actionId: result.actionId,
+          currentStatus: result.currentStatus,
+        },
+        { status: 409 },
+      );
+    }
+    if (result.kind === "not_found") {
+      return NextResponse.json(
+        { ok: false, error: "Action introuvable" },
+        { status: 404 },
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      actionId: result.actionId,
+      previousStatus: result.previousStatus,
+      newStatus: result.newStatus,
+      ...(result.kind === "noop" ? { noop: true } : {}),
     });
-    return NextResponse.json({ ok: true });
   }
 
   const validations = await prisma.actionValidation.count({

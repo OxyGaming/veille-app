@@ -20,6 +20,7 @@ import {
 } from "@/lib/today/constants";
 import { log } from "@/lib/logger";
 import { isCriticalEcheance } from "./criticality";
+import { ctaForEcheance } from "./cta";
 import { classifyEcheanceUrgency } from "./urgency";
 import type { EcheanceItem } from "./types";
 
@@ -75,7 +76,12 @@ function buildVisitEcheance(
       siteIsOccupied: site.isOccupied,
       teamIds: site.teamIds,
     },
-    cta: { label: "Ouvrir le site", href: `/sites/${site.id}` },
+    cta: ctaForEcheance({
+      kind,
+      sourceId: site.id,
+      daysToDue,
+      siteId: site.id,
+    }),
   };
 }
 
@@ -111,7 +117,12 @@ function buildEquipmentEcheance(
       siteIsOccupied: row.site.isOccupied,
       teamIds: row.site.memberships.map((m) => m.teamId),
     },
-    cta: { label: "Voir le site", href: `/sites/${row.site.id}` },
+    cta: ctaForEcheance({
+      kind: "EQUIPMENT_EXPIRING",
+      sourceId: row.id,
+      daysToDue,
+      siteId: row.site.id,
+    }),
   };
 }
 
@@ -152,14 +163,6 @@ function buildActionEcheance(
     for (const m of row.site.memberships) teamIds.add(m.teamId);
   }
 
-  // CTA : valider si en retard et adossé à un agent, sinon ouvrir.
-  const href = row.agentId
-    ? `/agents/${row.agentId}?actionId=${row.id}`
-    : row.siteId
-      ? `/sites/${row.siteId}`
-      : "/today";
-  const label = daysToDue !== null && daysToDue < 0 ? "Valider" : "Ouvrir";
-
   return {
     id: `ACTION_OVERDUE:${row.id}`,
     kind: "ACTION_OVERDUE",
@@ -177,7 +180,13 @@ function buildActionEcheance(
       agentName: agentName ?? undefined,
       teamIds: [...teamIds],
     },
-    cta: { label, href },
+    cta: ctaForEcheance({
+      kind: "ACTION_OVERDUE",
+      sourceId: row.id,
+      daysToDue,
+      siteId: row.site?.id,
+      agentId: row.agent?.id,
+    }),
   };
 }
 

@@ -444,6 +444,10 @@ model SiteVisit {
   @@index([observerId])
   @@index([status])
   @@index([visitDate])
+  /// Index composite Sprint 5 C9 — accélère le filtre
+  /// `status=completed AND finishedAt >= windowStart` utilisé par
+  /// Today week counters et Dashboard tendance visites.
+  @@index([status, finishedAt])
 }
 
 model SiteVisitParticipant {
@@ -906,6 +910,10 @@ model ImportedAction {
   @@index([localStatus])
   @@index([dueAt])
   @@index([agentId, dedupHash])
+  /// Index composite Sprint 5 C9 — accélère les requêtes type
+  /// `actionScope + localStatus=ACTIVE + dueAt<now` (dashboard
+  /// pilotage KPI actions en retard, Hub Échéances).
+  @@index([localStatus, dueAt])
 }
 
 /// Historique d'un import Excel.
@@ -955,6 +963,9 @@ model ActionValidation {
   @@index([agentId])
   @@index([siteId])
   @@index([teamId])
+  /// Index Sprint 5 C9 — accélère la tendance dashboard
+  /// "actions validées sur N jours" (filtre createdAt range).
+  @@index([createdAt])
 }
 
 // ─── Liens utiles ─────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@
  * indirectement, par Today EDITOR (compteur D13).
  */
 
-import type { SessionUser } from "@/lib/auth";
+import { siteScope, type SessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { countCriticalEcheances, filterCriticalEcheances } from "./criticality";
 import {
@@ -39,6 +39,18 @@ async function getTeamsAvailable(
     where: { id: { in: user.teamIds } },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
+  });
+}
+
+/** Liste les sites accessibles à l'utilisateur — peuple le dropdown filtre site. */
+async function getSitesAvailable(
+  user: SessionUser,
+): Promise<{ id: string; name: string }[]> {
+  return prisma.site.findMany({
+    where: { isActive: true, ...siteScope(user) },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+    take: 500,
   });
 }
 
@@ -134,12 +146,14 @@ export async function aggregateEcheances(
   now: Date,
   filters: EcheanceFilters = {},
 ): Promise<EcheancesPayload> {
-  const [visits, equipments, actions, teamsAvailable] = await Promise.all([
-    getVisitEcheances(user, now, filters.siteId),
-    getEquipmentEcheances(user, now, filters.siteId),
-    getActionEcheances(user, now, filters.siteId),
-    getTeamsAvailable(user),
-  ]);
+  const [visits, equipments, actions, teamsAvailable, sitesAvailable] =
+    await Promise.all([
+      getVisitEcheances(user, now, filters.siteId),
+      getEquipmentEcheances(user, now, filters.siteId),
+      getActionEcheances(user, now, filters.siteId),
+      getTeamsAvailable(user),
+      getSitesAvailable(user),
+    ]);
 
   const allItems = dedupById([...visits, ...equipments, ...actions]);
   const filtered = applyFilters(allItems, filters);
@@ -161,6 +175,7 @@ export async function aggregateEcheances(
     total: filtered.length,
     filtersApplied: filters,
     teamsAvailable,
+    sitesAvailable,
   };
 }
 

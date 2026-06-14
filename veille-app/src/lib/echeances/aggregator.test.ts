@@ -8,10 +8,12 @@ const getVisitEcheances = vi.fn();
 const getEquipmentEcheances = vi.fn();
 const getActionEcheances = vi.fn();
 const findManyTeam = vi.fn();
+const findManySite = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     team: { findMany: (...a: unknown[]) => findManyTeam(...a) },
+    site: { findMany: (...a: unknown[]) => findManySite(...a) },
   },
 }));
 
@@ -31,6 +33,10 @@ beforeEach(() => {
   getEquipmentEcheances.mockReset();
   getActionEcheances.mockReset();
   findManyTeam.mockReset();
+  findManySite.mockReset();
+  // Par défaut : sites vides, on n'a pas besoin de tester l'enrichissement
+  // partout — uniquement dans le test dédié.
+  findManySite.mockResolvedValue([]);
 });
 
 const NOW = new Date("2026-06-14T12:00:00.000Z");
@@ -69,19 +75,22 @@ function mkItem(p: Partial<EcheanceItem> & { id: string }): EcheanceItem {
 }
 
 describe("aggregateEcheances — assemblage", () => {
-  it("fan-out parallèle des 3 sources + teams", async () => {
+  it("fan-out parallèle des 3 sources + teams + sites", async () => {
     getVisitEcheances.mockResolvedValue([]);
     getEquipmentEcheances.mockResolvedValue([]);
     getActionEcheances.mockResolvedValue([]);
     findManyTeam.mockResolvedValue([{ id: "tA", name: "A" }]);
+    findManySite.mockResolvedValue([{ id: "s1", name: "Alpha" }]);
     const out = await aggregateEcheances(EDITOR, NOW);
     expect(getVisitEcheances).toHaveBeenCalledTimes(1);
     expect(getEquipmentEcheances).toHaveBeenCalledTimes(1);
     expect(getActionEcheances).toHaveBeenCalledTimes(1);
     expect(findManyTeam).toHaveBeenCalledTimes(1);
+    expect(findManySite).toHaveBeenCalledTimes(1);
     expect(out.now).toBe(NOW.toISOString());
     expect(out.total).toBe(0);
     expect(out.teamsAvailable).toEqual([{ id: "tA", name: "A" }]);
+    expect(out.sitesAvailable).toEqual([{ id: "s1", name: "Alpha" }]);
   });
 
   it("ADMIN/viewAllTeams → toutes les équipes sans filtre", async () => {

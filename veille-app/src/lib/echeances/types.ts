@@ -107,4 +107,6 @@ export type EcheancesPayload = {
   filtersApplied: EcheanceFilters;
   /** Équipes du périmètre — pour peupler le dropdown filtre équipe. */
   teamsAvailable: { id: string; name: string }[];
+  /** Sites du périmètre — pour peupler le dropdown filtre site. */
+  sitesAvailable: { id: string; name: string }[];
 };

@@ -1,11 +1,16 @@
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser, siteScope } from "@/lib/auth";
 import NewVisitClient from "./NewVisitClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewVisitPage() {
+export default async function NewVisitPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ siteId?: string }>;
+}) {
+  const { siteId } = await searchParams;
   const u = await getSessionUser();
   if (!u) redirect("/login");
   const [templates, sites] = await Promise.all([
@@ -19,8 +24,10 @@ export default async function NewVisitPage() {
       orderBy: { name: "asc" },
     }),
   ]);
+  if (siteId && !sites.some((s) => s.id === siteId)) notFound();
   return (
     <NewVisitClient
+      initialSiteId={siteId ?? null}
       templates={templates.map((t) => ({
         id: t.id,
         slug: t.slug,

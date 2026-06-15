@@ -20,15 +20,17 @@ type Site = {
 };
 
 export default function NewVisitClient({
+  initialSiteId = null,
   templates,
   sites,
 }: {
+  initialSiteId?: string | null;
   templates: Template[];
   sites: Site[];
 }) {
   const router = useRouter();
   const [templateId, setTemplateId] = useState<string | null>(null);
-  const [siteId, setSiteId] = useState<string | null>(null);
+  const [siteId, setSiteId] = useState<string | null>(initialSiteId);
   const [visitDate, setVisitDate] = useState<string>(
     new Date().toISOString().slice(0, 10)
   );

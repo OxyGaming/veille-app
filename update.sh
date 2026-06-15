@@ -2,15 +2,14 @@
 # -----------------------------------------------------------------------------
 # update.sh — Mise à jour Veille en production (Ubuntu / Nginx).
 #
-# Étapes par défaut :
+# Étapes par défaut (alignées sur la prod /var/www/veille, PM2, port 3004) :
 #   1. Vérifie que le repo est propre (pas de modifs locales non commit).
 #   2. Sauvegarde la base SQLite dans veille-app/data/backups/.
 #   3. git pull (branche par défaut : main).
-#   4. npm ci (install reproductible, supprime node_modules si nécessaire).
-#   5. prisma generate + db:push (sync schéma sans migration formelle —
-#      cohérent avec le README et `db:push` du package.json).
+#   4. npm ci (install reproductible).
+#   5. prisma migrate deploy + prisma generate (pas de db:push en prod).
 #   6. npm run build (build Next.js production).
-#   7. Redémarrage du service (systemd par défaut).
+#   7. pm2 restart veille && pm2 save.
 #
 # Usage :
 #   ./update.sh                       # mise à jour complète
@@ -18,8 +17,8 @@
 #   ./update.sh --no-backup           # saute l'étape 2 (à vos risques)
 #   ./update.sh --no-build            # saute l'étape 6 (hot-reload externe)
 #   ./update.sh --no-restart          # saute l'étape 7 (redémarrage manuel)
-#   ./update.sh --service nom         # nom du service systemd (def: veille)
-#   ./update.sh --pm2 nom             # utilise pm2 restart <nom> au lieu de systemd
+#   ./update.sh --pm2 nom             # nom du process PM2 (def: veille)
+#   ./update.sh --systemd nom         # utilise systemctl restart <nom> au lieu de PM2
 #   ./update.sh --skip-deps           # ne refait pas npm ci si node_modules existe
 #   ./update.sh -y                    # ne demande pas confirmation
 #
@@ -47,8 +46,9 @@ DO_BUILD=1
 DO_RESTART=1
 SKIP_DEPS=0
 ASSUME_YES=0
-SERVICE_NAME="veille"
-USE_PM2=""
+# PM2 par défaut, conforme à la prod /var/www/veille.
+PM2_NAME="veille"
+SYSTEMD_NAME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --branch)      BRANCH="$2"; shift 2 ;;
@@ -56,8 +56,8 @@ while [[ $# -gt 0 ]]; do
     --no-build)    DO_BUILD=0; shift ;;
     --no-restart)  DO_RESTART=0; shift ;;
     --skip-deps)   SKIP_DEPS=1; shift ;;
-    --service)     SERVICE_NAME="$2"; shift 2 ;;
-    --pm2)         USE_PM2="$2"; shift 2 ;;
+    --pm2)         PM2_NAME="$2"; SYSTEMD_NAME=""; shift 2 ;;
+    --systemd)     SYSTEMD_NAME="$2"; shift 2 ;;
     -y|--yes)      ASSUME_YES=1; shift ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//'
@@ -81,10 +81,10 @@ log "Branche    : $BRANCH"
 log "Backup DB  : $([[ $DO_BACKUP -eq 1 ]] && echo oui || echo NON)"
 log "Build      : $([[ $DO_BUILD -eq 1 ]] && echo oui || echo NON)"
 if [[ $DO_RESTART -eq 1 ]]; then
-  if [[ -n "$USE_PM2" ]]; then
-    log "Restart    : pm2 restart $USE_PM2"
+  if [[ -n "$SYSTEMD_NAME" ]]; then
+    log "Restart    : systemctl restart $SYSTEMD_NAME"
   else
-    log "Restart    : systemctl restart $SERVICE_NAME"
+    log "Restart    : pm2 restart $PM2_NAME && pm2 save"
   fi
 else
   log "Restart    : NON"
@@ -156,10 +156,12 @@ else
 fi
 
 # ── 5. Prisma ────────────────────────────────────────────────────────────────
-log "5/7  Prisma generate + db:push…"
+# Prod : applique les migrations versionnées (pas de `db:push` qui altère le
+# schéma sans migration). `prisma migrate deploy` est idempotent et sûr.
+log "5/7  Prisma migrate deploy + generate…"
+npx prisma migrate deploy
 npx prisma generate
-npm run db:push
-ok "Schéma Prisma à jour."
+ok "Migrations appliquées et client Prisma régénéré."
 
 # ── 6. Build ─────────────────────────────────────────────────────────────────
 if [[ $DO_BUILD -eq 1 ]]; then
@@ -172,22 +174,26 @@ fi
 
 # ── 7. Redémarrage ───────────────────────────────────────────────────────────
 if [[ $DO_RESTART -eq 1 ]]; then
-  if [[ -n "$USE_PM2" ]]; then
-    log "7/7  pm2 restart $USE_PM2…"
-    pm2 restart "$USE_PM2"
-    ok "Service relancé (pm2)."
-  else
-    log "7/7  systemctl restart $SERVICE_NAME…"
+  if [[ -n "$SYSTEMD_NAME" ]]; then
+    log "7/7  systemctl restart $SYSTEMD_NAME…"
     if ! command -v systemctl >/dev/null 2>&1; then
       warn "systemctl introuvable — relancez le service manuellement."
     else
-      # sudo si on n'est pas root.
       if [[ $EUID -ne 0 ]]; then
-        sudo systemctl restart "$SERVICE_NAME"
+        sudo systemctl restart "$SYSTEMD_NAME"
       else
-        systemctl restart "$SERVICE_NAME"
+        systemctl restart "$SYSTEMD_NAME"
       fi
       ok "Service relancé (systemd)."
+    fi
+  else
+    log "7/7  pm2 restart $PM2_NAME && pm2 save…"
+    if ! command -v pm2 >/dev/null 2>&1; then
+      warn "pm2 introuvable — relancez le process manuellement."
+    else
+      pm2 restart "$PM2_NAME"
+      pm2 save
+      ok "Process PM2 relancé et liste sauvegardée."
     fi
   fi
 else

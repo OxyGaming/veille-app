@@ -1,10 +1,17 @@
 import Link from "next/link";
 import { Icon } from "@/components/icons";
 import type { EcheanceItem, EcheanceKind } from "@/lib/echeances/types";
+import { PostponeButton } from "./PostponeButton";
 
 type Props = {
   item: EcheanceItem;
 };
+
+/** Types d'échéance que l'utilisateur peut reporter inline. */
+const POSTPONABLE_KINDS: ReadonlySet<EcheanceKind> = new Set([
+  "ACTION_OVERDUE",
+  "EQUIPMENT_EXPIRING",
+]);
 
 const KIND_LABEL: Record<EcheanceKind, string> = {
   VISIT_QUARTERLY: "Trimestrielle",
@@ -37,11 +44,12 @@ export function EcheanceRow({ item }: Props) {
   const metaParts = [kindLabel, dueLabel];
   if (item.subtitle) metaParts.unshift(item.subtitle);
 
+  const canPostpone = POSTPONABLE_KINDS.has(item.kind);
   return (
-    <li>
+    <li className="flex items-start gap-3 px-3 py-3 hover:bg-slate-50 transition-colors min-w-0">
       <Link
         href={item.cta.href}
-        className="flex items-start gap-3 px-3 py-3 hover:bg-slate-50 transition-colors min-w-0"
+        className="flex items-start gap-3 flex-1 min-w-0"
       >
         <span
           className={`shrink-0 mt-0.5 w-8 h-8 rounded-lg grid place-items-center ${
@@ -66,13 +74,14 @@ export function EcheanceRow({ item }: Props) {
             Critique
           </span>
         )}
-        <span className="shrink-0 text-xs text-indigo-600 font-medium pt-0.5">
-          {item.cta.label}
-        </span>
-        <Icon.ChevronRight
-          className="shrink-0 w-4 h-4 text-slate-400 mt-1"
-          aria-hidden
-        />
+      </Link>
+      {canPostpone && <PostponeButton item={item} />}
+      <Link
+        href={item.cta.href}
+        className="shrink-0 inline-flex items-center gap-1 text-xs text-indigo-600 font-medium pt-1"
+      >
+        {item.cta.label}
+        <Icon.ChevronRight className="w-4 h-4 text-slate-400" aria-hidden />
       </Link>
     </li>
   );

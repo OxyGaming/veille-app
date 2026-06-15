@@ -22,3 +22,8 @@ data/uploads/
 
 .DS_Store
 Thumbs.db
+
+# Scripts de debug perso (IDs hardcodés, jamais commités)
+scripts/check-notifications.ts
+scripts/check-all-notifs-types.ts
+scripts/test-notify-direct.ts

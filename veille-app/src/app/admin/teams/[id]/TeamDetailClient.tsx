@@ -39,34 +39,140 @@ type Site = {
 
 type Tab = "users" | "agents" | "sites";
 
+type CandidateUser = { id: string; name: string; email: string; role: string };
+type CandidateAgent = {
+  id: string;
+  matricule: string;
+  firstName: string;
+  lastName: string;
+};
+type CandidateSite = {
+  id: string;
+  name: string;
+  code: string | null;
+  type: string | null;
+};
+
+type Candidates = {
+  users: CandidateUser[];
+  agents: CandidateAgent[];
+  sites: CandidateSite[];
+};
+
 /**
- * Sprint 8 C2 — détail d'une équipe avec 3 onglets, lecture seule.
+ * Sprint 8 C2 + C3 — détail d'une équipe.
  *
- *  - En-tête : nom + code + statut + édition nom/code (existant).
- *  - 3 onglets : Users / Agents / Sites avec compteur dans le pill.
+ *  - En-tête : nom + code + statut + édition nom/code.
+ *  - 3 onglets : Users / Agents / Sites avec pill compteur.
  *  - Recherche locale par onglet.
- *  - Lecture seule : pas d'ajout/retrait (C3).
+ *  - C3 : bouton « Ajouter… » par onglet (picker modal) + croix de
+ *    retrait sur chaque ligne. Routes POST/DELETE granulaires
+ *    (idempotentes côté serveur).
  */
 export default function TeamDetailClient({
   team,
-  users,
-  agents,
-  sites,
+  users: initialUsers,
+  agents: initialAgents,
+  sites: initialSites,
+  candidates,
 }: {
   team: Team;
   users: User[];
   agents: Agent[];
   sites: Site[];
+  candidates: Candidates;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("users");
   const [query, setQuery] = useState("");
+  const [users, setUsers] = useState(initialUsers);
+  const [agents, setAgents] = useState(initialAgents);
+  const [sites, setSites] = useState(initialSites);
+  const [picker, setPicker] = useState<Tab | null>(null);
 
   // Édition nom + code de l'équipe.
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(team.name);
   const [editCode, setEditCode] = useState(team.code ?? "");
   const [editBusy, setEditBusy] = useState(false);
+
+  const kindOf = (t: Tab) =>
+    t === "users" ? "user" : t === "agents" ? "agent" : "site";
+
+  async function addMember(t: Tab, refId: string) {
+    const kind = kindOf(t);
+    const res = await fetch(
+      `/api/admin/teams/${team.id}/members/${kind}/${refId}`,
+      { method: "POST" },
+    );
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || "Ajout refusé");
+      return;
+    }
+    const body = await res.json().catch(() => ({}));
+    if (body.alreadyMember) {
+      toast.info("Déjà membre");
+      return;
+    }
+    // Optimiste : ajouter la ligne au state local depuis la liste candidates.
+    const now = new Date().toISOString();
+    if (t === "users") {
+      const c = candidates.users.find((x) => x.id === refId);
+      if (c && !users.some((x) => x.id === refId)) {
+        setUsers((arr) => [
+          ...arr,
+          {
+            ...c,
+            isActive: true,
+            membershipRole: "MEMBER",
+            joinedAt: now,
+          },
+        ]);
+      }
+    } else if (t === "agents") {
+      const c = candidates.agents.find((x) => x.id === refId);
+      if (c && !agents.some((x) => x.id === refId)) {
+        setAgents((arr) => [
+          ...arr,
+          { ...c, isActive: true, isVisible: true, joinedAt: now },
+        ]);
+      }
+    } else {
+      const c = candidates.sites.find((x) => x.id === refId);
+      if (c && !sites.some((x) => x.id === refId)) {
+        setSites((arr) => [
+          ...arr,
+          { ...c, isActive: true, isVisible: true, joinedAt: now },
+        ]);
+      }
+    }
+    toast.success("Ajouté à l'équipe");
+    router.refresh();
+  }
+
+  async function removeMember(t: Tab, refId: string, label: string) {
+    if (
+      !confirm(`Retirer « ${label} » de l'équipe ?\n\nL'entité elle-même n'est pas supprimée.`)
+    ) {
+      return;
+    }
+    const kind = kindOf(t);
+    const res = await fetch(
+      `/api/admin/teams/${team.id}/members/${kind}/${refId}`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || "Retrait refusé");
+      return;
+    }
+    if (t === "users") setUsers((arr) => arr.filter((x) => x.id !== refId));
+    if (t === "agents") setAgents((arr) => arr.filter((x) => x.id !== refId));
+    if (t === "sites") setSites((arr) => arr.filter((x) => x.id !== refId));
+    toast.success("Retiré de l'équipe");
+    router.refresh();
+  }
 
   const filteredUsers = useMemo(
     () => filterUsers(users, query),
@@ -220,26 +326,74 @@ export default function TeamDetailClient({
         />
       </div>
 
-      {/* ─── Barre recherche ─────────────────────────────────────────── */}
-      <div className="relative mb-3 max-w-md">
-        <Icon.Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={searchPlaceholder(tab)}
-          className="input pl-9"
-        />
+      {/* ─── Barre recherche + ajout ─────────────────────────────────── */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <div className="relative flex-1 min-w-[220px] max-w-md">
+          <Icon.Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={searchPlaceholder(tab)}
+            className="input pl-9"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setPicker(tab)}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-3 py-2 rounded-lg inline-flex items-center gap-1.5 shrink-0"
+        >
+          <Icon.Plus className="w-4 h-4" />
+          Ajouter
+        </button>
       </div>
 
       {/* ─── Contenu onglet ──────────────────────────────────────────── */}
       {tab === "users" && (
-        <UsersTable items={filteredUsers} total={users.length} query={query} />
+        <UsersTable
+          items={filteredUsers}
+          total={users.length}
+          query={query}
+          onRemove={(u) =>
+            removeMember("users", u.id, `${u.name} (${u.email})`)
+          }
+        />
       )}
       {tab === "agents" && (
-        <AgentsTable items={filteredAgents} total={agents.length} query={query} />
+        <AgentsTable
+          items={filteredAgents}
+          total={agents.length}
+          query={query}
+          onRemove={(a) =>
+            removeMember("agents", a.id, `${a.lastName} ${a.firstName} (${a.matricule})`)
+          }
+        />
       )}
       {tab === "sites" && (
-        <SitesTable items={filteredSites} total={sites.length} query={query} />
+        <SitesTable
+          items={filteredSites}
+          total={sites.length}
+          query={query}
+          onRemove={(s) =>
+            removeMember("sites", s.id, s.name)
+          }
+        />
+      )}
+
+      {picker && (
+        <MemberPickerDialog
+          tab={picker}
+          candidates={candidates}
+          alreadyIn={{
+            users: new Set(users.map((u) => u.id)),
+            agents: new Set(agents.map((a) => a.id)),
+            sites: new Set(sites.map((s) => s.id)),
+          }}
+          onCancel={() => setPicker(null)}
+          onAdd={async (refId) => {
+            await addMember(picker, refId);
+          }}
+          onDone={() => setPicker(null)}
+        />
       )}
     </div>
   );
@@ -339,10 +493,12 @@ function UsersTable({
   items,
   total,
   query,
+  onRemove,
 }: {
   items: User[];
   total: number;
   query: string;
+  onRemove: (u: User) => void;
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -356,6 +512,7 @@ function UsersTable({
               <th className="text-left px-4 py-2.5">Rôle équipe</th>
               <th className="text-left px-4 py-2.5">Statut</th>
               <th className="text-left px-4 py-2.5">Rejoint le</th>
+              <th className="w-8" />
             </tr>
           </thead>
           <tbody>
@@ -403,6 +560,9 @@ function UsersTable({
                 <td className="px-4 py-2.5 text-xs text-slate-500">
                   {format(new Date(u.joinedAt), "P", { locale: fr })}
                 </td>
+                <td className="px-2 py-2.5 text-right">
+                  <RemoveButton onClick={() => onRemove(u)} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -416,10 +576,12 @@ function AgentsTable({
   items,
   total,
   query,
+  onRemove,
 }: {
   items: Agent[];
   total: number;
   query: string;
+  onRemove: (a: Agent) => void;
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -432,7 +594,8 @@ function AgentsTable({
               <th className="text-left px-4 py-2.5">Visible</th>
               <th className="text-left px-4 py-2.5">Statut</th>
               <th className="text-left px-4 py-2.5">Rejoint le</th>
-              <th />
+              <th className="w-16" />
+              <th className="w-8" />
             </tr>
           </thead>
           <tbody>
@@ -479,6 +642,9 @@ function AgentsTable({
                     Fiche
                   </Link>
                 </td>
+                <td className="px-2 py-2.5 text-right">
+                  <RemoveButton onClick={() => onRemove(a)} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -492,10 +658,12 @@ function SitesTable({
   items,
   total,
   query,
+  onRemove,
 }: {
   items: Site[];
   total: number;
   query: string;
+  onRemove: (s: Site) => void;
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -508,7 +676,8 @@ function SitesTable({
               <th className="text-left px-4 py-2.5">Type</th>
               <th className="text-left px-4 py-2.5">Statut</th>
               <th className="text-left px-4 py-2.5">Rejoint le</th>
-              <th />
+              <th className="w-16" />
+              <th className="w-8" />
             </tr>
           </thead>
           <tbody>
@@ -551,11 +720,180 @@ function SitesTable({
                     Fiche
                   </Link>
                 </td>
+                <td className="px-2 py-2.5 text-right">
+                  <RemoveButton onClick={() => onRemove(s)} />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function RemoveButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Retirer de l'équipe (l'entité n'est pas supprimée)"
+      aria-label="Retirer de l'équipe"
+      className="inline-flex items-center justify-center w-7 h-7 rounded text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+    >
+      <Icon.X className="w-4 h-4" />
+    </button>
+  );
+}
+
+/**
+ * Picker générique pour ajouter un user / agent / site à l'équipe.
+ * Filtre les candidats déjà membres. Permet l'ajout multiple en cliquant
+ * « + » sur chaque ligne — la modale reste ouverte pour enchaîner.
+ */
+function MemberPickerDialog({
+  tab,
+  candidates,
+  alreadyIn,
+  onCancel,
+  onAdd,
+  onDone,
+}: {
+  tab: Tab;
+  candidates: Candidates;
+  alreadyIn: {
+    users: Set<string>;
+    agents: Set<string>;
+    sites: Set<string>;
+  };
+  onCancel: () => void;
+  onAdd: (refId: string) => Promise<void>;
+  onDone: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const list = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (tab === "users") {
+      return candidates.users
+        .filter((u) => !alreadyIn.users.has(u.id))
+        .filter((u) =>
+          !q ? true : `${u.name} ${u.email}`.toLowerCase().includes(q),
+        );
+    }
+    if (tab === "agents") {
+      return candidates.agents
+        .filter((a) => !alreadyIn.agents.has(a.id))
+        .filter((a) =>
+          !q
+            ? true
+            : `${a.lastName} ${a.firstName} ${a.matricule}`
+                .toLowerCase()
+                .includes(q),
+        );
+    }
+    return candidates.sites
+      .filter((s) => !alreadyIn.sites.has(s.id))
+      .filter((s) =>
+        !q ? true : `${s.name} ${s.code ?? ""} ${s.type ?? ""}`.toLowerCase().includes(q),
+      );
+  }, [tab, candidates, alreadyIn, query]);
+
+  async function pick(id: string) {
+    setBusyId(id);
+    try {
+      await onAdd(id);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50"
+        onClick={busyId ? undefined : onCancel}
+      />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden mx-4 max-h-[80vh] flex flex-col">
+        <header className="px-4 py-3 border-b border-slate-200">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+            Ajouter à l'équipe
+          </div>
+          <div className="text-sm font-bold">
+            {tab === "users"
+              ? "Choisir un utilisateur"
+              : tab === "agents"
+                ? "Choisir un agent"
+                : "Choisir un site"}
+          </div>
+        </header>
+        <div className="p-3 border-b border-slate-100">
+          <div className="relative">
+            <Icon.Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Rechercher…"
+              className="input pl-9"
+              autoFocus
+            />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {list.length === 0 ? (
+            <div className="p-8 text-center text-sm text-slate-500">
+              Aucun candidat disponible.
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {list.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => pick(c.id)}
+                    disabled={busyId === c.id}
+                    className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-semibold truncate">
+                        {tab === "users"
+                          ? (c as CandidateUser).name
+                          : tab === "agents"
+                            ? `${(c as CandidateAgent).lastName} ${(c as CandidateAgent).firstName}`
+                            : (c as CandidateSite).name}
+                      </span>
+                      <span className="block text-[11px] font-mono text-slate-500 truncate">
+                        {tab === "users"
+                          ? (c as CandidateUser).email
+                          : tab === "agents"
+                            ? (c as CandidateAgent).matricule
+                            : `${(c as CandidateSite).code ?? "—"}${(c as CandidateSite).type ? " · " + (c as CandidateSite).type : ""}`}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xs text-indigo-600 font-semibold inline-flex items-center gap-1">
+                      {busyId === c.id ? "…" : (
+                        <>
+                          <Icon.Plus className="w-3.5 h-3.5" /> Ajouter
+                        </>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex justify-end">
+          <button
+            type="button"
+            onClick={onDone}
+            className="text-sm font-semibold text-slate-700 hover:text-slate-900 px-3 py-1.5 rounded hover:bg-slate-100"
+          >
+            Terminer
+          </button>
+        </div>
+      </div>
+    </>
   );
 }

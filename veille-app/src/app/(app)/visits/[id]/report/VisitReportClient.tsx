@@ -1284,8 +1284,9 @@ function renderInventory(
     // bande (cf. demande métier : utile quand la fiche est imprimée et
     // archivée à part). Pour toutes les autres catégories, on garde le
     // libellé brut.
+    // Accord féminin singulier : « trousse » → « Vérifiée ».
     const headerLabel = isTrousseDeSecours(cat)
-      ? `${cat} - Vérifié le ${format(new Date(visit.visitDate), "dd/MM/yyyy")} par ${visit.observer.name}`
+      ? `${cat} - Vérifiée le ${format(new Date(visit.visitDate), "dd/MM/yyyy")} par ${visit.observer.name}`
       : cat;
     autoTable(doc, {
       startY: y,

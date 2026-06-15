@@ -256,12 +256,23 @@ export default function AgentActionsClient({
           return (
             <li
               key={a.id}
-              className={`bg-white border rounded-xl px-3 py-3 min-w-0 break-words transition-shadow hover:shadow-sm ${
+              className={`relative bg-white border rounded-xl px-3 py-3 min-w-0 break-words transition-shadow hover:shadow-sm ${
                 late
                   ? "border-rose-200 bg-rose-50/40"
                   : "border-slate-200"
               }`}
             >
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => setObsoleting(a)}
+                  title="Retirer cette action du suivi opérationnel (reste conservée dans l'historique)"
+                  aria-label="Retirer cette action"
+                  className="absolute top-2 right-2 w-6 h-6 inline-flex items-center justify-center rounded-md text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                >
+                  <Icon.X className="w-4 h-4" />
+                </button>
+              )}
               <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                 {a.type && (
                   <span className="text-[10px] font-mono bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
@@ -383,20 +394,6 @@ export default function AgentActionsClient({
                 </div>
               )}
               <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-                {canManage && (
-                  <button
-                    onClick={() => setObsoleting(a)}
-                    className="text-xs text-slate-500 hover:text-rose-600 font-medium px-1.5 py-1 rounded inline-flex items-center gap-1 transition-colors"
-                    title="Retirer cette action du suivi opérationnel (reste conservée dans l'historique)"
-                  >
-                    <Icon.X className="w-3.5 h-3.5" /> Retirer
-                    {a.duplicateCount > 1 && (
-                      <span className="text-[10px] font-mono">
-                        ×{a.duplicateCount}
-                      </span>
-                    )}
-                  </button>
-                )}
                 <button
                   onClick={() => openValidate(a)}
                   className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"

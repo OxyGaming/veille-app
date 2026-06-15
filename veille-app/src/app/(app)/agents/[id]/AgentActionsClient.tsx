@@ -382,7 +382,21 @@ export default function AgentActionsClient({
                   </div>
                 </div>
               )}
-              <div className="flex gap-2 mt-2.5 flex-wrap">
+              <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                {canManage && (
+                  <button
+                    onClick={() => setObsoleting(a)}
+                    className="text-xs text-slate-500 hover:text-rose-600 font-medium px-1.5 py-1 rounded inline-flex items-center gap-1 transition-colors"
+                    title="Retirer cette action du suivi opérationnel (reste conservée dans l'historique)"
+                  >
+                    <Icon.X className="w-3.5 h-3.5" /> Retirer
+                    {a.duplicateCount > 1 && (
+                      <span className="text-[10px] font-mono">
+                        ×{a.duplicateCount}
+                      </span>
+                    )}
+                  </button>
+                )}
                 <button
                   onClick={() => openValidate(a)}
                   className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
@@ -394,20 +408,6 @@ export default function AgentActionsClient({
                     </span>
                   )}
                 </button>
-                {canManage && (
-                  <button
-                    onClick={() => setObsoleting(a)}
-                    className="text-xs bg-white border border-slate-200 text-slate-700 hover:border-rose-300 hover:text-rose-700 font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
-                    title="Retirer cette action du suivi opérationnel (reste conservée dans l'historique)"
-                  >
-                    <Icon.X className="w-3.5 h-3.5" /> Retirer
-                    {a.duplicateCount > 1 && (
-                      <span className="text-[10px] font-mono text-slate-500">
-                        ×{a.duplicateCount}
-                      </span>
-                    )}
-                  </button>
-                )}
               </div>
             </li>
           );

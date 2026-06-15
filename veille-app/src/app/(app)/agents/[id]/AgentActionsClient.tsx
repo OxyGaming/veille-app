@@ -176,13 +176,22 @@ export default function AgentActionsClient({
             <Icon.MessageSquare className="w-4 h-4" /> Commentaire
           </button>
           {targetKind === "agent" && (
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              className="btn btn-primary"
-            >
-              <Icon.Plus className="w-4 h-4" /> Ajouter une action
-            </button>
+            <>
+              <Link
+                href={`/sessions/new?agentId=${agentId}`}
+                className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700 inline-flex items-center gap-1.5"
+                title="Démarrer une nouvelle session de veille pour cet agent"
+              >
+                <Icon.ClipboardCheck className="w-4 h-4" /> Veiller
+              </Link>
+              <button
+                type="button"
+                onClick={() => setAdding(true)}
+                className="btn btn-primary"
+              >
+                <Icon.Plus className="w-4 h-4" /> Ajouter une action
+              </button>
+            </>
           )}
         </div>
       </div>

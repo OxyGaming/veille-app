@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Icon } from "@/components/icons";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
@@ -26,11 +27,96 @@ export default function AgentsAdminClient({
   initial: Agent[];
   teams: Team[];
 }) {
+  const router = useRouter();
   const { dialog, ask } = useConfirmDialog();
   const [agents, setAgents] = useState(initial);
   const [query, setQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
   const [editing, setEditing] = useState<Agent | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  function buildLocalAgent(
+    id: string,
+    payload: {
+      matricule: string;
+      firstName: string;
+      lastName: string;
+      teamIds: string[];
+    }
+  ): Agent {
+    return {
+      id,
+      matricule: payload.matricule,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      isActive: true,
+      isVisible: true,
+      teamIds: payload.teamIds,
+      teamNames: payload.teamIds
+        .map((id) => teams.find((t) => t.id === id)?.name)
+        .filter((n): n is string => !!n),
+      actionsCount: 0,
+      sessionsCount: 0,
+    };
+  }
+
+  async function createAgent(payload: {
+    matricule: string;
+    firstName: string;
+    lastName: string;
+    teamIds: string[];
+  }): Promise<{ ok: boolean; error?: string }> {
+    const post = async (reactivate: boolean) =>
+      fetch("/api/admin/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          ...(reactivate ? { reactivateIfExists: true } : {}),
+        }),
+      });
+    const res = await post(false);
+    if (res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const newAgent = buildLocalAgent(body.id as string, payload);
+      setAgents((arr) => [newAgent, ...arr]);
+      toast.success("Agent créé");
+      setCreating(false);
+      router.refresh();
+      return { ok: true };
+    }
+    if (res.status === 409) {
+      const j = await res.json().catch(() => null);
+      if (j?.code === "DUPLICATE_MATRICULE" && j.existing) {
+        const e = j.existing;
+        const stateLabel = e.isActive ? "actif" : "archivé";
+        const ok = await ask({
+          title: `Matricule ${payload.matricule} déjà utilisé`,
+          description: `Cet agent existe (${e.lastName} ${e.firstName}, ${stateLabel}). Réactiver avec les nouvelles informations et l'attacher aux équipes choisies ?`,
+          confirmLabel: "Réactiver",
+          tone: "default",
+        });
+        if (!ok) return { ok: false };
+        const res2 = await post(true);
+        if (res2.ok) {
+          const body = await res2.json().catch(() => ({}));
+          const reactivated = buildLocalAgent(body.id as string, payload);
+          setAgents((arr) => {
+            const others = arr.filter((x) => x.id !== reactivated.id);
+            return [reactivated, ...others];
+          });
+          toast.success("Agent réactivé");
+          setCreating(false);
+          router.refresh();
+          return { ok: true };
+        }
+        const j2 = await res2.json().catch(() => ({}));
+        return { ok: false, error: j2.error || "Réactivation refusée" };
+      }
+    }
+    const j = await res.json().catch(() => ({}));
+    return { ok: false, error: j.error || "Création refusée" };
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -88,6 +174,14 @@ export default function AgentsAdminClient({
             aux équipes.
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="btn btn-primary"
+        >
+          <Icon.Plus className="w-4 h-4" />
+          Nouvel agent
+        </button>
       </div>
 
       <div className="flex items-center gap-3 mb-3 flex-wrap">
@@ -233,6 +327,14 @@ export default function AgentsAdminClient({
           onSave={saveTeams}
         />
       )}
+
+      {creating && (
+        <CreateAgentDialog
+          teams={teams}
+          onCancel={() => setCreating(false)}
+          onSubmit={createAgent}
+        />
+      )}
     </div>
   );
 }
@@ -302,6 +404,163 @@ function TeamPicker({
             className="btn btn-primary"
           >
             Enregistrer
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function CreateAgentDialog({
+  teams,
+  onCancel,
+  onSubmit,
+}: {
+  teams: Team[];
+  onCancel: () => void;
+  onSubmit: (payload: {
+    matricule: string;
+    firstName: string;
+    lastName: string;
+    teamIds: string[];
+  }) => Promise<{ ok: boolean; error?: string }>;
+}) {
+  const [matricule, setMatricule] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [teamIds, setTeamIds] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function toggleTeam(id: string) {
+    const next = new Set(teamIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setTeamIds(next);
+  }
+
+  async function submit() {
+    setError(null);
+    if (!matricule.trim() || !firstName.trim() || !lastName.trim()) {
+      setError("Matricule, prénom et nom sont obligatoires.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await onSubmit({
+        matricule: matricule.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        teamIds: [...teamIds],
+      });
+      if (!r.ok && r.error) setError(r.error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50"
+        onClick={busy ? undefined : onCancel}
+      />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden">
+        <header className="px-4 py-3 border-b border-slate-200">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500">
+            Nouvel agent
+          </div>
+          <div className="text-sm font-bold">Création manuelle</div>
+        </header>
+        <div className="p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Matricule <span className="text-rose-600">*</span>
+            </label>
+            <input
+              value={matricule}
+              onChange={(e) => setMatricule(e.target.value)}
+              placeholder="Ex. 1234567A"
+              className="input font-mono"
+              autoFocus
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Prénom <span className="text-rose-600">*</span>
+              </label>
+              <input
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Nom <span className="text-rose-600">*</span>
+              </label>
+              <input
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                className="input"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Équipes
+            </label>
+            <div className="border border-slate-200 rounded-lg max-h-48 overflow-auto">
+              {teams.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-slate-500">
+                  Aucune équipe disponible.
+                </div>
+              ) : (
+                teams.map((t) => {
+                  const sel = teamIds.has(t.id);
+                  return (
+                    <label
+                      key={t.id}
+                      className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer ${
+                        sel ? "bg-indigo-50" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={sel}
+                        onChange={() => toggleTeam(t.id)}
+                      />
+                      <span className="text-sm">{t.name}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          </div>
+          {error && (
+            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-2">
+              <Icon.AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-slate-100"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="btn btn-primary"
+          >
+            {busy ? "Création…" : "Créer"}
           </button>
         </div>
       </div>

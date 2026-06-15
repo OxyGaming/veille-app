@@ -171,5 +171,3 @@ Aucun overflow horizontal global sur les 3 pages. Tables avec
 ## SHA livraison
 
 Final C6 : `5aa414c`
-
-À renseigner après le commit final de C6.

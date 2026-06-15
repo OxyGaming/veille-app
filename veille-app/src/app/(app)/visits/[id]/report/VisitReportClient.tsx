@@ -74,6 +74,20 @@ function dateColumnLabel(category: string): string {
 }
 
 /**
+ * Vrai si la catégorie correspond à la trousse de secours, indépendamment
+ * de la casse, des espaces et des accents (la catégorie est saisie libre
+ * par l'admin du site, cf. SiteEquipmentsClient).
+ */
+function isTrousseDeSecours(category: string): boolean {
+  const normalized = category
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+  return normalized === "trousse de secours";
+}
+
+/**
  * Mappe une catégorie de section à son numéro de chapitre SNCF.
  * "Poste de travail" → "1", "Incendie"/"Électrique" → "2", etc.
  * Les sections de même chapitre sont regroupées sous un seul bandeau.
@@ -1265,12 +1279,20 @@ function renderInventory(
       doc.addPage();
       y = margin;
     }
+    // Bandeau catégorie — pour « Trousse de secours », on ajoute en
+    // discret la trace de la vérification courante directement sur la
+    // bande (cf. demande métier : utile quand la fiche est imprimée et
+    // archivée à part). Pour toutes les autres catégories, on garde le
+    // libellé brut.
+    const headerLabel = isTrousseDeSecours(cat)
+      ? `${cat} - Vérifié le ${format(new Date(visit.visitDate), "dd/MM/yyyy")} par ${visit.observer.name}`
+      : cat;
     autoTable(doc, {
       startY: y,
       head: [
         [
           {
-            content: cat,
+            content: headerLabel,
             colSpan: 3,
             styles: {
               fillColor: [235, 235, 235],

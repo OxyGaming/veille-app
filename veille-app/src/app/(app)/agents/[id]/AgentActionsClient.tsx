@@ -177,9 +177,16 @@ export default function AgentActionsClient({
           </button>
           {targetKind === "agent" && (
             <>
+              {/*
+                NB : on utilise `text-base` (et non `text-xs` comme les
+                boutons frères Vu/Commentaire) parce qu'un reset global
+                `button { font: inherit }` neutralise text-xs sur les
+                <button> ; sans cet ajustement le lien <a> rendrait plus
+                petit que les boutons (12 px vs 16 px) — visible à l'œil.
+              */}
               <Link
                 href={`/sessions/new?agentId=${agentId}`}
-                className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700 inline-flex items-center gap-1.5"
+                className="text-base font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700 inline-flex items-center gap-1.5"
                 title="Démarrer une nouvelle session de veille pour cet agent"
               >
                 <Icon.ClipboardCheck className="w-4 h-4" /> Veiller

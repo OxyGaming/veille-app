@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
+import { toast } from "sonner";
 import { Icon } from "@/components/icons";
 
 type Entry = {
@@ -112,8 +114,33 @@ type FilterMeta = {
   sites: { id: string; name: string; code: string | null }[];
 };
 
-export default function HistoryClient() {
+/**
+ * Mappe les 7 types affichés dans l'UI vers les 5 types backend.
+ * (`sighting`/`note` cohabitent dans `AgentSighting` via `kind`, idem
+ * `site-sighting`/`site-note` dans `SiteSighting`.)
+ */
+function mapApiType(type: Entry["type"]): string {
+  switch (type) {
+    case "visit":
+      return "visit";
+    case "session":
+      return "session";
+    case "validation":
+      return "validation";
+    case "sighting":
+    case "note":
+      return "agent-sighting";
+    case "site-sighting":
+    case "site-note":
+      return "site-sighting";
+  }
+}
+
+export default function HistoryClient({ userRole }: { userRole: string }) {
+  const router = useRouter();
+  const isAdmin = userRole === "ADMIN";
   const [entries, setEntries] = useState<Entry[] | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Entry | null>(null);
   const [types, setTypes] = useState<Set<string>>(
     new Set(["visit", "session", "validation", "sighting"])
   );
@@ -200,6 +227,47 @@ export default function HistoryClient() {
         ) ?? prev
       );
     }
+  }
+
+  async function performDelete(
+    target: Entry,
+    reason: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const apiType = mapApiType(target.type);
+    const res = await fetch(
+      `/api/admin/history/${apiType}/${target.id}/delete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      },
+    );
+    if (res.ok) {
+      // Retrait optimiste de la ligne, puis refresh server pour resync
+      // (Today, dashboards, Hub Échéances qui pourraient dépendre de
+      // cette entrée).
+      setEntries((prev) =>
+        prev?.filter(
+          (it) => !(it.type === target.type && it.id === target.id),
+        ) ?? prev,
+      );
+      toast.success("Entrée supprimée");
+      setDeleteTarget(null);
+      router.refresh();
+      return { ok: true };
+    }
+    if (res.status === 404) {
+      toast.error("Entrée introuvable.");
+      return { ok: false, error: "Entrée introuvable." };
+    }
+    if (res.status === 401 || res.status === 403) {
+      toast.error("Action non autorisée.");
+      return { ok: false, error: "Action non autorisée." };
+    }
+    const j = await res.json().catch(() => ({}));
+    const message =
+      (j as { error?: string }).error || "Échec de la suppression.";
+    return { ok: false, error: message };
   }
 
   const grouped = useMemo(() => {
@@ -485,6 +553,24 @@ export default function HistoryClient() {
                       />
                       <span>Icare</span>
                     </label>
+                    {/*
+                      Bouton « Supprimer » — ADMIN-only ET ≥ lg uniquement.
+                      `hidden lg:inline-flex` cache le bouton sur mobile/
+                      tablette. Le rendu conditionnel React s'assure qu'un
+                      EDITOR/USER ne le reçoit jamais (sécurité défense en
+                      profondeur — l'API serveur revérifie le rôle).
+                    */}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(e)}
+                        title="Supprimer cette entrée (admin)"
+                        className="hidden lg:inline-flex items-center justify-center px-3 border-l border-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors shrink-0"
+                        aria-label="Supprimer cette entrée"
+                      >
+                        <Icon.Trash className="w-4 h-4" />
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -492,6 +578,148 @@ export default function HistoryClient() {
           </section>
         ))}
       </div>
+
+      {deleteTarget && (
+        <DeleteEntryDialog
+          target={deleteTarget}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={performDelete}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Modale de confirmation de suppression d'une entrée d'historique.
+ *
+ * - Affiche un avertissement clair sur l'irréversibilité.
+ * - Champ motif obligatoire (3–500 caractères, trim côté client) — le
+ *   bouton « Supprimer définitivement » reste désactivé tant que la
+ *   contrainte n'est pas remplie ou qu'un appel est en cours.
+ * - Délègue l'appel API au parent (`onConfirm`). Le parent ferme la
+ *   modale en cas de succès (setDeleteTarget(null)). En cas d'échec,
+ *   l'erreur remonte ici pour affichage inline.
+ */
+function DeleteEntryDialog({
+  target,
+  onCancel,
+  onConfirm,
+}: {
+  target: Entry;
+  onCancel: () => void;
+  onConfirm: (
+    target: Entry,
+    reason: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
+}) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const trimmedLen = reason.trim().length;
+  const valid = trimmedLen >= 3 && trimmedLen <= 500;
+
+  async function submit() {
+    if (!valid || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await onConfirm(target, reason.trim());
+      if (!r.ok) {
+        setError(r.error ?? "Échec de la suppression.");
+        setBusy(false);
+      }
+      // En cas de succès, le parent unmount la modale — pas de setBusy(false).
+    } catch {
+      setError("Échec inattendu.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50"
+        onClick={busy ? undefined : onCancel}
+      />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden mx-4">
+        <header className="px-4 py-3 border-b border-slate-200">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-rose-600">
+            Suppression
+          </div>
+          <div className="text-base font-bold">Supprimer cette entrée ?</div>
+        </header>
+        <div className="p-4 space-y-3">
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-800 space-y-1">
+            <p className="font-semibold">Cette suppression est définitive.</p>
+            <p>Toutes les données associées seront supprimées.</p>
+            <p>L&apos;opération est enregistrée dans le journal d&apos;audit.</p>
+          </div>
+          <div className="text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2">
+            <div className="font-mono font-semibold uppercase tracking-wider mb-0.5 text-[10px] text-slate-500">
+              Entrée
+            </div>
+            <div className="font-semibold text-slate-900 truncate">
+              {target.title}
+            </div>
+            {target.subtitle && (
+              <div className="text-slate-500 truncate">{target.subtitle}</div>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Motif de suppression{" "}
+              <span className="text-rose-600">*</span>
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="Ex. : doublon import, saisie erronée…"
+              className="input"
+              autoFocus
+            />
+            <div className="flex justify-between text-[10px] mt-1">
+              <span
+                className={
+                  trimmedLen > 0 && trimmedLen < 3
+                    ? "text-rose-600"
+                    : "text-slate-400"
+                }
+              >
+                Minimum 3 caractères
+              </span>
+              <span className="text-slate-400 font-mono">{trimmedLen}/500</span>
+            </div>
+          </div>
+          {error && (
+            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-2">
+              <Icon.AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-slate-100 disabled:opacity-50"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!valid || busy}
+            className="text-sm font-semibold px-3 py-1.5 rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {busy ? "Suppression…" : "Supprimer définitivement"}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }

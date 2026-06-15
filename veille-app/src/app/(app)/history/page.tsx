@@ -7,5 +7,5 @@ export const dynamic = "force-dynamic";
 export default async function HistoryPage() {
   const u = await getSessionUser();
   if (!u) redirect("/login");
-  return <HistoryClient />;
+  return <HistoryClient userRole={u.role} />;
 }

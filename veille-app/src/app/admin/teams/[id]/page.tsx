@@ -1,5 +1,6 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 import TeamDetailClient from "./TeamDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -14,13 +15,17 @@ export const dynamic = "force-dynamic";
  *    permettre l'ajout via picker. Filtrage côté client (volumes
  *    raisonnables en admin).
  *
- * Sécurité : ADMIN-only via /admin/layout.tsx.
+ * Sécurité : ADMIN uniquement (cf. /admin/teams/page.tsx pour le
+ * raisonnement). Un EDITOR est redirigé vers /admin.
  */
 export default async function TeamDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const u = await getSessionUser();
+  if (!u) redirect("/login");
+  if (u.role !== "ADMIN") redirect("/admin");
   const { id } = await params;
   const [team, allUsers, allAgents, allSites] = await Promise.all([
     prisma.team.findUnique({

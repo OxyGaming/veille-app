@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 import TeamsClient from "./TeamsClient";
 
 export const dynamic = "force-dynamic";
@@ -11,9 +13,15 @@ export const dynamic = "force-dynamic";
  * (équipe principale) ne sont pas utilisées ici car elles ne reflètent
  * pas toujours l'appartenance opérationnelle.
  *
- * Sécurité : la garde ADMIN est appliquée par le layout `/admin/layout.tsx`.
+ * Sécurité : ADMIN uniquement. Le layout /admin/layout.tsx accepte
+ * ADMIN + EDITOR ; cette page resserre l'accès aux ADMIN car c'est
+ * une opération sensible (cf. spec Sprint 8 : « ADMIN uniquement »).
+ * Un EDITOR est redirigé vers /admin sans erreur explicite.
  */
 export default async function TeamsPage() {
+  const u = await getSessionUser();
+  if (!u) redirect("/login");
+  if (u.role !== "ADMIN") redirect("/admin");
   const [teams, kpis] = await Promise.all([
     prisma.team.findMany({
       orderBy: { name: "asc" },

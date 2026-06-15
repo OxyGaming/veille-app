@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +10,9 @@ export const dynamic = "force-dynamic";
  * Sprint 8 C4 (+ C5) — Diagnostic de structure des équipes.
  *
  * Compte et liste les entités potentiellement orphelines OU
- * sur-affectées. Sécurité : ADMIN via /admin/layout.tsx.
+ * sur-affectées. Sécurité : ADMIN uniquement (le layout /admin
+ * accepte EDITOR pour les autres sections mais le sprint 8 est
+ * strictement ADMIN). EDITOR est redirigé vers /admin.
  *
  * Sections (C4) :
  *  - Utilisateurs sans équipe (0 lien UserTeam, exclut les inactifs).
@@ -29,6 +33,10 @@ export const dynamic = "force-dynamic";
 const MULTI_TEAM_THRESHOLD = 5;
 
 export default async function TeamsHealthPage() {
+  const u = await getSessionUser();
+  if (!u) redirect("/login");
+  if (u.role !== "ADMIN") redirect("/admin");
+
   const [
     orphanUsers,
     orphanAgents,

@@ -59,6 +59,8 @@ export function AdminActionsTable({
   const [loadingMore, setLoadingMore] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [replacing, setReplacing] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // Les actions VALIDATED_LOCAL ne peuvent pas être rendues obsolètes
@@ -161,6 +163,99 @@ export function AdminActionsTable({
     }
   }
 
+  async function confirmHardDelete(reason: string) {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/actions/batch-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ actionIds: ids, reason }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(j.error ?? "Erreur lors de la suppression");
+        return;
+      }
+      const payload = (await res.json()) as {
+        deleted: string[];
+        blockedValidated: string[];
+        forbidden: string[];
+      };
+      const parts = [
+        `${payload.deleted.length} supprimée(s)`,
+        payload.blockedValidated.length > 0
+          ? `${payload.blockedValidated.length} bloquée(s) (validée(s))`
+          : null,
+        payload.forbidden.length > 0
+          ? `${payload.forbidden.length} hors scope`
+          : null,
+      ].filter(Boolean);
+      const summary = parts.join(" · ");
+      if (payload.deleted.length > 0) toast.success(summary);
+      else toast.warning(summary || "Aucune action supprimée");
+      // Retrait optimiste local + refresh server-state.
+      setItems((arr) =>
+        arr.filter((a) => !payload.deleted.includes(a.id)),
+      );
+      setSelected(new Set());
+      setDeleting(false);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmReplace(content: {
+    comment: string | null;
+    keyPoint: string | null;
+    theme: string | null;
+    domain: string | null;
+    dueAt: string | null | undefined;
+  }) {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/actions/batch-replace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ actionIds: ids, content }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(j.error ?? "Erreur lors du remplacement");
+        return;
+      }
+      const payload = (await res.json()) as {
+        replaced: string[];
+        createdIds: string[];
+        skippedValidated: string[];
+        forbidden: string[];
+      };
+      const parts = [
+        `${payload.replaced.length} remplacée(s)`,
+        payload.skippedValidated.length > 0
+          ? `${payload.skippedValidated.length} validée(s) (refusée(s))`
+          : null,
+        payload.forbidden.length > 0
+          ? `${payload.forbidden.length} hors scope`
+          : null,
+      ].filter(Boolean);
+      const summary = parts.join(" · ");
+      if (payload.replaced.length > 0) toast.success(summary);
+      else toast.warning(summary || "Aucune action remplacée");
+      setSelected(new Set());
+      setReplacing(false);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const selectedCount = selected.size;
   const totalEligibleOnPage = eligibleIds.size;
   const allSelectedOnPage =
@@ -187,13 +282,29 @@ export function AdminActionsTable({
           {selectedCount > 1 ? "s" : ""}
         </span>
         {selectedCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setConfirming(true)}
-            className="ml-auto text-xs bg-rose-600 hover:bg-rose-700 text-white font-semibold px-3 py-1.5 rounded-lg"
-          >
-            Marquer obsolètes ({selectedCount})
-          </button>
+          <div className="ml-auto flex gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="text-xs bg-slate-600 hover:bg-slate-700 text-white font-semibold px-3 py-1.5 rounded-lg"
+            >
+              Marquer obsolètes ({selectedCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setReplacing(true)}
+              className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 rounded-lg"
+            >
+              Remplacer ({selectedCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeleting(true)}
+              className="text-xs bg-rose-600 hover:bg-rose-700 text-white font-semibold px-3 py-1.5 rounded-lg"
+            >
+              Supprimer définitivement ({selectedCount})
+            </button>
+          </div>
         )}
       </div>
 
@@ -375,6 +486,24 @@ export function AdminActionsTable({
           onClose={() => !busy && setConfirming(false)}
         />
       )}
+
+      {deleting && (
+        <BatchDeleteModal
+          count={selectedCount}
+          busy={busy}
+          onConfirm={confirmHardDelete}
+          onClose={() => !busy && setDeleting(false)}
+        />
+      )}
+
+      {replacing && (
+        <BatchReplaceModal
+          count={selectedCount}
+          busy={busy}
+          onConfirm={confirmReplace}
+          onClose={() => !busy && setReplacing(false)}
+        />
+      )}
     </section>
   );
 }
@@ -445,6 +574,307 @@ function BatchConfirmModal({
               {busy ? "Retrait…" : `Retirer ${count} action${count > 1 ? "s" : ""}`}
             </button>
           </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Modale de suppression définitive (hard delete) en lot. Motif obligatoire
+ * (3–500 caractères) tracé dans l'audit. Bouton « Supprimer » désactivé tant
+ * que la contrainte n'est pas remplie ou qu'un appel est en cours.
+ */
+function BatchDeleteModal({
+  count,
+  busy,
+  onConfirm,
+  onClose,
+}: {
+  count: number;
+  busy: boolean;
+  onConfirm: (reason: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const trimmedLen = reason.trim().length;
+  const valid = trimmedLen >= 3 && trimmedLen <= 500;
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-x-0 bottom-0 md:bottom-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-md md:w-full z-50 bg-white rounded-t-2xl md:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+      >
+        <header className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-rose-500" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-rose-600">
+              Suppression définitive
+            </div>
+            <div className="text-sm font-semibold truncate">
+              {count} action{count > 1 ? "s" : ""} sélectionnée
+              {count > 1 ? "s" : ""}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="p-4 space-y-3">
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-800 space-y-1">
+            <p className="font-semibold">Cette suppression est définitive.</p>
+            <p>
+              Les lignes seront retirées de la base. Les actions ayant déjà au
+              moins une validation seront automatiquement écartées du lot.
+            </p>
+            <p>L&apos;opération est enregistrée dans le journal d&apos;audit.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Motif de suppression{" "}
+              <span className="text-rose-600">*</span>
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="Ex. : import erroné, doublons à purger…"
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
+              autoFocus
+            />
+            <div className="flex justify-between text-[10px] mt-1">
+              <span
+                className={
+                  trimmedLen > 0 && trimmedLen < 3
+                    ? "text-rose-600"
+                    : "text-slate-400"
+                }
+              >
+                Minimum 3 caractères
+              </span>
+              <span className="text-slate-400 font-mono">{trimmedLen}/500</span>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end pt-1">
+            <button
+              onClick={onClose}
+              disabled={busy}
+              className="text-sm text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-100 disabled:opacity-50"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={() => onConfirm(reason.trim())}
+              disabled={!valid || busy}
+              className="bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg"
+            >
+              {busy
+                ? "Suppression…"
+                : `Supprimer ${count} action${count > 1 ? "s" : ""}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Modale de remplacement en lot. Au moins un champ doit être renseigné.
+ * `dueAt` non renseignée → hérite par-action de la valeur originale. Renseignée
+ * → applique la même échéance à toutes les nouvelles. Vide → null pour toutes.
+ */
+function BatchReplaceModal({
+  count,
+  busy,
+  onConfirm,
+  onClose,
+}: {
+  count: number;
+  busy: boolean;
+  onConfirm: (content: {
+    comment: string | null;
+    keyPoint: string | null;
+    theme: string | null;
+    domain: string | null;
+    dueAt: string | null | undefined;
+  }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [comment, setComment] = useState("");
+  const [keyPoint, setKeyPoint] = useState("");
+  const [theme, setTheme] = useState("");
+  const [domain, setDomain] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [touchDueAt, setTouchDueAt] = useState(false);
+  const anyFieldFilled =
+    comment.trim() !== "" ||
+    keyPoint.trim() !== "" ||
+    theme.trim() !== "" ||
+    domain.trim() !== "";
+  const valid = anyFieldFilled;
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-x-0 bottom-0 md:bottom-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:max-w-lg md:w-full z-50 bg-white rounded-t-2xl md:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]"
+      >
+        <header className="px-4 py-3 border-b border-slate-200 flex items-center gap-2 shrink-0">
+          <span className="w-2 h-2 rounded-full bg-indigo-500" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-indigo-600">
+              Remplacement en lot
+            </div>
+            <div className="text-sm font-semibold truncate">
+              {count} action{count > 1 ? "s" : ""} sélectionnée
+              {count > 1 ? "s" : ""}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="p-4 space-y-3 overflow-y-auto">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 space-y-1">
+            <p>
+              Pour chaque action sélectionnée, une <strong>nouvelle</strong>{" "}
+              action est créée avec ces champs (les liens agent/site/équipe
+              sont conservés). L&apos;originale passe en{" "}
+              <code>REPLACED</code> et disparaît du suivi.
+            </p>
+            <p className="text-slate-500">
+              Les actions déjà validées seront écartées du lot.
+            </p>
+          </div>
+          <div>
+            <label className="block text-[11px] font-mono uppercase tracking-wider text-slate-500 mb-1">
+              Commentaire (titre)
+            </label>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              rows={3}
+              maxLength={2000}
+              placeholder="Description concrète à réaliser…"
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              autoFocus
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <label className="block">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
+                Point clé
+              </span>
+              <input
+                type="text"
+                value={keyPoint}
+                onChange={(e) => setKeyPoint(e.target.value)}
+                maxLength={500}
+                placeholder="Catégorisation"
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
+                Échéance
+              </span>
+              <input
+                type="date"
+                value={dueAt}
+                onChange={(e) => {
+                  setDueAt(e.target.value);
+                  setTouchDueAt(true);
+                }}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <span className="text-[10px] text-slate-400">
+                {touchDueAt
+                  ? dueAt
+                    ? "Appliquée à toutes les nouvelles."
+                    : "Sera effacée pour toutes."
+                  : "Vide = hérite de l'originale."}
+              </span>
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
+                Thème
+              </span>
+              <input
+                type="text"
+                value={theme}
+                onChange={(e) => setTheme(e.target.value)}
+                maxLength={200}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
+                Domaine
+              </span>
+              <input
+                type="text"
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                maxLength={200}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </label>
+          </div>
+          {!anyFieldFilled && (
+            <p className="text-[11px] text-slate-500">
+              Renseigne au moins un champ de contenu pour activer le
+              remplacement.
+            </p>
+          )}
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex gap-2 justify-end shrink-0">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="text-sm text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-100 disabled:opacity-50"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={() =>
+              onConfirm({
+                comment: comment.trim() || null,
+                keyPoint: keyPoint.trim() || null,
+                theme: theme.trim() || null,
+                domain: domain.trim() || null,
+                dueAt: touchDueAt
+                  ? dueAt
+                    ? new Date(dueAt + "T00:00:00").toISOString()
+                    : null
+                  : undefined,
+              })
+            }
+            disabled={!valid || busy}
+            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg"
+          >
+            {busy
+              ? "Remplacement…"
+              : `Remplacer ${count} action${count > 1 ? "s" : ""}`}
+          </button>
         </div>
       </div>
     </>

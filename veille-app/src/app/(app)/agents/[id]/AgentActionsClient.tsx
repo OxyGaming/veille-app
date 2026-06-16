@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -56,6 +56,15 @@ export default function AgentActionsClient({
 }) {
   const router = useRouter();
   const [actions, setActions] = useState(initial);
+  // Resynchro après `router.refresh()` : sans cet effet, l'état local restait
+  // figé sur la liste du premier rendu — les actions ajoutées via le modal
+  // « Ajouter une action » ou modifiées côté serveur n'apparaissaient pas
+  // tant que l'utilisateur ne rechargeait pas manuellement. Pour les
+  // validations, l'optimistic remove couvrait le cas, mais convergeait avec
+  // l'état serveur après refresh — ce qui est ce qu'on veut.
+  useEffect(() => {
+    setActions(initial);
+  }, [initial]);
   const [validating, setValidating] = useState<Action | null>(null);
   const [obsoleting, setObsoleting] = useState<Action | null>(null);
   const [comment, setComment] = useState("");
@@ -65,8 +74,51 @@ export default function AgentActionsClient({
   const [adding, setAdding] = useState(false);
   const [sighting, setSighting] = useState(false);
   const [noting, setNoting] = useState(false);
+  const [query, setQuery] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
 
   const canManage = userRole === "EDITOR" || userRole === "ADMIN";
+
+  // Liste de tags disponibles = union (a.type ∪ a.tags) de toutes les actions
+  // chargées. Triée pour stabilité du dropdown.
+  const availableTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of actions) {
+      if (a.type) set.add(a.type);
+      for (const t of a.tags) set.add(t);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "fr"));
+  }, [actions]);
+
+  // Filtrage client-side : la liste est petite (typiquement < 50 actions
+  // par agent), un debounce n'apporterait rien. La recherche est instantanée.
+  const filteredActions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q && !tagFilter) return actions;
+    return actions.filter((a) => {
+      if (tagFilter) {
+        const hasTag = a.type === tagFilter || a.tags.includes(tagFilter);
+        if (!hasTag) return false;
+      }
+      if (q) {
+        const haystack = [
+          a.comment,
+          a.keyPoint,
+          a.theme,
+          a.domain,
+          a.actionPlan,
+          a.externalId,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [actions, query, tagFilter]);
+
+  const isFiltered = query.trim() !== "" || tagFilter !== "";
 
   function toggleExpanded(id: string) {
     setExpanded((s) => {
@@ -152,6 +204,8 @@ export default function AgentActionsClient({
         <div className="text-xs text-slate-500">
           {actions.length === 0
             ? "Aucune action à traiter."
+            : isFiltered
+            ? `${filteredActions.length} / ${actions.length} action${actions.length > 1 ? "s" : ""} affichée${filteredActions.length > 1 ? "s" : ""}.`
             : `${actions.length} action${actions.length > 1 ? "s" : ""} en cours.`}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -249,8 +303,56 @@ export default function AgentActionsClient({
           .
         </div>
       ) : (
+      <>
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[180px]">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filtrer les actions…"
+            className="w-full rounded-lg border border-slate-200 bg-white pl-8 pr-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <Icon.Search
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
+            aria-hidden="true"
+          />
+        </div>
+        {availableTags.length > 0 && (
+          <select
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-[40%]"
+            aria-label="Filtrer par tag"
+          >
+            <option value="">Tous les tags</option>
+            {availableTags.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        )}
+        {isFiltered && (
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setTagFilter("");
+            }}
+            className="text-xs text-slate-500 hover:text-slate-900 underline"
+          >
+            Effacer
+          </button>
+        )}
+      </div>
+      {filteredActions.length === 0 ? (
+        <div className="text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-6 text-center">
+          Aucune action ne correspond aux filtres.
+        </div>
+      ) : (
       <ul className="grid grid-cols-1 gap-2">
-        {actions.map((a) => {
+        {filteredActions.map((a) => {
           const due = a.dueAt ? new Date(a.dueAt) : null;
           const late = due && due < new Date();
           return (
@@ -410,6 +512,8 @@ export default function AgentActionsClient({
           );
         })}
       </ul>
+      )}
+      </>
       )}
 
       {validating && (

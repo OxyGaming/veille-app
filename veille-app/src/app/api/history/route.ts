@@ -95,7 +95,14 @@ export async function GET(req: Request) {
           take,
           include: {
             action: {
-              select: { externalId: true, keyPoint: true, siteId: true },
+              select: {
+                externalId: true,
+                comment: true,
+                keyPoint: true,
+                theme: true,
+                domain: true,
+                siteId: true,
+              },
             },
             agent: { select: { id: true, firstName: true, lastName: true } },
             site: { select: { id: true, name: true } },
@@ -160,8 +167,17 @@ export async function GET(req: Request) {
     badges?: string[];
     accent?: "default" | "warn" | "ok" | "info";
     icareDone?: boolean;
-    /** Texte de commentaire à afficher en clair (séparément des badges). */
+    /**
+     * Commentaire-entrée : l'entrée EST le commentaire (note, site-note,
+     * sighting d'import). Affiché en clair sous le titre.
+     */
     commentText?: string | null;
+    /**
+     * Commentaire-d'action : l'entrée a un commentaire attaché (validation
+     * d'action, sighting non-import avec note). Affiché derrière un bouton
+     * d'information côté UI.
+     */
+    actionComment?: string | null;
   };
 
   const entries: Entry[] = [];
@@ -171,8 +187,8 @@ export async function GET(req: Request) {
       id: v.id,
       at: v.visitDate.toISOString(),
       observerName: v.observer.name,
-      title: `Visite — ${v.template.name}`,
-      subtitle: v.site.name,
+      title: `${v.template.name} · ${v.site.name}`,
+      subtitle: null,
       siteId: v.siteId,
       href: `/visits/${v.id}`,
       badges: [
@@ -190,10 +206,10 @@ export async function GET(req: Request) {
       id: s.id,
       at: s.startedAt.toISOString(),
       observerName: s.observer.name,
-      title: "Session de veille",
-      subtitle: s.agent
+      title: s.agent
         ? `${s.agent.lastName} ${s.agent.firstName}`
         : "Sans agent",
+      subtitle: null,
       agentId: s.agentId,
       href: `/sessions/${s.id}`,
       badges: [
@@ -206,14 +222,26 @@ export async function GET(req: Request) {
     });
   }
   for (const v of validations) {
+    // Cascade de titre alignée avec la carte agent (cf. AgentActionsClient
+    // commentaire L321) : le `comment` est la description concrète à réaliser
+    // (« Entrainement ODICEO », « Vérifier extincteurs »…). `keyPoint` n'est
+    // qu'une catégorisation ; il sert de fallback. Si rien n'est renseigné,
+    // on retombe sur l'agent/site rattaché pour donner du contexte.
+    const validationTitle =
+      v.action.comment ||
+      v.action.keyPoint ||
+      v.action.theme ||
+      v.action.domain ||
+      (v.agent ? `Action — ${v.agent.lastName} ${v.agent.firstName}` : null) ||
+      (v.site ? `Action — ${v.site.name}` : null) ||
+      "Action sans intitulé";
     entries.push({
       type: "validation",
       id: v.id,
       at: v.realizedAt.toISOString(),
       observerName: v.validatedBy.name,
-      title: `Action validée`,
-      subtitle:
-        v.action.keyPoint ?? v.action.externalId.slice(0, 12) + "…",
+      title: validationTitle,
+      subtitle: null,
       agentId: v.agentId,
       siteId: v.siteId ?? v.action.siteId,
       href: v.agent
@@ -221,62 +249,57 @@ export async function GET(req: Request) {
         : v.site
         ? `/sites/${v.site.id}`
         : "#",
-      badges: v.comment ? [`« ${v.comment.slice(0, 40)} »`] : [],
+      badges: [],
+      actionComment: v.comment ?? null,
       accent: "ok",
     });
   }
   for (const sg of sightings) {
     const isNote = sg.kind === "NOTE";
     const isImport = sg.externalRef?.startsWith("pointage-") ?? false;
-    // Pour les imports, on remplace le badge « commentaire long » par une
-    // étiquette « Import » : le commentaire reste lisible en clair sous le
-    // titre via `commentText`.
-    const badges = isImport
-      ? ["Import"]
-      : [
-          ...(sg.comment ? [sg.comment.slice(0, 80)] : []),
-          ...(sg._count.photos > 0 ? [`${sg._count.photos} photo(s)`] : []),
-        ];
+    // L'entrée note ou import : le commentaire EST l'entrée → `commentText`
+    // (rendu inline). Sighting normal : commentaire = note attachée → `actionComment`
+    // (rendu derrière ℹ️). Pour les imports, badge « Import » dédié.
+    const badges: string[] = isImport ? ["Import"] : [];
     if (!isImport && sg._count.photos > 0) {
-      // Le compteur photos pour les imports n'a pas grand sens (pas
-      // d'upload), donc on ne le met pas.
+      badges.push(`${sg._count.photos} photo(s)`);
     }
     entries.push({
       type: isNote ? "note" : "sighting",
       id: sg.id,
       at: sg.sightedAt.toISOString(),
       observerName: sg.observer.name,
-      title: isNote ? "Commentaire" : "Vu",
-      subtitle: sg.agent
+      title: sg.agent
         ? `${sg.agent.lastName} ${sg.agent.firstName}`
         : "Agent inconnu",
+      subtitle: null,
       agentId: sg.agentId,
       href: `/agents/${sg.agentId}`,
       badges,
-      commentText: isImport ? sg.comment : null,
+      commentText: (isNote || isImport) ? sg.comment : null,
+      actionComment: !isNote && !isImport ? sg.comment ?? null : null,
       accent: isNote ? "info" : "default",
     });
   }
   for (const sg of siteSightings) {
     const isNote = sg.kind === "NOTE";
     const isImport = sg.externalRef?.startsWith("pointage-") ?? false;
-    const badges = isImport
-      ? ["Import"]
-      : [
-          ...(sg.comment ? [sg.comment.slice(0, 80)] : []),
-          ...(sg._count.photos > 0 ? [`${sg._count.photos} photo(s)`] : []),
-        ];
+    const badges: string[] = isImport ? ["Import"] : [];
+    if (!isImport && sg._count.photos > 0) {
+      badges.push(`${sg._count.photos} photo(s)`);
+    }
     entries.push({
       type: isNote ? "site-note" : "site-sighting",
       id: sg.id,
       at: sg.sightedAt.toISOString(),
       observerName: sg.observer.name,
-      title: isNote ? "Commentaire (site)" : "Vu (site)",
-      subtitle: sg.site.name,
+      title: sg.site.name,
+      subtitle: null,
       siteId: sg.siteId,
       href: `/sites/${sg.siteId}`,
       badges,
-      commentText: isImport ? sg.comment : null,
+      commentText: (isNote || isImport) ? sg.comment : null,
+      actionComment: !isNote && !isImport ? sg.comment ?? null : null,
       accent: isNote ? "info" : "default",
     });
   }

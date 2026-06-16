@@ -29,6 +29,7 @@ type Entry = {
   accent?: "default" | "warn" | "ok" | "info";
   icareDone?: boolean;
   commentText?: string | null;
+  actionComment?: string | null;
 };
 
 const FILTERS = [
@@ -136,11 +137,38 @@ function mapApiType(type: Entry["type"]): string {
   }
 }
 
+/**
+ * Endpoint PATCH pour éditer le commentaire associé à une entrée d'historique.
+ * Renvoie null pour les types qui n'ont pas de commentaire éditable
+ * (visite, session — le « commentaire » de session est porté par les
+ * observations à l'intérieur, hors périmètre de cette vue).
+ */
+function commentEditEndpoint(e: Entry): string | null {
+  switch (e.type) {
+    case "validation":
+      return `/api/actions/validations/${e.id}`;
+    case "sighting":
+    case "note":
+      return `/api/sightings/${e.id}`;
+    case "site-sighting":
+    case "site-note":
+      return `/api/site-sightings/${e.id}`;
+    default:
+      return null;
+  }
+}
+
 export default function HistoryClient({ userRole }: { userRole: string }) {
   const router = useRouter();
   const isAdmin = userRole === "ADMIN";
+  const canEditComments = userRole === "ADMIN" || userRole === "EDITOR";
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Entry | null>(null);
+  const [editTarget, setEditTarget] = useState<{
+    entry: Entry;
+    field: "commentText" | "actionComment";
+  } | null>(null);
+  const [openInfoId, setOpenInfoId] = useState<string | null>(null);
   const [types, setTypes] = useState<Set<string>>(
     new Set(["visit", "session", "validation", "sighting"])
   );
@@ -432,24 +460,36 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
               {list.map((e) => {
                 const Icn = ICON[e.type];
                 const theme = EVENT_THEME[e.type];
+                const entryKey = `${e.type}:${e.id}`;
+                const isInfoOpen = openInfoId === entryKey;
+                const hasEditButton =
+                  canEditComments &&
+                  !!commentEditEndpoint(e) &&
+                  !!(e.commentText || e.actionComment);
                 return (
                   <li
-                    key={`${e.type}:${e.id}`}
-                    className={`flex items-stretch border rounded-xl hover:shadow-md transition-all overflow-hidden ${
+                    key={entryKey}
+                    className={`relative flex flex-col md:flex-row md:items-stretch border rounded-xl hover:shadow-md transition-all ${
                       e.icareDone
                         ? "bg-emerald-50/70 border-emerald-300"
                         : "bg-white border-slate-200 hover:border-indigo-300"
                     }`}
                   >
                     <span
-                      className={`w-2 shrink-0 ${
+                      className={`hidden md:block w-2 shrink-0 rounded-l-xl ${
+                        e.icareDone ? "bg-emerald-500" : theme.bar
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span
+                      className={`md:hidden h-1.5 shrink-0 rounded-t-xl ${
                         e.icareDone ? "bg-emerald-500" : theme.bar
                       }`}
                       aria-hidden="true"
                     />
                     <Link
                       href={e.href}
-                      className="flex items-center gap-3 p-3 flex-1 min-w-0"
+                      className="flex items-start gap-3 p-3 flex-1 min-w-0"
                     >
                       <div
                         className={`w-10 h-10 rounded-lg grid place-items-center shrink-0 ${
@@ -470,23 +510,11 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
                           {theme.label}
                         </div>
                         <div
-                          className={`text-sm font-semibold truncate ${
+                          className={`text-sm ${
                             e.icareDone ? "text-emerald-900" : "text-slate-900"
                           }`}
                         >
                           {e.title}
-                          {e.subtitle && (
-                            <span
-                              className={
-                                e.icareDone
-                                  ? "text-emerald-700 font-normal"
-                                  : "text-slate-500 font-normal"
-                              }
-                            >
-                              {" "}
-                              — {e.subtitle}
-                            </span>
-                          )}
                         </div>
                         {e.observerName && (
                           <div
@@ -501,7 +529,7 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
                         )}
                         {e.commentText && (
                           <div
-                            className={`text-[12px] mt-1 italic line-clamp-2 ${
+                            className={`text-[12px] mt-1 italic ${
                               e.icareDone
                                 ? "text-emerald-800"
                                 : "text-slate-600"
@@ -510,66 +538,150 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
                             « {e.commentText} »
                           </div>
                         )}
+                        {e.badges && e.badges.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {e.badges.map((b, i) => {
+                              const isImport = b === "Import";
+                              return (
+                                <span
+                                  key={i}
+                                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                                    e.icareDone
+                                      ? "bg-emerald-100 text-emerald-800"
+                                      : isImport
+                                      ? "bg-sky-100 text-sky-800 border border-sky-200 font-semibold uppercase tracking-wider"
+                                      : "bg-slate-100 text-slate-700"
+                                  }`}
+                                >
+                                  {b}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                      {e.badges && e.badges.length > 0 && (
-                        <div className="hidden md:flex flex-wrap gap-1 max-w-[40%] justify-end">
-                          {e.badges.map((b, i) => {
-                            const isImport = b === "Import";
-                            return (
-                              <span
-                                key={i}
-                                className={`text-[10px] font-mono px-1.5 py-0.5 rounded truncate max-w-[180px] ${
-                                  e.icareDone
-                                    ? "bg-emerald-100 text-emerald-800"
-                                    : isImport
-                                    ? "bg-sky-100 text-sky-800 border border-sky-200 font-semibold uppercase tracking-wider"
-                                    : "bg-slate-100 text-slate-700"
-                                }`}
-                              >
-                                {b}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
                     </Link>
-                    <label
-                      className={`flex items-center gap-1.5 pr-3 pl-2 cursor-pointer select-none text-[11px] font-mono shrink-0 border-l ${
+                    <div
+                      className={`${
+                        e.actionComment ? "flex" : "hidden lg:flex"
+                      } items-stretch shrink-0 rounded-b-xl md:rounded-b-none md:rounded-r-xl ${
+                        isAdmin || hasEditButton ? "lg:rounded-r-none" : ""
+                      } border-t md:border-t-0 md:border-l ${
                         e.icareDone
-                          ? "text-emerald-800 border-emerald-200"
-                          : "text-slate-400 border-slate-100"
+                          ? "border-emerald-200"
+                          : "border-slate-100"
                       }`}
-                      title={
-                        e.icareDone
-                          ? "Saisie Icare effectuée"
-                          : "Cochez quand la saisie Icare est faite"
-                      }
                     >
-                      <input
-                        type="checkbox"
-                        checked={!!e.icareDone}
-                        onChange={() => toggleIcare(e)}
-                        className="w-4 h-4 accent-emerald-600 cursor-pointer"
-                      />
-                      <span>Icare</span>
-                    </label>
-                    {/*
-                      Bouton « Supprimer » — ADMIN-only ET ≥ lg uniquement.
-                      `hidden lg:inline-flex` cache le bouton sur mobile/
-                      tablette. Le rendu conditionnel React s'assure qu'un
-                      EDITOR/USER ne le reçoit jamais (sécurité défense en
-                      profondeur — l'API serveur revérifie le rôle).
-                    */}
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(e)}
-                        title="Supprimer cette entrée (admin)"
-                        className="hidden lg:inline-flex items-center justify-center px-3 border-l border-slate-100 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors shrink-0"
-                        aria-label="Supprimer cette entrée"
+                      {e.actionComment && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenInfoId(isInfoOpen ? null : entryKey)
+                          }
+                          aria-label="Voir le commentaire associé"
+                          aria-expanded={isInfoOpen}
+                          title="Voir le commentaire associé"
+                          className={`flex items-center justify-center px-3 transition-colors ${
+                            isInfoOpen
+                              ? "bg-indigo-50 text-indigo-700"
+                              : e.icareDone
+                              ? "text-emerald-700 hover:bg-emerald-100"
+                              : "text-slate-400 hover:bg-slate-50 hover:text-indigo-600"
+                          }`}
+                        >
+                          <Icon.MessageSquare className="w-4 h-4" />
+                        </button>
+                      )}
+                      <label
+                        className={`hidden lg:flex items-center gap-1.5 pr-3 pl-2 cursor-pointer select-none text-[11px] font-mono ${
+                          e.icareDone
+                            ? "text-emerald-800"
+                            : "text-slate-400"
+                        } ${
+                          e.actionComment
+                            ? e.icareDone
+                              ? "border-l border-emerald-200"
+                              : "border-l border-slate-100"
+                            : ""
+                        }`}
+                        title={
+                          e.icareDone
+                            ? "Saisie Icare effectuée"
+                            : "Cochez quand la saisie Icare est faite"
+                        }
                       >
-                        <Icon.Trash className="w-4 h-4" />
-                      </button>
+                        <input
+                          type="checkbox"
+                          checked={!!e.icareDone}
+                          onChange={() => toggleIcare(e)}
+                          className="w-4 h-4 accent-emerald-600 cursor-pointer"
+                        />
+                        <span>Icare</span>
+                      </label>
+                    </div>
+                    {isInfoOpen && e.actionComment && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-30"
+                          onClick={() => setOpenInfoId(null)}
+                          aria-hidden="true"
+                        />
+                        <div
+                          role="dialog"
+                          className="absolute z-40 right-2 top-full mt-1 w-72 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-lg shadow-lg p-3 text-xs text-slate-700"
+                        >
+                          <div className="text-[10px] font-mono font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                            Commentaire
+                          </div>
+                          <div className="italic whitespace-pre-wrap break-words">
+                            « {e.actionComment} »
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    {/*
+                      Colonne d'actions admin/éditeur (≥ lg uniquement) — empile
+                      « Modifier le commentaire » au-dessus de « Supprimer ». Le
+                      crayon n'apparaît que si l'entrée a un commentaire éditable
+                      (`commentText` ou `actionComment` + endpoint connu). Le rendu
+                      conditionnel React garantit qu'un USER ne reçoit jamais ces
+                      boutons ; les API serveur revérifient le rôle (défense en
+                      profondeur).
+                    */}
+                    {(hasEditButton || isAdmin) && (
+                      <div className="hidden lg:flex flex-col shrink-0 lg:rounded-r-xl border-l border-slate-100 overflow-hidden">
+                        {hasEditButton && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditTarget({
+                                entry: e,
+                                field: e.commentText
+                                  ? "commentText"
+                                  : "actionComment",
+                              })
+                            }
+                            title="Modifier le commentaire"
+                            aria-label="Modifier le commentaire"
+                            className={`flex-1 inline-flex items-center justify-center px-3 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors ${
+                              isAdmin ? "border-b border-slate-100" : ""
+                            }`}
+                          >
+                            <Icon.FileEdit className="w-4 h-4" />
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(e)}
+                            title="Supprimer cette entrée (admin)"
+                            className="flex-1 inline-flex items-center justify-center px-3 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                            aria-label="Supprimer cette entrée"
+                          >
+                            <Icon.Trash className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </li>
                 );
@@ -584,6 +696,27 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
           target={deleteTarget}
           onCancel={() => setDeleteTarget(null)}
           onConfirm={performDelete}
+        />
+      )}
+
+      {editTarget && (
+        <EditCommentDialog
+          target={editTarget.entry}
+          field={editTarget.field}
+          onCancel={() => setEditTarget(null)}
+          onSaved={(nextValue) => {
+            setEntries((prev) =>
+              prev?.map((it) =>
+                it.type === editTarget.entry.type &&
+                it.id === editTarget.entry.id
+                  ? { ...it, [editTarget.field]: nextValue }
+                  : it
+              ) ?? prev
+            );
+            setEditTarget(null);
+            toast.success("Commentaire mis à jour");
+            router.refresh();
+          }}
         />
       )}
     </div>
@@ -717,6 +850,141 @@ function DeleteEntryDialog({
             className="text-sm font-semibold px-3 py-1.5 rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {busy ? "Suppression…" : "Supprimer définitivement"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Modale d'édition de commentaire (PC uniquement — l'icône crayon est en
+ * `hidden lg:inline-flex`, mais la modale reste fonctionnelle si jamais
+ * ouverte autrement).
+ *
+ * - Récupère l'endpoint via `commentEditEndpoint(target)`.
+ * - PATCH `{ comment }` ; le backend valide la longueur (max 2000) et
+ *   refuse un vide pour une NOTE.
+ * - Le parent reçoit la nouvelle valeur via `onSaved` pour patcher la
+ *   liste localement avant le `router.refresh()`.
+ */
+function EditCommentDialog({
+  target,
+  field,
+  onCancel,
+  onSaved,
+}: {
+  target: Entry;
+  field: "commentText" | "actionComment";
+  onCancel: () => void;
+  onSaved: (nextValue: string | null) => void;
+}) {
+  const initial = (field === "commentText" ? target.commentText : target.actionComment) ?? "";
+  const [value, setValue] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const endpoint = commentEditEndpoint(target);
+  const trimmed = value.trim();
+  const isNote = target.type === "note" || target.type === "site-note";
+  const valid = !!endpoint && (isNote ? trimmed.length >= 1 : true) && trimmed.length <= 2000;
+  const changed = trimmed !== (initial ?? "").trim();
+
+  async function submit() {
+    if (!valid || !changed || busy || !endpoint) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: trimmed || null }),
+      });
+      if (res.ok) {
+        onSaved(trimmed || null);
+        return;
+      }
+      if (res.status === 401 || res.status === 403) {
+        setError("Action non autorisée.");
+      } else if (res.status === 404) {
+        setError("Entrée introuvable.");
+      } else {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(j.error ?? "Échec de l'enregistrement.");
+      }
+      setBusy(false);
+    } catch {
+      setError("Échec inattendu.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 bg-slate-900/40 z-50"
+        onClick={busy ? undefined : onCancel}
+      />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden mx-4">
+        <header className="px-4 py-3 border-b border-slate-200">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-indigo-600">
+            Édition
+          </div>
+          <div className="text-base font-bold">Modifier le commentaire</div>
+        </header>
+        <div className="p-4 space-y-3">
+          <div className="text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2">
+            <div className="font-mono font-semibold uppercase tracking-wider mb-0.5 text-[10px] text-slate-500">
+              Entrée
+            </div>
+            <div className="font-semibold text-slate-900 truncate">
+              {target.title}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Commentaire
+              {isNote && <span className="text-rose-600"> *</span>}
+            </label>
+            <textarea
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              rows={5}
+              maxLength={2000}
+              placeholder={isNote ? "Commentaire requis…" : "Vide pour effacer le commentaire"}
+              className="input"
+              autoFocus
+            />
+            <div className="flex justify-between text-[10px] mt-1">
+              <span className={isNote && trimmed.length === 0 ? "text-rose-600" : "text-slate-400"}>
+                {isNote ? "Obligatoire" : "Optionnel"}
+              </span>
+              <span className="text-slate-400 font-mono">{trimmed.length}/2000</span>
+            </div>
+          </div>
+          {error && (
+            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-start gap-2">
+              <Icon.AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-slate-100 disabled:opacity-50"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!valid || !changed || busy}
+            className="text-sm font-semibold px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {busy ? "Enregistrement…" : "Enregistrer"}
           </button>
         </div>
       </div>

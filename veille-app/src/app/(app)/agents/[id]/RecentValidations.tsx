@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { toast } from "sonner";
@@ -45,6 +46,7 @@ export default function RecentValidations({
   currentUserId,
   currentUserRole,
 }: Props) {
+  const router = useRouter();
   const { dialog, ask } = useConfirmDialog();
   const [list, setList] = useState(initial);
   const [now, setNow] = useState(() => Date.now());
@@ -55,6 +57,15 @@ export default function RecentValidations({
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
+
+  // Resynchro après `router.refresh()` : `useState(initial)` ne lit le prop
+  // qu'au mount. Sans cet effet, une nouvelle validation créée juste avant
+  // (puis renvoyée par le serveur) ne remontait jamais ici, et la liste
+  // restait visuellement obsolète tant que l'utilisateur n'avait pas
+  // rechargé la page.
+  useEffect(() => {
+    setList(initial);
+  }, [initial]);
 
   function canCancel(v: ValidationEntry): boolean {
     if (currentUserRole === "ADMIN") return true;
@@ -81,6 +92,9 @@ export default function RecentValidations({
     if (res.ok) {
       setList((arr) => arr.filter((x) => x.id !== v.id));
       toast.success("Validation annulée");
+      // Re-fetch les données serveur : l'action remise en ACTIVE doit
+      // réapparaître dans la liste « Actions à traiter ».
+      router.refresh();
     } else {
       const j = await res.json().catch(() => ({}));
       toast.error(j.error || "Annulation refusée");

@@ -1,11 +1,17 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type {
   AdminActionsFilters,
   AdminActionStatus,
 } from "@/lib/admin-actions-aggregator";
+
+/**
+ * Délai (ms) avant d'émettre la requête après la dernière frappe.
+ * 250 ms : assez court pour rester réactif sans poster un fetch par caractère.
+ */
+const SEARCH_DEBOUNCE_MS = 250;
 
 type Props = {
   filters: AdminActionsFilters;
@@ -35,6 +41,11 @@ export function AdminActionsFiltersBar({
   const router = useRouter();
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
+  // État local de l'input — séparé de filters.q (qui ne s'actualise qu'au
+  // round-trip serveur). Évite l'effet "saisie en décalé" : on tape vite,
+  // on voit toujours sa frappe, et la requête part 250 ms après la dernière.
+  const [searchValue, setSearchValue] = useState(filters.q ?? "");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hasActiveFilters = useMemo(() => {
     return Boolean(
@@ -72,8 +83,29 @@ export function AdminActionsFiltersBar({
   }
 
   function reset() {
+    setSearchValue("");
     pushParams(new URLSearchParams());
   }
+
+  // Re-synchro côté input si filters.q change indépendamment (reset URL,
+  // navigation arrière…), pour éviter une divergence local vs URL.
+  useEffect(() => {
+    setSearchValue(filters.q ?? "");
+  }, [filters.q]);
+
+  function onSearchChange(v: string) {
+    setSearchValue(v);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      if (v.length === 0 || v.length >= 2) setParam("q", v);
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   return (
     <section
@@ -122,16 +154,22 @@ export function AdminActionsFiltersBar({
             <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
               Recherche (titre / commentaire / ID)
             </span>
-            <input
-              type="search"
-              defaultValue={filters.q ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v.length === 0 || v.length >= 2) setParam("q", v);
-              }}
-              placeholder="Mot-clé…"
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+            <div className="relative mt-1">
+              <input
+                type="search"
+                value={searchValue}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Mot-clé…"
+                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 pr-8 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              {pending && (
+                <span
+                  aria-live="polite"
+                  aria-label="Recherche en cours"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full border-2 border-slate-200 border-t-indigo-500 animate-spin"
+                />
+              )}
+            </div>
           </label>
           <div className="flex items-end gap-2">
             <button

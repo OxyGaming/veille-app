@@ -31,6 +31,12 @@ export async function GET(req: Request) {
   const to = url.searchParams.get("to")
     ? new Date(url.searchParams.get("to")!)
     : undefined;
+  // Recherche libre — trim + ignore les requêtes très courtes (1 caractère
+  // ramènerait quasi tout le dataset et coûterait cher en SQL). Le seuil
+  // de 2 caractères est aligné sur le pattern qu'on utilise sur les
+  // autres barres de recherche du projet.
+  const qRaw = (url.searchParams.get("q") ?? "").trim();
+  const q = qRaw.length >= 2 ? qRaw : "";
   const take = Math.min(
     Number(url.searchParams.get("take") ?? 100) || 100,
     300
@@ -44,6 +50,66 @@ export async function GET(req: Request) {
     return { [field]: { gte: from, lte: to } };
   };
 
+  // Filtre `q` par entité — OR sur les champs textuels les plus utiles
+  // côté usage métier. SQLite : `contains` est case-insensitive pour
+  // l'ASCII, partiel pour les accentués (compromis acceptable ici).
+  const qVisitWhere = q
+    ? {
+        OR: [
+          { site: { name: { contains: q } } },
+          { site: { code: { contains: q } } },
+          { template: { name: { contains: q } } },
+        ],
+      }
+    : {};
+  const qSessionWhere = q
+    ? {
+        OR: [
+          { agent: { lastName: { contains: q } } },
+          { agent: { firstName: { contains: q } } },
+          { agent: { matricule: { contains: q } } },
+          {
+            procedures: {
+              some: { procedure: { title: { contains: q } } },
+            },
+          },
+        ],
+      }
+    : {};
+  const qValidationWhere = q
+    ? {
+        OR: [
+          { comment: { contains: q } },
+          { action: { comment: { contains: q } } },
+          { action: { keyPoint: { contains: q } } },
+          { action: { theme: { contains: q } } },
+          { action: { domain: { contains: q } } },
+          { agent: { lastName: { contains: q } } },
+          { agent: { firstName: { contains: q } } },
+          { site: { name: { contains: q } } },
+        ],
+      }
+    : {};
+  const qAgentSightingWhere = q
+    ? {
+        OR: [
+          { comment: { contains: q } },
+          { agent: { lastName: { contains: q } } },
+          { agent: { firstName: { contains: q } } },
+          { agent: { matricule: { contains: q } } },
+        ],
+      }
+    : {};
+  const qSiteSightingWhere = q
+    ? {
+        OR: [
+          { comment: { contains: q } },
+          { site: { name: { contains: q } } },
+          { site: { code: { contains: q } } },
+        ],
+      }
+    : {};
+
   const [visits, sessions, validations, sightings, siteSightings] = await Promise.all([
     types.has("visit") && !agentId
       ? prisma.siteVisit.findMany({
@@ -52,6 +118,7 @@ export async function GET(req: Request) {
             ...(siteId ? { siteId } : {}),
             ...(observerId ? { observerId } : {}),
             ...dateWhere("visitDate"),
+            ...qVisitWhere,
           },
           orderBy: { visitDate: "desc" },
           take,
@@ -70,6 +137,7 @@ export async function GET(req: Request) {
             ...(agentId ? { agentId } : {}),
             ...(observerId ? { observerId } : {}),
             ...dateWhere("startedAt"),
+            ...qSessionWhere,
           },
           orderBy: { startedAt: "desc" },
           take,
@@ -90,6 +158,7 @@ export async function GET(req: Request) {
             ...(siteId ? { siteId } : {}),
             ...(observerId ? { validatedById: observerId } : {}),
             ...dateWhere("realizedAt"),
+            ...qValidationWhere,
           },
           orderBy: { realizedAt: "desc" },
           take,
@@ -117,6 +186,7 @@ export async function GET(req: Request) {
             ...(agentId ? { agentId } : {}),
             ...(observerId ? { observerId } : {}),
             ...dateWhere("sightedAt"),
+            ...qAgentSightingWhere,
           },
           orderBy: { sightedAt: "desc" },
           take,
@@ -135,6 +205,7 @@ export async function GET(req: Request) {
             ...(siteId ? { siteId } : {}),
             ...(observerId ? { observerId } : {}),
             ...dateWhere("sightedAt"),
+            ...qSiteSightingWhere,
           },
           orderBy: { sightedAt: "desc" },
           take,

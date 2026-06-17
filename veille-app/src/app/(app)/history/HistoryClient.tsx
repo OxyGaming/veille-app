@@ -180,6 +180,18 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
   const [siteId, setSiteId] = useState("");
   const [meta, setMeta] = useState<FilterMeta | null>(null);
   const [loading, setLoading] = useState(false);
+  // Recherche : `query` est la valeur affichée à l'écran (frappe instantanée,
+  // input contrôlé). `qDebounced` est ce qui déclenche réellement le fetch
+  // côté serveur — recopié 250 ms après la dernière frappe. Deux états
+  // séparés = pas de "caractère perdu" en frappe rapide, et pas de fetch
+  // par caractère.
+  const [query, setQuery] = useState("");
+  const [qDebounced, setQDebounced] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setQDebounced(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
 
   useEffect(() => {
     fetch("/api/history/filters")
@@ -198,6 +210,7 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
       if (observerId) params.set("observerId", observerId);
       if (agentId) params.set("agentId", agentId);
       if (siteId) params.set("siteId", siteId);
+      if (qDebounced && qDebounced.length >= 2) params.set("q", qDebounced);
       const res = await fetch(`/api/history?${params}`);
       if (res.ok) {
         const j = await res.json();
@@ -211,7 +224,7 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [types, from, to, observerId, agentId, siteId]);
+  }, [types, from, to, observerId, agentId, siteId, qDebounced]);
 
   function toggleType(t: string) {
     setTypes((s) => {
@@ -324,6 +337,42 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
       </div>
 
       <div className="card p-3 mb-4 space-y-3">
+        <div className="relative">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Rechercher (agent, site, action, commentaire…)"
+            className="input w-full pl-8 pr-8 text-sm"
+            aria-label="Rechercher dans l'historique"
+          />
+          <Icon.Search
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
+            aria-hidden="true"
+          />
+          {loading && qDebounced && (
+            <span
+              aria-live="polite"
+              aria-label="Recherche en cours"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full border-2 border-slate-200 border-t-indigo-500 animate-spin"
+            />
+          )}
+          {!loading && query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Effacer la recherche"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 inline-flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+            >
+              <Icon.X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+        {query.trim().length === 1 && (
+          <p className="text-[10px] text-slate-400">
+            Saisis au moins 2 caractères pour lancer la recherche.
+          </p>
+        )}
         <div className="flex flex-wrap gap-2 items-center">
           {FILTERS.map((f) => {
             const sel = types.has(f.v);

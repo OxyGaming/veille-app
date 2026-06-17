@@ -17,10 +17,16 @@ type Section = {
   items: Item[];
 };
 type Observation = {
-  sectionId: string;
+  sectionId: string | null;
   itemId: string | null;
   status: string;
   comment: string | null;
+  // Champs INVENTORY (nullables côté CHECKLIST).
+  equipmentId: string | null;
+  present: boolean | null;
+  quantityObserved: number | null;
+  expirationDateObserved: string | null;
+  discrepancyType: string | null; // MISSING | EXPIRED | QUANTITY_LOW | DAMAGED | NONE
 };
 type NC = {
   description: string;
@@ -85,6 +91,48 @@ function isTrousseDeSecours(category: string): boolean {
     .toLowerCase()
     .trim();
   return normalized === "trousse de secours";
+}
+
+/**
+ * Phrase courte décrivant l'écart constaté sur un équipement INVENTORY,
+ * utilisée dans le tableau « Non-conformités constatées » du PDF.
+ *
+ * Les `comment` libres saisis par le vérificateur (« Réassort en cours »,
+ * « Commandé le 12/06 »…) sont concaténés en aval — cette fonction décrit
+ * uniquement le type d'écart, pas son traitement.
+ */
+function describeDiscrepancy(
+  obs: Observation,
+  eq: Equipment
+): string | null {
+  if (!obs.discrepancyType || obs.discrepancyType === "NONE") return null;
+  switch (obs.discrepancyType) {
+    case "MISSING": {
+      if (obs.present === false) return "Article absent";
+      const expected = eq.expectedQuantity ?? 0;
+      const observed = obs.quantityObserved ?? 0;
+      const delta = expected - observed;
+      if (delta > 0) {
+        return `${delta} item${delta > 1 ? "s" : ""} manquant${delta > 1 ? "s" : ""}`;
+      }
+      return "Manquant";
+    }
+    case "QUANTITY_LOW": {
+      const expected = eq.expectedQuantity ?? 0;
+      const observed = obs.quantityObserved ?? 0;
+      return `Quantité insuffisante (${observed}/${expected})`;
+    }
+    case "EXPIRED": {
+      if (obs.expirationDateObserved) {
+        return `Périmé (péremption ${format(new Date(obs.expirationDateObserved), "dd/MM/yyyy")})`;
+      }
+      return "Périmé";
+    }
+    case "DAMAGED":
+      return "Conditionnement endommagé";
+    default:
+      return "Non conforme";
+  }
 }
 
 /**
@@ -1226,12 +1274,18 @@ function renderNCRecap(
 /* ============================================================================
  *  PDF — Veille de site (INVENTORY) : fiche de suivi papier
  *
- *  Volontairement austère : composition théorique + colonne Date manuelle.
- *  Ne montre NI les écarts, NI les commentaires, NI les NC. Le PDF est
- *  imprimé puis annoté au stylo lors des contrôles suivants.
+ *  Deux tableaux par catégorie d'équipement :
+ *   1. Composition théorique (Désignation / Qté / Date). Les lignes des
+ *      équipements ayant un écart constaté sur la visite courante sont
+ *      mises en rouge gras, ce qui ressort à l'œil dès l'impression.
+ *   2. « Non-conformités constatées » : ne s'affiche que s'il y a au moins
+ *      un écart dans la catégorie. Liste le type d'écart (manquant /
+ *      périmé / qté insuffisante / endommagé) et le commentaire libre
+ *      (« Réassort en cours », « Commandé le 12/06 »…).
  *
- *  - Périssable     : colonne Date vide (à remplir au stylo)
- *  - Non périssable : colonne Date barrée en diagonale
+ *  Colonne Date du 1er tableau :
+ *  - Périssable     : vide (à remplir au stylo lors de la prochaine vérif)
+ *  - Non périssable : barrée en diagonale (didDrawCell noircit la cellule)
  * ========================================================================== */
 
 function renderInventory(
@@ -1274,6 +1328,14 @@ function renderInventory(
   }
   const cats = [...byCat.entries()].sort(([a], [b]) => a.localeCompare(b, "fr"));
 
+  // Index observations par equipmentId : on ne s'intéresse qu'aux INVENTORY
+  // (sectionId null) avec un equipmentId renseigné. Permet de récupérer
+  // O(1) l'écart d'un équipement pour le rendu rouge + le 2e tableau.
+  const obsByEquipmentId = new Map<string, Observation>();
+  for (const o of visit.observations) {
+    if (o.equipmentId) obsByEquipmentId.set(o.equipmentId, o);
+  }
+
   for (const [cat, eqs] of cats) {
     if (y > pageH - 100) {
       doc.addPage();
@@ -1315,18 +1377,30 @@ function renderInventory(
           },
         ],
       ],
-      body: eqs.map((e) => [
-        e.label,
-        e.expectedQuantity != null ? String(e.expectedQuantity) : "",
-        // 3 cas :
-        //   - date renseignée au catalogue (ex. échéance prochaine visite
-        //     d'extincteur) → affichée telle quelle ;
-        //   - périssable sans date → cellule vide (à remplir au stylo) ;
-        //   - non périssable sans date → noircie par didDrawCell.
-        e.expirationDate
-          ? format(new Date(e.expirationDate), "dd/MM/yyyy")
-          : "",
-      ]),
+      body: eqs.map((e) => {
+        const obs = obsByEquipmentId.get(e.id);
+        const hasDiscrepancy =
+          obs?.discrepancyType != null && obs.discrepancyType !== "NONE";
+        const cellStyle = hasDiscrepancy
+          ? { textColor: [192, 21, 47] as [number, number, number], fontStyle: "bold" as const }
+          : undefined;
+        const buildCell = (content: string) =>
+          cellStyle ? { content, styles: cellStyle } : content;
+        return [
+          buildCell(e.label),
+          buildCell(e.expectedQuantity != null ? String(e.expectedQuantity) : ""),
+          // 3 cas :
+          //   - date renseignée au catalogue (ex. échéance prochaine visite
+          //     d'extincteur) → affichée telle quelle ;
+          //   - périssable sans date → cellule vide (à remplir au stylo) ;
+          //   - non périssable sans date → noircie par didDrawCell.
+          buildCell(
+            e.expirationDate
+              ? format(new Date(e.expirationDate), "dd/MM/yyyy")
+              : ""
+          ),
+        ];
+      }),
       styles: {
         fontSize: 9,
         cellPadding: { top: 6, right: 6, bottom: 6, left: 6 },
@@ -1375,6 +1449,70 @@ function renderInventory(
     });
     // @ts-expect-error lastAutoTable
     y = doc.lastAutoTable.finalY + 10;
+
+    // 2e tableau « Non-conformités constatées » — affiché immédiatement
+    // sous le tableau d'inventaire de la catégorie, et uniquement s'il
+    // y a au moins un écart. Le `comment` libre est concaténé après le
+    // type d'écart (ex. « Réassort en cours », « Commandé le 12/06 »).
+    const ncRows = eqs
+      .map((e) => {
+        const obs = obsByEquipmentId.get(e.id);
+        const desc = obs ? describeDiscrepancy(obs, e) : null;
+        if (!desc) return null;
+        const comment = obs?.comment?.trim();
+        return [e.label, comment ? `${desc} · ${comment}` : desc];
+      })
+      .filter((r): r is [string, string] => r !== null);
+
+    if (ncRows.length > 0) {
+      if (y > pageH - 80) {
+        doc.addPage();
+        y = margin;
+      }
+      autoTable(doc, {
+        startY: y,
+        head: [
+          [
+            {
+              content: `${cat} — Non-conformités constatées`,
+              colSpan: 2,
+              styles: {
+                fillColor: [248, 215, 218],
+                textColor: [114, 28, 36],
+                fontStyle: "bold",
+                halign: "left",
+              },
+            },
+          ],
+          [
+            { content: "Désignation", styles: { fontStyle: "bold" } },
+            { content: "Écart constaté", styles: { fontStyle: "bold" } },
+          ],
+        ],
+        body: ncRows,
+        styles: {
+          fontSize: 9,
+          cellPadding: { top: 5, right: 6, bottom: 5, left: 6 },
+          lineColor: [192, 21, 47],
+          lineWidth: 0.4,
+          valign: "middle",
+          textColor: [114, 28, 36],
+        },
+        headStyles: {
+          fillColor: [253, 237, 238],
+          textColor: [114, 28, 36],
+          lineWidth: 0.4,
+        },
+        columnStyles: {
+          0: { cellWidth: usableW * 0.4, fontStyle: "bold" },
+          1: { cellWidth: usableW * 0.6 },
+        },
+        margin: { left: margin, right: margin },
+        theme: "grid",
+      });
+      // @ts-expect-error lastAutoTable
+      y = doc.lastAutoTable.finalY + 14;
+    }
   }
 
   // Pied de page sur chaque page (cohérent avec visite planifiée).

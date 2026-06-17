@@ -14,6 +14,7 @@
 
 import { actionScope, type SessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { encodeTags } from "@/lib/tags";
 import { randomUUID } from "node:crypto";
 
 export const BATCH_REPLACE_MAX = 200;
@@ -25,6 +26,12 @@ export type BatchReplaceInput = {
   domain: string | null;
   /** ISO string ou null. Si non fourni → on hérite de l'originale. */
   dueAt?: string | null;
+  /**
+   * Liste de tags pour les nouvelles actions.
+   *  - non fourni (`undefined`) → hérite des tags de l'originale (cas par défaut)
+   *  - fourni (même tableau vide) → remplace, applique la liste telle quelle
+   */
+  tags?: string[];
 };
 
 export type BatchReplaceOutcome = {
@@ -90,6 +97,10 @@ export async function batchReplaceActions(
       ? null
       : new Date(content.dueAt);
 
+  // Tags : `undefined` → hérite (per-action), liste fournie → encodage unique.
+  const nextTagsEncoded =
+    content.tags === undefined ? undefined : encodeTags(content.tags);
+
   const replaced: string[] = [];
   const createdIds: string[] = [];
 
@@ -106,7 +117,7 @@ export async function batchReplaceActions(
           localStatus: "ACTIVE",
           originalStatus: a.originalStatus,
           veilleType: a.veilleType,
-          tags: a.tags,
+          tags: nextTagsEncoded === undefined ? a.tags : nextTagsEncoded,
           comment: content.comment,
           keyPoint: content.keyPoint,
           theme: content.theme,
@@ -142,6 +153,7 @@ export async function batchReplaceActions(
             theme: content.theme,
             domain: content.domain,
             dueAt: content.dueAt ?? null,
+            tags: content.tags ?? null,
           },
         }),
       },

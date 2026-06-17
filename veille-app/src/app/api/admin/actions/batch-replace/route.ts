@@ -25,15 +25,25 @@ const schema = z
       theme: z.string().trim().max(200).nullable(),
       domain: z.string().trim().max(200).nullable(),
       dueAt: z.string().datetime().nullable().optional(),
+      tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
     }),
   })
   .refine(
-    (v) =>
-      [v.content.comment, v.content.keyPoint, v.content.theme, v.content.domain]
-        .some((s) => s !== null && s !== ""),
+    (v) => {
+      const textual = [
+        v.content.comment,
+        v.content.keyPoint,
+        v.content.theme,
+        v.content.domain,
+      ].some((s) => s !== null && s !== "");
+      // Les tags seuls comptent aussi : on peut vouloir remplacer juste la
+      // taxonomie sans toucher au libellé (cas « retire le tag obligatoire »).
+      const tagsTouched = v.content.tags !== undefined;
+      return textual || tagsTouched;
+    },
     {
       message:
-        "Au moins un champ (commentaire, keyPoint, theme ou domain) doit être rempli.",
+        "Au moins un champ (commentaire, keyPoint, theme, domain ou tags) doit être renseigné.",
       path: ["content"],
     },
   );

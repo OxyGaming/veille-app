@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
+import { TagInput } from "@/components/TagChips";
 import type {
   AdminActionRow,
   AdminActionsFilters,
@@ -214,6 +215,7 @@ export function AdminActionsTable({
     theme: string | null;
     domain: string | null;
     dueAt: string | null | undefined;
+    tags: string[] | undefined;
   }) {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
@@ -708,6 +710,7 @@ function BatchReplaceModal({
     theme: string | null;
     domain: string | null;
     dueAt: string | null | undefined;
+    tags: string[] | undefined;
   }) => Promise<void>;
   onClose: () => void;
 }) {
@@ -717,11 +720,17 @@ function BatchReplaceModal({
   const [domain, setDomain] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [touchDueAt, setTouchDueAt] = useState(false);
+  // Tags : la sémantique « non touché → hérite, touché → applique » est
+  // signalée par `touchTags`. Cela permet à l'utilisateur de remplacer par
+  // une liste vide explicite (= retirer tous les tags des originales).
+  const [tags, setTags] = useState<string[]>([]);
+  const [touchTags, setTouchTags] = useState(false);
   const anyFieldFilled =
     comment.trim() !== "" ||
     keyPoint.trim() !== "" ||
     theme.trim() !== "" ||
-    domain.trim() !== "";
+    domain.trim() !== "" ||
+    touchTags;
   const valid = anyFieldFilled;
   return (
     <>
@@ -839,10 +848,44 @@ function BatchReplaceModal({
               />
             </label>
           </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
+                Tags
+              </span>
+              <span className="text-[10px] text-slate-400">
+                {touchTags
+                  ? tags.length === 0
+                    ? "Liste vide — toutes les nouvelles seront sans tag."
+                    : `${tags.length} appliqué${tags.length > 1 ? "s" : ""} à toutes les nouvelles.`
+                  : "Non touché = hérite des originales."}
+              </span>
+            </div>
+            <TagInput
+              tags={tags}
+              onChange={(next) => {
+                setTags(next);
+                setTouchTags(true);
+              }}
+              placeholder="Ajouter un tag (Entrée pour valider)…"
+            />
+            {touchTags && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTags([]);
+                  setTouchTags(false);
+                }}
+                className="mt-1 text-[10px] text-slate-500 underline hover:text-slate-700"
+              >
+                Revenir à « hériter des originales »
+              </button>
+            )}
+          </div>
           {!anyFieldFilled && (
             <p className="text-[11px] text-slate-500">
-              Renseigne au moins un champ de contenu pour activer le
-              remplacement.
+              Renseigne au moins un champ de contenu (texte ou tags) pour
+              activer le remplacement.
             </p>
           )}
         </div>
@@ -866,6 +909,7 @@ function BatchReplaceModal({
                     ? new Date(dueAt + "T00:00:00").toISOString()
                     : null
                   : undefined,
+                tags: touchTags ? tags : undefined,
               })
             }
             disabled={!valid || busy}

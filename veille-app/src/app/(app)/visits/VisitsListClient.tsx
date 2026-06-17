@@ -48,9 +48,16 @@ const DEFAULT_THEME = {
   short: "Autre",
 };
 
-export default function VisitsListClient({ visits }: { visits: Visit[] }) {
+export default function VisitsListClient({
+  visits,
+  userRole = "USER",
+}: {
+  visits: Visit[];
+  userRole?: "USER" | "EDITOR" | "ADMIN";
+}) {
   const router = useRouter();
   const { dialog, ask } = useConfirmDialog();
+  const canReopen = userRole === "ADMIN" || userRole === "EDITOR";
   const [q, setQ] = useState("");
   const [list, setList] = useState(visits);
   const filteredLive = useMemo(
@@ -81,6 +88,28 @@ export default function VisitsListClient({ visits }: { visits: Visit[] }) {
     } else {
       toast.error("Impossible d'archiver la visite");
     }
+  }
+
+  async function reopen(v: Visit) {
+    const ok = await ask({
+      title: `Rouvrir la visite « ${v.siteName} » ?`,
+      description:
+        "La visite repassera en ACTIVE et redeviendra éditable. Le rapport ne sera plus accessible tant qu'elle n'est pas re-fermée. L'opération est tracée dans le journal d'audit.",
+      confirmLabel: "Rouvrir et éditer",
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/visits/${v.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "active" }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || "Réouverture refusée");
+      return;
+    }
+    toast.success("Visite rouverte");
+    router.push(`/visits/${v.id}`);
   }
 
   async function hardDelete(v: Visit) {
@@ -170,18 +199,36 @@ export default function VisitsListClient({ visits }: { visits: Visit[] }) {
                     Observateur : {v.observerName}
                   </div>
                   {v.status === "completed" && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        router.push(`/visits/${v.id}/report`);
-                      }}
-                      className="mt-2 w-full text-xs font-semibold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-100 bg-indigo-50 border border-indigo-100 rounded-md px-3 py-2 flex items-center justify-center gap-1.5"
-                    >
-                      <Icon.FileText className="w-3.5 h-3.5" />
-                      Voir le rapport
-                    </button>
+                    <div className="mt-2 flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          router.push(`/visits/${v.id}/report`);
+                        }}
+                        className="flex-1 text-xs font-semibold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-100 bg-indigo-50 border border-indigo-100 rounded-md px-3 py-2 flex items-center justify-center gap-1.5"
+                      >
+                        <Icon.FileText className="w-3.5 h-3.5" />
+                        Voir le rapport
+                      </button>
+                      {canReopen && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            reopen(v);
+                          }}
+                          title="Rouvrir la visite pour la rééditer"
+                          aria-label="Rouvrir la visite"
+                          className="text-xs font-semibold text-amber-700 hover:text-amber-900 hover:bg-amber-100 bg-amber-50 border border-amber-100 rounded-md px-3 py-2 inline-flex items-center justify-center gap-1.5"
+                        >
+                          <Icon.FileEdit className="w-3.5 h-3.5" />
+                          Rouvrir
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="flex flex-col items-center justify-center gap-1 pr-2">

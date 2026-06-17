@@ -92,7 +92,29 @@ export async function PATCH(
     );
   }
   const data = parsed.data;
-  const finishedAt = data.status === "completed" ? new Date() : undefined;
+  // Logique `finishedAt` symétrique à celle des sessions de veille :
+  //  - status → completed : stamp = maintenant
+  //  - status → active / draft : EFFACE explicitement (`null`). Sans ça
+  //    une réouverture laissait l'ancien horodatage et faisait croire que
+  //    la visite était toujours terminée côté rapports/feed.
+  //  - status inchangé : on n'écrit rien (`undefined`).
+  const finishedAt =
+    data.status === "completed"
+      ? new Date()
+      : data.status === "active" || data.status === "draft"
+      ? null
+      : undefined;
+  // Réouverture d'une visite déjà clôturée → action sensible (le rapport
+  // peut être archivé / signé). Réservée aux ADMIN/EDITOR. USER : 403.
+  const reopening =
+    existing.status === "completed" &&
+    (data.status === "active" || data.status === "draft");
+  if (reopening && u.role !== "ADMIN" && u.role !== "EDITOR") {
+    return NextResponse.json(
+      { error: "Réouverture réservée aux administrateurs et éditeurs." },
+      { status: 403 },
+    );
+  }
   const updated = await prisma.siteVisit.update({
     where: { id },
     data: {
@@ -103,6 +125,26 @@ export async function PATCH(
       finishedAt,
     },
   });
+
+  // Audit log de la réouverture — la clôture est déjà tracée via
+  // recordActivitySafe (VISIT_FINISHED), la réversion mérite son log dédié
+  // pour pouvoir remonter qui a rouvert quoi quand.
+  if (reopening) {
+    await prisma.auditLog.create({
+      data: {
+        userId: u.id,
+        userEmail: u.email,
+        action: "VISIT_REOPENED",
+        entity: "SiteVisit",
+        entityId: id,
+        details: JSON.stringify({
+          previousStatus: existing.status,
+          newStatus: data.status,
+          siteId: existing.siteId,
+        }),
+      },
+    });
+  }
 
   // Génération auto des NC + actions à la clôture d'une visite INVENTORY.
   // Idempotent : on saute les observations qui ont déjà généré une NC

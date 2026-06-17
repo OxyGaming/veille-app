@@ -37,6 +37,7 @@ export default async function VisitsPage() {
         </Link>
       </div>
       <VisitsListClient
+        userRole={u.role as "USER" | "EDITOR" | "ADMIN"}
         visits={visits.map((v) => ({
           id: v.id,
           visitDate: v.visitDate.toISOString(),

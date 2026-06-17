@@ -467,6 +467,12 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
                   canEditComments &&
                   !!commentEditEndpoint(e) &&
                   !!(e.commentText || e.actionComment);
+                // « VU agent » / « VU site » : trace passive de passage, pas
+                // une action à reporter dans Icare. La case n'apparaît pas.
+                // (Les NOTE restent associables à Icare : un commentaire peut
+                // tracer une consigne, un rappel, etc.)
+                const showIcare =
+                  e.type !== "sighting" && e.type !== "site-sighting";
                 return (
                   <li
                     key={entryKey}
@@ -575,7 +581,11 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
                     </Link>
                     <div
                       className={`${
-                        e.actionComment ? "flex" : "hidden lg:flex"
+                        e.actionComment
+                          ? "flex"
+                          : showIcare
+                          ? "hidden lg:flex"
+                          : "hidden"
                       } items-stretch shrink-0 rounded-b-xl md:rounded-b-none md:rounded-r-xl ${
                         isAdmin || hasEditButton ? "lg:rounded-r-none" : ""
                       } border-t md:border-t-0 md:border-l ${
@@ -604,32 +614,34 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
                           <Icon.MessageSquare className="w-4 h-4" />
                         </button>
                       )}
-                      <label
-                        className={`hidden lg:flex items-center gap-1.5 pr-3 pl-2 cursor-pointer select-none text-[11px] font-mono ${
-                          e.icareDone
-                            ? "text-emerald-800"
-                            : "text-slate-400"
-                        } ${
-                          e.actionComment
-                            ? e.icareDone
-                              ? "border-l border-emerald-200"
-                              : "border-l border-slate-100"
-                            : ""
-                        }`}
-                        title={
-                          e.icareDone
-                            ? "Saisie Icare effectuée"
-                            : "Cochez quand la saisie Icare est faite"
-                        }
-                      >
-                        <input
-                          type="checkbox"
-                          checked={!!e.icareDone}
-                          onChange={() => toggleIcare(e)}
-                          className="w-4 h-4 accent-emerald-600 cursor-pointer"
-                        />
-                        <span>Icare</span>
-                      </label>
+                      {showIcare && (
+                        <label
+                          className={`hidden lg:flex items-center gap-1.5 pr-3 pl-2 cursor-pointer select-none text-[11px] font-mono ${
+                            e.icareDone
+                              ? "text-emerald-800"
+                              : "text-slate-400"
+                          } ${
+                            e.actionComment
+                              ? e.icareDone
+                                ? "border-l border-emerald-200"
+                                : "border-l border-slate-100"
+                              : ""
+                          }`}
+                          title={
+                            e.icareDone
+                              ? "Saisie Icare effectuée"
+                              : "Cochez quand la saisie Icare est faite"
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!e.icareDone}
+                            onChange={() => toggleIcare(e)}
+                            className="w-4 h-4 accent-emerald-600 cursor-pointer"
+                          />
+                          <span>Icare</span>
+                        </label>
+                      )}
                     </div>
                     {isInfoOpen && e.actionComment && (
                       <>

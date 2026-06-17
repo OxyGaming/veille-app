@@ -94,6 +94,23 @@ function isTrousseDeSecours(category: string): boolean {
 }
 
 /**
+ * Vrai si l'observation INVENTORY traduit un écart à signaler.
+ *  - `discrepancyType` connu (MISSING / EXPIRED / QUANTITY_LOW / DAMAGED)
+ *    est le signal principal, calculé côté formulaire de saisie.
+ *  - Fallback défensif : si pour une raison quelconque `discrepancyType`
+ *    n'a pas été renseigné, on regarde `present === false` ou un statut
+ *    explicitement négatif (NON). Évite les "trous" de coloration si
+ *    une saisie ancienne précède l'introduction du champ.
+ */
+function hasDiscrepancy(obs: Observation | undefined): boolean {
+  if (!obs) return false;
+  if (obs.discrepancyType && obs.discrepancyType !== "NONE") return true;
+  if (obs.present === false) return true;
+  if (obs.status === "NON" || obs.status === "NON_CONFORME") return true;
+  return false;
+}
+
+/**
  * Phrase courte décrivant l'écart constaté sur un équipement INVENTORY,
  * utilisée dans le tableau « Non-conformités constatées » du PDF.
  *
@@ -105,8 +122,17 @@ function describeDiscrepancy(
   obs: Observation,
   eq: Equipment
 ): string | null {
-  if (!obs.discrepancyType || obs.discrepancyType === "NONE") return null;
-  switch (obs.discrepancyType) {
+  if (!hasDiscrepancy(obs)) return null;
+  // Fallback : si discrepancyType n'est pas explicite mais que `present`
+  // ou `status` indique un écart, on retombe sur la description la plus
+  // probable.
+  const type =
+    obs.discrepancyType && obs.discrepancyType !== "NONE"
+      ? obs.discrepancyType
+      : obs.present === false
+      ? "MISSING"
+      : "OTHER";
+  switch (type) {
     case "MISSING": {
       if (obs.present === false) return "Article absent";
       const expected = eq.expectedQuantity ?? 0;
@@ -1274,16 +1300,18 @@ function renderNCRecap(
 /* ============================================================================
  *  PDF — Veille de site (INVENTORY) : fiche de suivi papier
  *
- *  Deux tableaux par catégorie d'équipement :
- *   1. Composition théorique (Désignation / Qté / Date). Les lignes des
- *      équipements ayant un écart constaté sur la visite courante sont
- *      mises en rouge gras, ce qui ressort à l'œil dès l'impression.
- *   2. « Non-conformités constatées » : ne s'affiche que s'il y a au moins
- *      un écart dans la catégorie. Liste le type d'écart (manquant /
- *      périmé / qté insuffisante / endommagé) et le commentaire libre
- *      (« Réassort en cours », « Commandé le 12/06 »…).
+ *  Structure du document :
+ *   - Un tableau d'inventaire par catégorie d'équipement (Désignation /
+ *     Qté / Date). Les lignes des équipements ayant un écart constaté
+ *     sur la visite courante sont mises en rouge gras pour ressortir à
+ *     l'œil dès l'impression.
+ *   - Un tableau récapitulatif unique « Non-conformités constatées » en
+ *     fin de document, regroupant toutes les catégories : colonne
+ *     Catégorie + Désignation + Écart constaté. Le `comment` libre
+ *     (« Réassort en cours », « Commandé le 12/06 »…) est concaténé
+ *     après le type d'écart.
  *
- *  Colonne Date du 1er tableau :
+ *  Colonne Date du tableau d'inventaire :
  *  - Périssable     : vide (à remplir au stylo lors de la prochaine vérif)
  *  - Non périssable : barrée en diagonale (didDrawCell noircit la cellule)
  * ========================================================================== */
@@ -1330,11 +1358,16 @@ function renderInventory(
 
   // Index observations par equipmentId : on ne s'intéresse qu'aux INVENTORY
   // (sectionId null) avec un equipmentId renseigné. Permet de récupérer
-  // O(1) l'écart d'un équipement pour le rendu rouge + le 2e tableau.
+  // O(1) l'écart d'un équipement pour le rendu rouge + le tableau final.
   const obsByEquipmentId = new Map<string, Observation>();
   for (const o of visit.observations) {
     if (o.equipmentId) obsByEquipmentId.set(o.equipmentId, o);
   }
+
+  // Collecte des NC pour le tableau final (un seul tableau en fin de
+  // document, toutes catégories confondues). Format ligne :
+  // [catégorie, désignation, écart constaté · commentaire libre].
+  const allNcRows: [string, string, string][] = [];
 
   for (const [cat, eqs] of cats) {
     if (y > pageH - 100) {
@@ -1379,9 +1412,7 @@ function renderInventory(
       ],
       body: eqs.map((e) => {
         const obs = obsByEquipmentId.get(e.id);
-        const hasDiscrepancy =
-          obs?.discrepancyType != null && obs.discrepancyType !== "NONE";
-        const cellStyle = hasDiscrepancy
+        const cellStyle = hasDiscrepancy(obs)
           ? { textColor: [192, 21, 47] as [number, number, number], fontStyle: "bold" as const }
           : undefined;
         const buildCell = (content: string) =>
@@ -1450,69 +1481,74 @@ function renderInventory(
     // @ts-expect-error lastAutoTable
     y = doc.lastAutoTable.finalY + 10;
 
-    // 2e tableau « Non-conformités constatées » — affiché immédiatement
-    // sous le tableau d'inventaire de la catégorie, et uniquement s'il
-    // y a au moins un écart. Le `comment` libre est concaténé après le
-    // type d'écart (ex. « Réassort en cours », « Commandé le 12/06 »).
-    const ncRows = eqs
-      .map((e) => {
-        const obs = obsByEquipmentId.get(e.id);
-        const desc = obs ? describeDiscrepancy(obs, e) : null;
-        if (!desc) return null;
-        const comment = obs?.comment?.trim();
-        return [e.label, comment ? `${desc} · ${comment}` : desc];
-      })
-      .filter((r): r is [string, string] => r !== null);
-
-    if (ncRows.length > 0) {
-      if (y > pageH - 80) {
-        doc.addPage();
-        y = margin;
-      }
-      autoTable(doc, {
-        startY: y,
-        head: [
-          [
-            {
-              content: `${cat} — Non-conformités constatées`,
-              colSpan: 2,
-              styles: {
-                fillColor: [248, 215, 218],
-                textColor: [114, 28, 36],
-                fontStyle: "bold",
-                halign: "left",
-              },
-            },
-          ],
-          [
-            { content: "Désignation", styles: { fontStyle: "bold" } },
-            { content: "Écart constaté", styles: { fontStyle: "bold" } },
-          ],
-        ],
-        body: ncRows,
-        styles: {
-          fontSize: 9,
-          cellPadding: { top: 5, right: 6, bottom: 5, left: 6 },
-          lineColor: [192, 21, 47],
-          lineWidth: 0.4,
-          valign: "middle",
-          textColor: [114, 28, 36],
-        },
-        headStyles: {
-          fillColor: [253, 237, 238],
-          textColor: [114, 28, 36],
-          lineWidth: 0.4,
-        },
-        columnStyles: {
-          0: { cellWidth: usableW * 0.4, fontStyle: "bold" },
-          1: { cellWidth: usableW * 0.6 },
-        },
-        margin: { left: margin, right: margin },
-        theme: "grid",
-      });
-      // @ts-expect-error lastAutoTable
-      y = doc.lastAutoTable.finalY + 14;
+    // Collecte (pas de rendu) — toutes les NC iront dans un tableau
+    // unique en fin de document, regroupant toutes les catégories.
+    for (const e of eqs) {
+      const obs = obsByEquipmentId.get(e.id);
+      const desc = obs ? describeDiscrepancy(obs, e) : null;
+      if (!desc) continue;
+      const comment = obs?.comment?.trim();
+      allNcRows.push([
+        cat,
+        e.label,
+        comment ? `${desc} · ${comment}` : desc,
+      ]);
     }
+  }
+
+  // Tableau récapitulatif final « Non-conformités constatées » — un seul
+  // bloc en fin de document, qui regroupe toutes les catégories pour
+  // donner à l'évaluateur sa liste de réassorts/actions en une page.
+  if (allNcRows.length > 0) {
+    if (y > pageH - 100) {
+      doc.addPage();
+      y = margin;
+    } else {
+      y += 8;
+    }
+    autoTable(doc, {
+      startY: y,
+      head: [
+        [
+          {
+            content: "Non-conformités constatées",
+            colSpan: 3,
+            styles: {
+              fillColor: [248, 215, 218],
+              textColor: [114, 28, 36],
+              fontStyle: "bold",
+              halign: "left",
+            },
+          },
+        ],
+        [
+          { content: "Catégorie", styles: { fontStyle: "bold" } },
+          { content: "Désignation", styles: { fontStyle: "bold" } },
+          { content: "Écart constaté", styles: { fontStyle: "bold" } },
+        ],
+      ],
+      body: allNcRows,
+      styles: {
+        fontSize: 9,
+        cellPadding: { top: 5, right: 6, bottom: 5, left: 6 },
+        lineColor: [192, 21, 47],
+        lineWidth: 0.4,
+        valign: "middle",
+        textColor: [114, 28, 36],
+      },
+      headStyles: {
+        fillColor: [253, 237, 238],
+        textColor: [114, 28, 36],
+        lineWidth: 0.4,
+      },
+      columnStyles: {
+        0: { cellWidth: usableW * 0.22 },
+        1: { cellWidth: usableW * 0.38, fontStyle: "bold" },
+        2: { cellWidth: usableW * 0.4 },
+      },
+      margin: { left: margin, right: margin },
+      theme: "grid",
+    });
   }
 
   // Pied de page sur chaque page (cohérent avec visite planifiée).

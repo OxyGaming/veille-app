@@ -36,6 +36,7 @@ export default async function SessionsPage() {
         </Link>
       </div>
       <SessionsListClient
+        userRole={u.role as "USER" | "EDITOR" | "ADMIN"}
         sessions={sessions.map((s) => ({
           id: s.id,
           status: s.status,

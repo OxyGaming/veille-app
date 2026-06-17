@@ -87,12 +87,34 @@ export async function PATCH(
     );
   }
   const data = parsed.data;
+  // Logique `finishedAt` :
+  //  - status → completed : stamp = maintenant
+  //  - status → active / draft : on EFFACE explicitement (`null`). Sans ça
+  //    une réouverture laissait l'ancien horodatage de clôture et faisait
+  //    croire que la session était toujours terminée côté rapports/feed.
+  //  - status inchangé / pas fourni : on respecte le `finishedAt` du body
+  //    s'il est là, sinon on n'écrit rien (`undefined` → Prisma ignore).
   const finishedAt =
     data.status === "completed"
       ? new Date()
+      : data.status === "active" || data.status === "draft"
+      ? null
       : data.finishedAt
       ? new Date(data.finishedAt)
       : undefined;
+  // Garde-fou métier : la réouverture d'une session déjà clôturée est
+  // une action sensible (le rapport associé peut avoir déjà servi en
+  // formation). On la réserve aux ADMIN/EDITOR. Les autres rôles voient
+  // le bouton désactivé côté UI ; le contrôle serveur ferme la porte.
+  const reopening =
+    existing.status === "completed" &&
+    (data.status === "active" || data.status === "draft");
+  if (reopening && u.role !== "ADMIN" && u.role !== "EDITOR") {
+    return NextResponse.json(
+      { error: "Réouverture réservée aux administrateurs et éditeurs." },
+      { status: 403 },
+    );
+  }
   const updated = await prisma.veilleSession.update({
     where: { id },
     data: {
@@ -104,6 +126,26 @@ export async function PATCH(
       finishedAt,
     },
   });
+
+  // Audit log de la réouverture (la clôture est déjà tracée côté
+  // activityFeed, mais la réversion mérite un log dédié pour pouvoir
+  // remonter "qui a rouvert quoi quand").
+  if (reopening) {
+    await prisma.auditLog.create({
+      data: {
+        userId: u.id,
+        userEmail: u.email,
+        action: "SESSION_REOPENED",
+        entity: "VeilleSession",
+        entityId: id,
+        details: JSON.stringify({
+          previousStatus: existing.status,
+          newStatus: data.status,
+          agentId: existing.agentId,
+        }),
+      },
+    });
+  }
 
   // Flux d'activité équipe — uniquement à la transition vers `completed`.
   // L'écriture est non bloquante : un échec ne casse pas la mutation.

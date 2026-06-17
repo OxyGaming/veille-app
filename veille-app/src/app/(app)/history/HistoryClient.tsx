@@ -23,6 +23,7 @@ type Entry = {
   title: string;
   subtitle: string | null;
   agentId?: string | null;
+  agentName?: string | null;
   siteId?: string | null;
   href: string;
   badges?: string[];
@@ -516,6 +517,17 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
                         >
                           {e.title}
                         </div>
+                        {e.agentName && (
+                          <div
+                            className={`text-[11px] ${
+                              e.icareDone
+                                ? "text-emerald-700"
+                                : "text-slate-600"
+                            }`}
+                          >
+                            Agent : {e.agentName}
+                          </div>
+                        )}
                         {e.observerName && (
                           <div
                             className={`text-[11px] ${

@@ -162,6 +162,13 @@ export async function GET(req: Request) {
     title: string;
     subtitle: string | null;
     agentId?: string | null;
+    /**
+     * Nom complet de l'agent rattaché à l'entrée — pour les validations,
+     * où le titre porte le libellé de l'action (et pas l'agent). Pour les
+     * sessions/sightings, le titre EST déjà le nom de l'agent : on laisse
+     * `agentName` à null pour éviter une duplication visuelle.
+     */
+    agentName?: string | null;
     siteId?: string | null;
     href: string;
     badges?: string[];
@@ -243,6 +250,9 @@ export async function GET(req: Request) {
       title: validationTitle,
       subtitle: null,
       agentId: v.agentId,
+      agentName: v.agent
+        ? `${v.agent.lastName} ${v.agent.firstName}`
+        : null,
       siteId: v.siteId ?? v.action.siteId,
       href: v.agent
         ? `/agents/${v.agent.id}`

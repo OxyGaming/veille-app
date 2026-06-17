@@ -174,6 +174,18 @@ export default async function AgentPage({
           <Stat label="En retard" value={lateCount} tone="warn" />
           <Stat label="< 7 jours" value={soonCount} tone="info" />
         </div>
+        {(u.role === "ADMIN" || u.role === "EDITOR") && (
+          <div className="mt-4 flex justify-end">
+            <Link
+              href={`/agents/${id}/development`}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-100 bg-indigo-50 border border-indigo-100 rounded-md px-3 py-1.5"
+              title="Support de dialogue managérial — 12 mois glissants par défaut"
+            >
+              <Icon.FileText className="w-3.5 h-3.5" />
+              Fiche de développement individuel
+            </Link>
+          </div>
+        )}
       </header>
 
       <section className="mt-6">

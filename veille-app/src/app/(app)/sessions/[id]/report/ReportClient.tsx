@@ -268,9 +268,13 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
           y += 12;
         }
         doc.setTextColor(0);
-        // Filtre des items non observés : ils n'ont pas leur place dans
-        // le compte rendu (un item au statut "?" = pas évalué).
-        const observed = po.items.filter((i) => i.status !== "NON_OBSERVE");
+        // Filtre des items non observés ET non applicables : ils n'ont pas
+        // leur place dans le compte rendu — un item "?" n'a pas été évalué,
+        // un "NA" est explicitement hors-périmètre. Les stats du bandeau
+        // en haut du PDF les comptabilisent toujours (transparence).
+        const observed = po.items.filter(
+          (i) => i.status !== "NON_OBSERVE" && i.status !== "NON_APPLICABLE"
+        );
         if (observed.length === 0) {
           doc.setFont("helvetica", "italic");
           doc.setFontSize(9);
@@ -524,8 +528,11 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
       <div className="grid gap-3 mt-4">
         {data.procedures.map((po) => {
           // Aperçu HTML aligné sur le PDF : on n'affiche que les items
-          // effectivement observés (les "?" sont exclus du compte rendu).
-          const observed = po.items.filter((i) => i.status !== "NON_OBSERVE");
+          // effectivement observés. NON_OBSERVE ("?") et NON_APPLICABLE
+          // sont exclus du détail (les stats du bandeau les comptent).
+          const observed = po.items.filter(
+            (i) => i.status !== "NON_OBSERVE" && i.status !== "NON_APPLICABLE"
+          );
           return (
             <section
               key={po.id}

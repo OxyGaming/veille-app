@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
@@ -13,6 +14,10 @@ import type {
   TopProcedure,
   CommentExcerpt,
 } from "@/lib/agent-development-aggregator";
+import {
+  buildDevelopmentPdf,
+  developmentPdfFilename,
+} from "./developmentPdf";
 
 const STATUS_LABEL: Record<string, string> = {
   CONFORME: "Conforme",
@@ -39,6 +44,52 @@ export default function DevelopmentClient({
   const router = useRouter();
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(defaultTo);
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  async function exportPdf() {
+    if (pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      // 1. On envoie le log côté serveur en parallèle de la génération PDF.
+      //    Le serveur revérifie le rôle, le scope agent, et écrit l'audit
+      //    avec les compteurs RÉ-calculés (pas ceux du client).
+      const logRes = await fetch(
+        `/api/agents/${summary.agent.id}/development/pdf-log`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            periodFrom: summary.period.from,
+            periodTo: summary.period.to,
+          }),
+        },
+      );
+      if (!logRes.ok) {
+        const j = await logRes.json().catch(() => ({}));
+        toast.error(j.error || "Export refusé");
+        return;
+      }
+      // 2. Génération PDF côté client (pas d'aller-retour réseau lourd).
+      const blob = await buildDevelopmentPdf(summary);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = developmentPdfFilename(
+        summary.agent.lastName,
+        summary.agent.firstName,
+        new Date(),
+      );
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Libération mémoire après que le navigateur a démarré le téléchargement.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      toast.error("Erreur lors de la génération du PDF");
+    } finally {
+      setPdfBusy(false);
+    }
+  }
 
   function applyDates() {
     const params = new URLSearchParams();
@@ -132,9 +183,21 @@ export default function DevelopmentClient({
 
       {/* Tuiles KPI synthèse */}
       <section className="mb-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-2">
-          Synthèse
-        </h2>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+            Synthèse
+          </h2>
+          <button
+            type="button"
+            onClick={exportPdf}
+            disabled={pdfBusy}
+            className="text-xs font-semibold inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Exporter au format PDF (téléchargement immédiat)"
+          >
+            <Icon.Download className="w-3.5 h-3.5" />
+            {pdfBusy ? "Génération…" : "Exporter PDF"}
+          </button>
+        </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
           <Kpi label="Sessions de veille" value={counts.sessions} />
           <Kpi label="« Vu en poste »" value={counts.sightings} />

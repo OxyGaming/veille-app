@@ -11,7 +11,9 @@ out/
 dist/
 build/
 *.tsbuildinfo
-.next-env.d.ts
+# Généré par Next.js à chaque `next dev` / `next build` — ne doit jamais
+# être commité (typo précédente : `.next-env.d.ts` avec point initial).
+next-env.d.ts
 
 # Env / secrets — on garde un éventuel .env.example
 .env

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -63,6 +63,18 @@ export function AdminActionsTable({
   const [deleting, setDeleting] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Resynchro après changement de filtre / recherche : le composant serveur
+  // re-fetche et envoie un nouveau `initialItems` filtré, mais `useState`
+  // n'initialise qu'au mount. Sans cet effet la liste rendue restait celle
+  // du premier rendu (compteur côté FiltersBar mis à jour, liste figée → on
+  // voyait « 12 actions » et 61 items affichés). On vide aussi la sélection
+  // car les ids cochés peuvent ne plus être visibles après filtrage.
+  useEffect(() => {
+    setItems(initialItems);
+    setNextCursor(initialNextCursor);
+    setSelected(new Set());
+  }, [initialItems, initialNextCursor]);
 
   // Les actions VALIDATED_LOCAL ne peuvent pas être rendues obsolètes
   // côté API → on les marque non-sélectionnables visuellement aussi.

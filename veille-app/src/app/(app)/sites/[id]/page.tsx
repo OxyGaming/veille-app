@@ -149,7 +149,10 @@ export default async function SitePage({
           <Stat label="< 7 jours" value={soonCount} tone="info" />
         </div>
         <div className="mt-4 flex gap-2">
-          <Link href={`/visits/new`} className="btn btn-primary">
+          <Link
+            href={`/visits/new?siteId=${site.id}`}
+            className="btn btn-primary"
+          >
             <Icon.Plus className="w-4 h-4" /> Nouvelle visite
           </Link>
         </div>

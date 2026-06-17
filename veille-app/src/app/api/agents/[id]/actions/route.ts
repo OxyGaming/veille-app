@@ -4,12 +4,7 @@ import { createHash, randomUUID } from "crypto";
 import { addMonths } from "date-fns";
 import { prisma } from "@/lib/prisma";
 import { agentScope, requireUser } from "@/lib/auth";
-import {
-  encodeTags,
-  normalizeTag,
-  TAG_OBLIGATOIRE,
-  TAG_VEILLE_LEGALE,
-} from "@/lib/tags";
+import { encodeTags, normalizeTag } from "@/lib/tags";
 import {
   defaultMessageFor,
   recordActivitySafe,
@@ -18,8 +13,10 @@ import { notifyActionAssigned } from "@/lib/notifications-generators";
 
 /**
  * Création manuelle d'une action depuis la fiche d'un agent.
- * Cf. spec : doit OBLIGATOIREMENT porter les tags "veille légale" + "obligatoire".
- * D'autres tags libres peuvent être ajoutés. Échéance par défaut = +7 mois.
+ * Les tags « veille légale » + « obligatoire » sont pré-cochés côté UI
+ * mais l'utilisateur peut les retirer s'ils ne s'appliquent pas — donc
+ * pas de forçage serveur, on prend la liste telle quelle.
+ * Échéance par défaut = +7 mois.
  */
 const schema = z.object({
   title: z.string().trim().min(1).max(300),
@@ -66,12 +63,8 @@ export async function POST(
     ? new Date(parsed.data.dueAt)
     : addMonths(new Date(), 7);
 
-  // Tags imposés + extras (dédup via normalize côté encode).
-  const tags = [
-    TAG_VEILLE_LEGALE,
-    TAG_OBLIGATOIRE,
-    ...(parsed.data.extraTags ?? []),
-  ];
+  // Tags tels que renvoyés par le client (dédup via normalize côté encode).
+  const tags = parsed.data.extraTags ?? [];
 
   // teamId scalaire : équipe principale de l'agent, sinon une de ses équipes.
   const teamId =

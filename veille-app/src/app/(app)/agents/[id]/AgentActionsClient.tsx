@@ -718,8 +718,9 @@ function ValidateModal({
 
 /**
  * Modal de création manuelle d'une action sur la fiche d'un agent.
- * Tags imposés : "veille légale" + "obligatoire" (non supprimables).
- * Titre obligatoire, échéance par défaut +7 mois (éditable), tags extras libres.
+ * Tags par défaut : "veille légale" + "obligatoire" — pré-remplis mais
+ * supprimables par l'utilisateur s'ils ne s'appliquent pas.
+ * Titre obligatoire, échéance par défaut +7 mois (éditable).
  */
 function ManualActionModal({
   agentId,
@@ -732,11 +733,13 @@ function ManualActionModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const imposed = [TAG_VEILLE_LEGALE, TAG_OBLIGATOIRE];
   const defaultDue = format(addMonths(new Date(), 7), "yyyy-MM-dd");
   const [title, setTitle] = useState("");
   const [dueAt, setDueAt] = useState(defaultDue);
-  const [extraTags, setExtraTags] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>([
+    TAG_VEILLE_LEGALE,
+    TAG_OBLIGATOIRE,
+  ]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -752,7 +755,7 @@ function ManualActionModal({
         body: JSON.stringify({
           title: title.trim(),
           dueAt: new Date(dueAt + "T00:00:00").toISOString(),
-          extraTags,
+          extraTags: tags,
         }),
       });
       if (!res.ok) {
@@ -828,22 +831,12 @@ function ManualActionModal({
             <label className="block text-xs font-medium text-slate-600 mb-1">
               Tags{" "}
               <span className="text-[10px] text-slate-400">
-                (« veille légale » et « obligatoire » imposés)
+                (« veille légale » et « obligatoire » par défaut, supprimables)
               </span>
             </label>
             <TagInput
-              tags={[...imposed, ...extraTags]}
-              imposed={imposed}
-              onChange={(next) =>
-                setExtraTags(
-                  next.filter(
-                    (t) =>
-                      !imposed.some(
-                        (i) => i.toLowerCase() === t.toLowerCase()
-                      )
-                  )
-                )
-              }
+              tags={tags}
+              onChange={setTags}
               placeholder="Ajouter un tag (Entrée pour valider)…"
             />
           </div>

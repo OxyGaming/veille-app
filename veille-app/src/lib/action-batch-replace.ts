@@ -24,7 +24,7 @@ export type BatchReplaceInput = {
   theme: string | null;
   domain: string | null;
   /** ISO string ou null. Si non fourni → on hérite de l'originale. */
-  dueAt: string | null | undefined;
+  dueAt?: string | null;
 };
 
 export type BatchReplaceOutcome = {

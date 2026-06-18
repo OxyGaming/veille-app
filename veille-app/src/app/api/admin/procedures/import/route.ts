@@ -6,6 +6,12 @@ import { requireRole } from "@/lib/auth";
 /**
  * Import JSON de procédures (format produit par `/export`).
  *
+ * Accepte version: 1 (héritage, sans champs d'aide réglementaire) ET
+ * version: 2 (depuis l'ajout de helpReference/helpText/historic*). Pour
+ * un payload v1 : les nouveaux champs sont absents (undefined) et on ne
+ * touche pas aux valeurs existantes côté DB pour ne pas écraser des
+ * popovers d'aide qui auraient été enrichis depuis l'export.
+ *
  * Stratégie « merge » (par défaut) :
  *  - clé naturelle = (domain, title) — insensible à la casse
  *  - si la procédure existe : on met à jour ses scalaires et on remplace ses
@@ -24,6 +30,13 @@ const itemSchema = z.object({
   sortOrder: z.number().int().default(0),
   requireCommentIfKO: z.boolean().default(false),
   requirePhotoIfKO: z.boolean().default(false),
+  // Ajoutés en v2 — optionnels pour rétrocompat. `optional()` SANS `default()`
+  // → on peut distinguer « absent » (= ne pas toucher) de « explicitement
+  // null » (= effacer le champ côté DB).
+  helpReference: z.string().nullable().optional(),
+  helpText: z.string().nullable().optional(),
+  historicConformPct: z.number().int().min(0).max(100).nullable().optional(),
+  historicSampleSize: z.number().int().min(0).nullable().optional(),
 });
 
 const procSchema = z.object({
@@ -41,7 +54,11 @@ const procSchema = z.object({
 const schema = z.object({
   strategy: z.enum(["merge", "add-only"]).default("merge"),
   payload: z.object({
-    version: z.number().int().min(1).max(1),
+    // Versions supportées : 1 (legacy) et 2 (avec champs d'aide). Un fichier
+    // v1 importé ne touchera pas helpReference/helpText/historic* des
+    // procédures existantes (champs absents = `undefined` → on ne met pas
+    // dans `data` côté Prisma).
+    version: z.number().int().min(1).max(2),
     procedures: z.array(procSchema).max(2000),
   }),
 });
@@ -129,6 +146,11 @@ export async function POST(req: Request) {
             seen.add(key);
             const ex = itemByLabel.get(key);
             if (ex) {
+              // Pour les champs v2 (helpReference, helpText, historic*),
+              // on respecte la rétrocompat : `undefined` (absent du payload
+              // v1) → on ne touche pas. Valeur fournie (y compris null) →
+              // on l'écrit. Cela évite qu'un import v1 ancien efface des
+              // popovers d'aide enrichis depuis.
               await tx.checklistItem.update({
                 where: { id: ex.id },
                 data: {
@@ -138,6 +160,18 @@ export async function POST(req: Request) {
                   requireCommentIfKO: it.requireCommentIfKO,
                   requirePhotoIfKO: it.requirePhotoIfKO,
                   isActive: true,
+                  ...(it.helpReference !== undefined
+                    ? { helpReference: it.helpReference }
+                    : {}),
+                  ...(it.helpText !== undefined
+                    ? { helpText: it.helpText }
+                    : {}),
+                  ...(it.historicConformPct !== undefined
+                    ? { historicConformPct: it.historicConformPct }
+                    : {}),
+                  ...(it.historicSampleSize !== undefined
+                    ? { historicSampleSize: it.historicSampleSize }
+                    : {}),
                 },
               });
             } else {
@@ -149,6 +183,10 @@ export async function POST(req: Request) {
                   sortOrder: it.sortOrder ?? j,
                   requireCommentIfKO: it.requireCommentIfKO,
                   requirePhotoIfKO: it.requirePhotoIfKO,
+                  helpReference: it.helpReference ?? null,
+                  helpText: it.helpText ?? null,
+                  historicConformPct: it.historicConformPct ?? null,
+                  historicSampleSize: it.historicSampleSize ?? null,
                 },
               });
               report.itemsCreated++;
@@ -189,6 +227,10 @@ export async function POST(req: Request) {
                 sortOrder: it.sortOrder ?? j,
                 requireCommentIfKO: it.requireCommentIfKO,
                 requirePhotoIfKO: it.requirePhotoIfKO,
+                helpReference: it.helpReference ?? null,
+                helpText: it.helpText ?? null,
+                historicConformPct: it.historicConformPct ?? null,
+                historicSampleSize: it.historicSampleSize ?? null,
               })),
             });
             report.itemsCreated += p.items.length;

@@ -4,8 +4,15 @@ import { requireRole } from "@/lib/auth";
 /**
  * Export JSON de toutes les procédures + leurs items.
  *
- * Format versionné — `version: 1`. Permet de migrer un référentiel d'un
- * environnement à l'autre, ou de sauvegarder avant un import massif.
+ * Format versionné — `version: 2` depuis l'ajout des champs d'aide
+ * réglementaire (helpReference, helpText) et des stats historiques
+ * (historicConformPct, historicSampleSize) sur les ChecklistItem.
+ *  - v1 (avant) : ne sérialisait QUE label/gravity/sortOrder/require*KO ;
+ *    les popovers d'aide étaient silencieusement perdus à l'aller-retour.
+ *  - v2 : tous les champs métier des ChecklistItem sont préservés.
+ *
+ * L'import accepte v1 ET v2 (rétrocompat — un payload v1 ne touche pas
+ * les champs ajoutés sur les procédures existantes).
  *
  * Documents sont stockés en JSON dans la BDD ; on les re-décode pour donner
  * un vrai tableau côté export.
@@ -27,7 +34,7 @@ export async function GET() {
     },
   });
   const payload = {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     count: procs.length,
     procedures: procs.map((p) => ({
@@ -45,6 +52,10 @@ export async function GET() {
         sortOrder: it.sortOrder,
         requireCommentIfKO: it.requireCommentIfKO,
         requirePhotoIfKO: it.requirePhotoIfKO,
+        helpReference: it.helpReference,
+        helpText: it.helpText,
+        historicConformPct: it.historicConformPct,
+        historicSampleSize: it.historicSampleSize,
       })),
     })),
   };

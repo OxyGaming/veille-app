@@ -52,6 +52,12 @@ type ReportPayload = {
     helpText: string | null;
     photos: string[];
   }[];
+  /**
+   * Photos rattachées à la session globalement (et non à un item précis).
+   * Servies par l'API depuis VeilleSession.photos. Étaient déclarées
+   * absentes du type côté client → silencieusement perdues au rendu PDF.
+   */
+  sessionPhotos?: { path: string; legend: string | null }[];
 };
 
 /**
@@ -398,73 +404,10 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
         y += lines.length * 12 + 16;
       }
 
-      // ─── Photos jointes aux NC (page dédiée systématique) ─────────────
-      const ncWithPhotos = data.nonConform.filter(
-        (nc) => nc.photos && nc.photos.length > 0
-      );
-      if (ncWithPhotos.length > 0) {
-        // Démarre toujours sur une nouvelle page pour éviter tout
-        // chevauchement avec les blocs précédents.
-        doc.addPage();
-        y = margin;
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
-        doc.text("Photos jointes aux non-conformités", margin, y);
-        y += 18;
-        for (const nc of ncWithPhotos) {
-          const ncIdx = data.nonConform.indexOf(nc) + 1;
-          ensureSpace(120);
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(9);
-          doc.setTextColor(80);
-          const titleLines = doc.splitTextToSize(
-            `NC #${ncIdx} — ${nc.procedure} — ${nc.item}`,
-            pageW - 2 * margin
-          );
-          doc.text(titleLines, margin, y);
-          y += titleLines.length * 11 + 4;
-          doc.setTextColor(0);
-          doc.setFont("helvetica", "normal");
-          // Charge les images en parallèle.
-          const dataUrls = await Promise.all(
-            nc.photos.map(async (path) => {
-              try {
-                const r = await fetch(path);
-                if (!r.ok) return null;
-                const blob = await r.blob();
-                return await new Promise<string>((resolve) => {
-                  const fr = new FileReader();
-                  fr.onload = () => resolve(fr.result as string);
-                  fr.readAsDataURL(blob);
-                });
-              } catch {
-                return null;
-              }
-            })
-          );
-          const valid = dataUrls.filter((u): u is string => !!u);
-          const thumbW = 140;
-          const thumbH = 100;
-          const gap = 10;
-          let x = margin;
-          for (const url of valid) {
-            if (x + thumbW > pageW - margin) {
-              x = margin;
-              y += thumbH + gap;
-              ensureSpace(thumbH + gap);
-            }
-            try {
-              doc.addImage(url, "JPEG", x, y, thumbW, thumbH);
-            } catch {
-              /* skip silencieusement */
-            }
-            x += thumbW + gap;
-          }
-          y += thumbH + 24;
-        }
-      }
-
-      // ─── Pied "Sources réglementaires" (toujours sur sa propre fin) ───
+      // ─── Pied "Sources réglementaires" (avant le bloc photos) ─────────
+      // Les sources doivent rester proches du contenu textuel pour que
+      // l'évaluateur ait toutes les références sous les yeux avant de
+      // dérouler les annexes photo.
       if (sources.length) {
         const blockH = 22 + sources.length * 11;
         ensureSpace(blockH + 12);
@@ -487,6 +430,137 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
         }
         doc.setTextColor(0);
         doc.setFont("helvetica", "normal");
+      }
+
+      // ─── Photos jointes — annexe TOUTE EN FIN de document ─────────────
+      // Regroupe TOUTES les photos disponibles (items observés, NC,
+      // session globale) en annexe finale, après les sources réglementaires.
+      // Avant cette refonte, seules les photos NC étaient rendues — celles
+      // des items conformes / à revoir et celles globales de la session
+      // étaient silencieusement perdues.
+      // Dédup par `path` : une photo rattachée à un item peut être
+      // re-référencée par sa NC → on ne la rend qu'une fois.
+      type CollectedPhoto = {
+        path: string;
+        legend: string | null;
+        context: string;
+      };
+      const photoBySource = new Map<string, CollectedPhoto>();
+      // Source 1 : photos sur chaque item observé (toutes statuts confondus).
+      for (const po of data.procedures) {
+        for (const it of po.items) {
+          if (!it.photos || it.photos.length === 0) continue;
+          for (const ph of it.photos) {
+            if (photoBySource.has(ph.path)) continue;
+            photoBySource.set(ph.path, {
+              path: ph.path,
+              legend: ph.legend,
+              context: `${po.procedure.title} — ${it.label}`,
+            });
+          }
+        }
+      }
+      // Source 2 : photos NC (dédup ; on prend l'index NC pour le contexte).
+      data.nonConform.forEach((nc, idx) => {
+        if (!nc.photos || nc.photos.length === 0) return;
+        for (const path of nc.photos) {
+          if (photoBySource.has(path)) continue;
+          photoBySource.set(path, {
+            path,
+            legend: null,
+            context: `NC #${idx + 1} — ${nc.procedure} — ${nc.item}`,
+          });
+        }
+      });
+      // Source 3 : photos générales de la session (sessionPhotos).
+      for (const ph of data.sessionPhotos ?? []) {
+        if (photoBySource.has(ph.path)) continue;
+        photoBySource.set(ph.path, {
+          path: ph.path,
+          legend: ph.legend,
+          context: "Photos de session",
+        });
+      }
+
+      const allPhotos = [...photoBySource.values()];
+      if (allPhotos.length > 0) {
+        // Démarre toujours sur une nouvelle page pour réelle séparation
+        // visuelle entre le compte rendu textuel et l'annexe photo.
+        doc.addPage();
+        y = margin;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.text("Annexe — Photos jointes", margin, y);
+        y += 18;
+
+        // Pré-charge toutes les images en parallèle avant rendu pour
+        // limiter les attentes séquentielles.
+        const dataUrls = await Promise.all(
+          allPhotos.map(async (ph) => {
+            try {
+              const r = await fetch(ph.path);
+              if (!r.ok) return null;
+              const blob = await r.blob();
+              return await new Promise<string>((resolve) => {
+                const fr = new FileReader();
+                fr.onload = () => resolve(fr.result as string);
+                fr.readAsDataURL(blob);
+              });
+            } catch {
+              return null;
+            }
+          })
+        );
+
+        // Regroupe par contexte (même item / même NC / "Photos de session"),
+        // pour produire des sous-titres lisibles.
+        const groups = new Map<string, { url: string; legend: string | null }[]>();
+        allPhotos.forEach((ph, i) => {
+          const url = dataUrls[i];
+          if (!url) return;
+          const arr = groups.get(ph.context) ?? [];
+          arr.push({ url, legend: ph.legend });
+          groups.set(ph.context, arr);
+        });
+
+        const thumbW = 140;
+        const thumbH = 100;
+        const gap = 10;
+        for (const [context, items] of groups) {
+          ensureSpace(120);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9);
+          doc.setTextColor(80);
+          const titleLines = doc.splitTextToSize(context, pageW - 2 * margin);
+          doc.text(titleLines, margin, y);
+          y += titleLines.length * 11 + 4;
+          doc.setTextColor(0);
+          doc.setFont("helvetica", "normal");
+
+          let x = margin;
+          for (const { url, legend } of items) {
+            if (x + thumbW > pageW - margin) {
+              x = margin;
+              y += thumbH + gap;
+              ensureSpace(thumbH + gap);
+            }
+            try {
+              doc.addImage(url, "JPEG", x, y, thumbW, thumbH);
+              if (legend) {
+                doc.setFontSize(7);
+                doc.setTextColor(120);
+                const legendLines = doc.splitTextToSize(legend, thumbW);
+                doc.text(legendLines, x, y + thumbH + 8);
+                doc.setTextColor(0);
+                doc.setFontSize(8);
+              }
+            } catch {
+              /* skip silencieusement */
+            }
+            x += thumbW + gap;
+          }
+          y += thumbH + 28;
+        }
       }
 
       doc.save(

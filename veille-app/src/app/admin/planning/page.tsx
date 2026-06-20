@@ -30,10 +30,10 @@ export default async function AdminPlanningPage() {
       <div className="mb-5">
         <h1 className="text-2xl font-bold tracking-tight">Planning agents</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Téléversez le tour de service ferroviaire (ODS / XLSX). Seules les
-          lignes en SERVICE sont enregistrées ; les NPO sont comptées mais
-          jamais persistées. Un nouvel import remplace intégralement le
-          précédent.
+          Téléversez le tour de service ferroviaire (ODS / XLSX, ou TSV /
+          TXT). Seules les lignes en SERVICE sont enregistrées ; les NPO
+          éventuelles sont comptées mais jamais persistées. Un nouvel import
+          remplace intégralement le précédent.
         </p>
       </div>
 

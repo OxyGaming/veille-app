@@ -137,7 +137,7 @@ export default function PlanningImportClient() {
     <div className="space-y-4">
       <form onSubmit={submitPreview} className="card p-5">
         <label className="block text-xs font-medium text-slate-600 mb-1.5">
-          Fichier planning (.ods, .xlsx)
+          Fichier planning (.ods, .xlsx, .txt, .tsv)
         </label>
         <label
           htmlFor="planning-file"
@@ -159,7 +159,7 @@ export default function PlanningImportClient() {
           <input
             id="planning-file"
             type="file"
-            accept=".ods,.xlsx,.xls"
+            accept=".ods,.xlsx,.xls,.txt,.tsv,text/tab-separated-values,text/plain"
             hidden
             onChange={(e) => {
               setFile(e.target.files?.[0] ?? null);

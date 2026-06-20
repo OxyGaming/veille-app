@@ -9,9 +9,10 @@ import {
   parsePlanningRows,
   parseTimeFr,
   readPlanningWorkbook,
+  resolveHeaderMapping,
 } from "./parser";
 
-// ─── Header de référence (24 colonnes) ──────────────────────────────────────
+// ─── Header de référence (24 colonnes — format ODS/XLSX original) ───────────
 
 const HEADER = [
   "UCH",
@@ -208,31 +209,95 @@ describe("combineDateTime", () => {
   });
 });
 
-// ─── assertPlanningHeader ────────────────────────────────────────────────────
+// ─── assertPlanningHeader / resolveHeaderMapping ────────────────────────────
 
-describe("assertPlanningHeader", () => {
+describe("resolveHeaderMapping", () => {
+  it("accepte le header ODS/XLSX original (24 col, pivot JS/NPO)", () => {
+    const m = resolveHeaderMapping(HEADER);
+    expect(m.matricule).toBe(4);
+    expect(m.dateStart).toBe(8);
+    expect(m.jsOrNpo).toBe(16);
+    expect(m.jsCode).toBe(17);
+    expect(m.jsNumber).toBe(23);
+    expect(m.uchJs).toBe(20);
+  });
+
+  it("accepte le header TSV alternatif (export.txt, sans pivot JS/NPO)", () => {
+    const tsvHeader = [
+      "UCH AGENT",
+      "CODE UCH AGENT",
+      "NOM AGENT",
+      "PRENOM AGENT",
+      "CODE IMMATRICULATION",
+      "CODE APES",
+      "CODE SYMBOLE GRADE",
+      "CODE COLLEGE GRADE",
+      "DATE DEBUT POP",
+      "HEURE DEBUT POP",
+      "HEURE FIN POP",
+      "DATE FIN POP",
+      "AMPLITUDE POP (100E/HEURE)",
+      "AMPLITUDE POP (HH:MM)",
+      "DUREE EFFECTIVE POP (100E/HEURE)",
+      "DUREE EFFECTIVE POP (HH:MM)",
+      "UCH JS",
+      "CODE UCH JS",
+      "CODE JS",
+      "TYPE JS",
+      "CODE ROULEMENT JS",
+      "NUMERO JS",
+      "COMPLEMENT DE COMPTE",
+      "CONTIENT TACHE REMISE DE SERVICE",
+      "GESTION MANUELLE A CONTROLER",
+      "NUMERO TRAITEMENT VFM",
+    ];
+    const m = resolveHeaderMapping(tsvHeader);
+    expect(m.uch).toBe(0);
+    expect(m.matricule).toBe(4);
+    expect(m.dateStart).toBe(8);
+    expect(m.jsOrNpo).toBeNull(); // ← absent → JS-only
+    expect(m.jsCode).toBe(18);
+    expect(m.jsNumber).toBe(21);
+    expect(m.uchJs).toBe(16);
+  });
+
+  it("lance si une colonne obligatoire est absente (DATE DEBUT)", () => {
+    const bad = [...HEADER];
+    bad[8] = "AUTRE";
+    expect(() => resolveHeaderMapping(bad)).toThrow(/DATE DEBUT/);
+  });
+
+  it("lance si la colonne matricule est absente", () => {
+    const bad = [...HEADER];
+    bad[4] = "MATRICULE";
+    expect(() => resolveHeaderMapping(bad)).toThrow(/CODE IMMATRICULATION/);
+  });
+
+  it("trime les espaces du header avant comparaison", () => {
+    const padded = HEADER.map((h) => `  ${h}  `);
+    expect(() => resolveHeaderMapping(padded)).not.toThrow();
+  });
+});
+
+describe("assertPlanningHeader (wrapper de compat)", () => {
   it("accepte le header officiel", () => {
     expect(() => assertPlanningHeader(HEADER)).not.toThrow();
   });
 
-  it("rejette un header avec mauvaise colonne matricule", () => {
+  it("rejette un header sans colonne obligatoire", () => {
     const bad = [...HEADER];
     bad[4] = "MATRICULE";
-    expect(() => assertPlanningHeader(bad)).toThrow(/colonne 4/);
-  });
-
-  it("rejette un header sans la colonne JS/NPO", () => {
-    const bad = [...HEADER];
-    bad[16] = "AUTRE";
-    expect(() => assertPlanningHeader(bad)).toThrow(/colonne 16/);
+    expect(() => assertPlanningHeader(bad)).toThrow(/CODE IMMATRICULATION/);
   });
 });
 
 // ─── parsePlanningRow ────────────────────────────────────────────────────────
 
 describe("parsePlanningRow", () => {
+  const MAPPING = resolveHeaderMapping(HEADER);
+
   it("parse une ligne JS canonique", () => {
-    const out = parsePlanningRow(jsRow(), 1);
+    const out = parsePlanningRow(jsRow(), 1, MAPPING);
     expect(out.kind).toBe("service");
     if (out.kind !== "service") return; // type guard
     expect(out.shift.matricule).toBe("9504912B");
@@ -245,7 +310,7 @@ describe("parsePlanningRow", () => {
   });
 
   it("ignore une ligne NPO sans propager le code NPO", () => {
-    const out = parsePlanningRow(npoRow(), 2);
+    const out = parsePlanningRow(npoRow(), 2, MAPPING);
     expect(out.kind).toBe("non-service");
     // Le type garantit qu'aucun champ "shift" n'est exposé pour les NPO.
     expect(out).not.toHaveProperty("shift");
@@ -253,23 +318,23 @@ describe("parsePlanningRow", () => {
 
   it("ignore une ligne entièrement vide", () => {
     const empty: unknown[] = new Array(24).fill(null);
-    expect(parsePlanningRow(empty, 3).kind).toBe("empty");
+    expect(parsePlanningRow(empty, 3, MAPPING).kind).toBe("empty");
   });
 
   it("compte en erreur une ligne JS sans matricule", () => {
-    const out = parsePlanningRow(jsRow({ 4: null }), 4);
+    const out = parsePlanningRow(jsRow({ 4: null }), 4, MAPPING);
     expect(out.kind).toBe("error");
     if (out.kind !== "error") return;
     expect(out.error.reason).toMatch(/matricule/);
   });
 
   it("compte en erreur une ligne JS avec DATE DEBUT invalide", () => {
-    const out = parsePlanningRow(jsRow({ 8: "31/02/2026" }), 5);
+    const out = parsePlanningRow(jsRow({ 8: "31/02/2026" }), 5, MAPPING);
     expect(out.kind).toBe("error");
   });
 
   it("compte en erreur une ligne JS avec HEURE FIN invalide", () => {
-    const out = parsePlanningRow(jsRow({ 10: "25:00:00" }), 6);
+    const out = parsePlanningRow(jsRow({ 10: "25:00:00" }), 6, MAPPING);
     expect(out.kind).toBe("error");
   });
 
@@ -282,6 +347,7 @@ describe("parsePlanningRow", () => {
         11: "04/06/2026",
       }),
       7,
+      MAPPING,
     );
     expect(out.kind).toBe("service");
     if (out.kind !== "service") return;
@@ -301,6 +367,7 @@ describe("parsePlanningRow", () => {
         11: "09/06/2026",
       }),
       8,
+      MAPPING,
     );
     expect(out.kind).toBe("error");
     if (out.kind !== "error") return;
@@ -378,7 +445,7 @@ describe("parsePlanningRows", () => {
   it("rejette un en-tête invalide", () => {
     const bad = [...HEADER];
     bad[8] = "X";
-    expect(() => parsePlanningRows([bad, jsRow()])).toThrow(/colonne 8/);
+    expect(() => parsePlanningRows([bad, jsRow()])).toThrow(/DATE DEBUT/);
   });
 
   it("accumule les erreurs ligne par ligne", () => {
@@ -423,5 +490,168 @@ describe("parsePlanningBuffer (end-to-end via xlsx)", () => {
     const read = readPlanningWorkbook(buf as Buffer);
     expect(read.length).toBeGreaterThanOrEqual(2);
     expect(read[0][4]).toBe("CODE IMMATRICULATION");
+  });
+});
+
+// ─── Format TSV alternatif (export.txt — JS-only, 26 colonnes) ──────────────
+
+describe("parsePlanningBuffer (TSV alternatif)", () => {
+  const TSV_HEADER = [
+    "UCH AGENT",
+    "CODE UCH AGENT",
+    "NOM AGENT",
+    "PRENOM AGENT",
+    "CODE IMMATRICULATION",
+    "CODE APES",
+    "CODE SYMBOLE GRADE",
+    "CODE COLLEGE GRADE",
+    "DATE DEBUT POP",
+    "HEURE DEBUT POP",
+    "HEURE FIN POP",
+    "DATE FIN POP",
+    "AMPLITUDE POP (100E/HEURE)",
+    "AMPLITUDE POP (HH:MM)",
+    "DUREE EFFECTIVE POP (100E/HEURE)",
+    "DUREE EFFECTIVE POP (HH:MM)",
+    "UCH JS",
+    "CODE UCH JS",
+    "CODE JS",
+    "TYPE JS",
+    "CODE ROULEMENT JS",
+    "NUMERO JS",
+    "COMPLEMENT DE COMPTE",
+    "CONTIENT TACHE REMISE DE SERVICE",
+    "GESTION MANUELLE A CONTROLER",
+    "NUMERO TRAITEMENT VFM",
+  ];
+
+  function tsvRowFor(
+    matricule: string,
+    dateStart: string,
+    timeStart: string,
+    timeEnd: string,
+    dateEnd: string,
+    jsCode: string,
+    jsNumber: string,
+  ): string {
+    const cells = new Array(26).fill("");
+    cells[0] = "RIVE DROITE NORD";
+    cells[1] = "933713";
+    cells[2] = "ACHILLE";
+    cells[3] = "JESSIE";
+    cells[4] = matricule;
+    cells[5] = "10";
+    cells[6] = "CP6NIV1";
+    cells[7] = "3";
+    cells[8] = dateStart;
+    cells[9] = timeStart;
+    cells[10] = timeEnd;
+    cells[11] = dateEnd;
+    cells[12] = "875";
+    cells[13] = "8:45";
+    cells[14] = "775";
+    cells[15] = "7:45";
+    cells[16] = "RIVE DROITE NORD";
+    cells[17] = "933713";
+    cells[18] = jsCode;
+    cells[19] = "FIX";
+    cells[20] = "GIC491";
+    cells[21] = jsNumber;
+    return cells.join("\t");
+  }
+
+  it("parse un TSV avec ligne de titre + header + données JS-only", () => {
+    const tsv = [
+      "Liste des couvertures de JS avec leur durée…", // titre
+      TSV_HEADER.join("\t"),
+      tsvRowFor(
+        "9012096G",
+        "22/07/2026",
+        "08:00:00",
+        "16:45:00",
+        "22/07/2026",
+        "GIC001",
+        "15242",
+      ),
+      tsvRowFor(
+        "8006107R",
+        "27/06/2026",
+        "11:30:00",
+        "21:10:00",
+        "27/06/2026",
+        "PEY005R",
+        "20244",
+      ),
+    ].join("\r\n");
+    const buf = Buffer.from(tsv, "utf8");
+    const result = parsePlanningBuffer(buf);
+    expect(result.rowsTotal).toBe(2);
+    expect(result.rowsService).toBe(2);
+    expect(result.rowsNonService).toBe(0); // pas de pivot JS/NPO → 0 NPO
+    expect(result.rowsErrored).toBe(0);
+    expect(result.shifts).toHaveLength(2);
+    expect(result.shifts[0].matricule).toBe("9012096G");
+    expect(result.shifts[0].jsCode).toBe("GIC001");
+    expect(result.shifts[0].jsNumber).toBe("15242");
+    expect(result.shifts[1].matricule).toBe("8006107R");
+    expect(result.shifts[1].jsCode).toBe("PEY005R");
+  });
+
+  it("tolère le BOM UTF-8 en début de fichier", () => {
+    const tsv =
+      "﻿Liste des JS\r\n" +
+      TSV_HEADER.join("\t") +
+      "\r\n" +
+      tsvRowFor(
+        "9012096G",
+        "22/07/2026",
+        "08:00:00",
+        "16:45:00",
+        "22/07/2026",
+        "GIC001",
+        "15242",
+      );
+    const buf = Buffer.from(tsv, "utf8");
+    const result = parsePlanningBuffer(buf);
+    expect(result.rowsService).toBe(1);
+    expect(result.shifts[0].jsCode).toBe("GIC001");
+  });
+
+  it("tolère les lignes vides en fin de fichier", () => {
+    const tsv =
+      TSV_HEADER.join("\t") +
+      "\n" +
+      tsvRowFor(
+        "9012096G",
+        "22/07/2026",
+        "08:00:00",
+        "16:45:00",
+        "22/07/2026",
+        "GIC001",
+        "15242",
+      ) +
+      "\n\n\n";
+    const buf = Buffer.from(tsv, "utf8");
+    const result = parsePlanningBuffer(buf);
+    expect(result.rowsService).toBe(1);
+  });
+
+  it("renvoie un error pour une ligne TSV avec date invalide", () => {
+    const tsv =
+      TSV_HEADER.join("\t") +
+      "\n" +
+      tsvRowFor(
+        "9012096G",
+        "32/07/2026", // ← date invalide
+        "08:00:00",
+        "16:45:00",
+        "22/07/2026",
+        "GIC001",
+        "15242",
+      );
+    const buf = Buffer.from(tsv, "utf8");
+    const result = parsePlanningBuffer(buf);
+    expect(result.rowsErrored).toBe(1);
+    expect(result.rowsService).toBe(0);
   });
 });

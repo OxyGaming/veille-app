@@ -1,27 +1,22 @@
 /**
- * Parser ODS/XLSX du planning de tour de service ferroviaire.
+ * Parser planning de tour de service ferroviaire — formats supportés :
  *
- * Format attendu (cf. fichier de référence, 24 colonnes) :
- *   [ 0] UCH                              [12] AMPLITUDE POP/NPO (100E)
- *   [ 1] CODE UCH                         [13] AMPLITUDE POP/NPO (HH:MM)
- *   [ 2] NOM                              [14] DUREE EFFECTIVE POP (100E)
- *   [ 3] PRENOM                           [15] DUREE EFFECTIVE POP (HH:MM)
- *   [ 4] CODE IMMATRICULATION  ◄── clé    [16] JS / NPO              ◄── pivot
- *   [ 5] CODE APES                        [17] CODE JS / CODE NPO
- *   [ 6] CODE SYMBOLE GRADE               [18] TYPE JS / FAM. NPO
- *   [ 7] CODE COLLEGE GRADE               [19] VALEUR NPO
- *   [ 8] DATE DEBUT POP / NPO  ◄── used   [20] UCH JS               (info brute)
- *   [ 9] HEURE DEBUT POP / NPO ◄── used   [21] CODE UCH JS
- *   [10] HEURE FIN POP / NPO   ◄── used   [22] CODE ROULEMENT JS
- *   [11] DATE FIN POP / NPO    ◄── used   [23] NUMERO JS            ◄── used
+ *  - ODS / XLSX (24 colonnes, ligne 1 = header, pivot `JS / NPO` col 16)
+ *  - TSV / TXT  (26 colonnes, ligne 1 = titre, ligne 2 = header, sans pivot
+ *               `JS / NPO` → traité comme "JS uniquement")
  *
- * Filtre amont strict : seules les lignes `row[16] === "JS"` deviennent un
- * ParsedShift. Les NPO sont comptées (`rowsNonService`) mais aucun champ
- * sensible (CODE NPO, TYPE NPO) ne traverse cette frontière.
+ * Le mapping de colonnes est résolu par ALIAS sur le header reçu : chaque
+ * colonne logique (`matricule`, `dateStart`, `jsCode`, etc.) est cherchée
+ * via une liste d'aliases acceptés. La colonne `jsOrNpo` est OPTIONNELLE :
+ * absente → toutes les lignes sont des SERVICE (les NPO ne sont jamais
+ * exportés dans ce format, sécurisé RGPD by-design).
+ *
+ * Filtre amont (format avec pivot) : seules les lignes `<jsOrNpo> === "JS"`
+ * deviennent un ParsedShift. Les NPO sont comptées dans `rowsNonService`
+ * mais aucun champ sensible ne traverse la frontière.
  *
  * Dates : format FR `DD/MM/YYYY`. Heures : `HH:MM:SS` ou `HH:MM`.
- * Fuseau : Europe/Paris implicite — les Date construites le sont en heure
- * locale du serveur (le déploiement cible est en France métropolitaine).
+ * Fuseau : Europe/Paris implicite (le serveur tourne sur cette TZ).
  *
  * Cf. memory/planning-import-rules.md pour les règles métier complètes.
  */
@@ -33,34 +28,104 @@ import type {
   RawUchSummary,
 } from "./types";
 
-// ─── Constantes de colonnes (en-tête + index) ────────────────────────────────
+// ─── Mapping de colonnes par ALIAS ───────────────────────────────────────────
 
-const COL = {
-  uch: 0,
-  matricule: 4,
-  dateStart: 8,
-  timeStart: 9,
-  timeEnd: 10,
-  dateEnd: 11,
-  jsOrNpo: 16,
-  jsCode: 17,
-  uchJs: 20,
-  jsNumber: 23,
-} as const;
+/**
+ * Mapping logique → index physique dans le header reçu.
+ * `jsOrNpo` est nullable : si la colonne est absente du fichier, on est en
+ * mode "JS uniquement" (cas du nouveau format export.txt).
+ * `uchJs` est nullable aussi (cas peu probable mais robuste).
+ */
+type HeaderMapping = {
+  uch: number;
+  matricule: number;
+  dateStart: number;
+  timeStart: number;
+  timeEnd: number;
+  dateEnd: number;
+  jsOrNpo: number | null;
+  jsCode: number;
+  uchJs: number | null;
+  jsNumber: number;
+};
 
-const EXPECTED_HEADERS: ReadonlyArray<readonly [number, string]> = [
-  [COL.uch, "UCH"],
-  [COL.matricule, "CODE IMMATRICULATION"],
-  [COL.dateStart, "DATE DEBUT POP / NPO"],
-  [COL.timeStart, "HEURE DEBUT POP / NPO"],
-  [COL.timeEnd, "HEURE FIN POP / NPO"],
-  [COL.dateEnd, "DATE FIN POP / NPO"],
-  [COL.jsOrNpo, "JS / NPO"],
-  [COL.jsNumber, "NUMERO JS"],
+/** Liste des libellés acceptés pour chaque colonne logique. */
+const HEADER_ALIASES: Record<keyof HeaderMapping, readonly string[]> = {
+  uch: ["UCH", "UCH AGENT"],
+  matricule: ["CODE IMMATRICULATION"],
+  dateStart: ["DATE DEBUT POP / NPO", "DATE DEBUT POP"],
+  timeStart: ["HEURE DEBUT POP / NPO", "HEURE DEBUT POP"],
+  timeEnd: ["HEURE FIN POP / NPO", "HEURE FIN POP"],
+  dateEnd: ["DATE FIN POP / NPO", "DATE FIN POP"],
+  jsOrNpo: ["JS / NPO"], // optionnelle
+  jsCode: ["CODE JS / CODE NPO", "CODE JS"],
+  uchJs: ["UCH JS"],
+  jsNumber: ["NUMERO JS"],
+};
+
+/** Colonnes obligatoires (lance si l'une est introuvable). */
+const REQUIRED_LOGICAL_COLS: readonly (keyof HeaderMapping)[] = [
+  "uch",
+  "matricule",
+  "dateStart",
+  "timeStart",
+  "timeEnd",
+  "dateEnd",
+  "jsCode",
+  "jsNumber",
 ];
 
-/** Première feuille du workbook lue en tableau 2D (header inclus). */
-export function readPlanningWorkbook(
+/** Résout chaque colonne logique en index dans le header reçu. */
+export function resolveHeaderMapping(header: unknown[]): HeaderMapping {
+  const norm = header.map((c) =>
+    typeof c === "string" ? c.trim() : c == null ? "" : String(c).trim(),
+  );
+  const findCol = (aliases: readonly string[]): number | null => {
+    for (const alias of aliases) {
+      const idx = norm.indexOf(alias);
+      if (idx !== -1) return idx;
+    }
+    return null;
+  };
+  const result = {} as HeaderMapping;
+  for (const logical of Object.keys(HEADER_ALIASES) as (keyof HeaderMapping)[]) {
+    const idx = findCol(HEADER_ALIASES[logical]);
+    if (idx === null && REQUIRED_LOGICAL_COLS.includes(logical)) {
+      throw new Error(
+        `En-tête invalide : colonne obligatoire introuvable — attendu l'un de [${HEADER_ALIASES[
+          logical
+        ]
+          .map((a) => `"${a}"`)
+          .join(", ")}].`,
+      );
+    }
+    // L'assignation ci-dessous est sûre :
+    //  - si idx === null, on a déjà jeté pour les colonnes obligatoires ;
+    //  - les colonnes optionnelles (jsOrNpo, uchJs) sont typées `number | null`.
+    (result as Record<keyof HeaderMapping, number | null>)[logical] = idx;
+  }
+  return result;
+}
+
+// ─── Lecture du buffer (auto-détection format ODS/XLSX vs TSV) ───────────────
+
+/** Vrai si le buffer commence par la signature ZIP (ODS et XLSX). */
+function looksLikeOfficeBuffer(
+  buffer: ArrayBuffer | Uint8Array | Buffer,
+): boolean {
+  const view = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
+  // ZIP local file header = 0x50 0x4B 0x03 0x04 = "PK\x03\x04"
+  return (
+    view.length >= 4 &&
+    view[0] === 0x50 &&
+    view[1] === 0x4b &&
+    view[2] === 0x03 &&
+    view[3] === 0x04
+  );
+}
+
+/** Lit un buffer ODS/XLSX → tableau 2D. */
+function readWorkbookRows(
   buffer: ArrayBuffer | Uint8Array | Buffer,
 ): unknown[][] {
   const wb = XLSX.read(buffer, { type: "array", cellDates: false });
@@ -74,18 +139,53 @@ export function readPlanningWorkbook(
   });
 }
 
-/** Vérifie qu'un en-tête contient bien les colonnes attendues. Lance si KO. */
-export function assertPlanningHeader(header: unknown[]): void {
-  for (const [idx, label] of EXPECTED_HEADERS) {
-    const cell = header[idx];
-    if (typeof cell !== "string" || cell.trim() !== label) {
-      throw new Error(
-        `En-tête invalide : colonne ${idx} doit être "${label}", reçu "${
-          cell == null ? "" : String(cell)
-        }".`,
-      );
-    }
+/**
+ * Lit un buffer TSV (text/plain UTF-8) → tableau 2D.
+ *
+ * Tolère les BOM UTF-8 et les sauts CRLF/LF.
+ * Saute les éventuelles lignes "titre" en tête (lignes sans tabulation),
+ * fréquentes en export RH (ex. "Liste des couvertures de JS…").
+ */
+function readTsvRows(buffer: ArrayBuffer | Uint8Array | Buffer): unknown[][] {
+  const view = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
+  // Buffer (Node) ou Uint8Array (Web). Buffer.from supporte les deux et le BOM.
+  const text = Buffer.from(view).toString("utf8").replace(/^﻿/, "");
+  const rawLines = text.split(/\r?\n/);
+  // Filtre les lignes complètement vides en fin de fichier.
+  const lines: string[] = [];
+  for (const l of rawLines) {
+    if (l.length > 0) lines.push(l);
   }
+  // Saute les premières lignes qui ne contiennent pas de tabulation
+  // (descriptions textuelles avant le vrai header).
+  let startIdx = 0;
+  while (startIdx < lines.length && !lines[startIdx].includes("\t")) {
+    startIdx++;
+  }
+  return lines.slice(startIdx).map((l) =>
+    l.split("\t").map((c) => (c.length > 0 ? c : null)),
+  );
+}
+
+/** Lit n'importe quel buffer planning supporté → tableau 2D. */
+export function readPlanningWorkbook(
+  buffer: ArrayBuffer | Uint8Array | Buffer,
+): unknown[][] {
+  if (looksLikeOfficeBuffer(buffer)) {
+    return readWorkbookRows(buffer);
+  }
+  return readTsvRows(buffer);
+}
+
+/**
+ * Valide qu'un en-tête contient bien les colonnes obligatoires (via aliases).
+ * Lance si KO.
+ *
+ * Wrapper kept pour compatibilité ascendante avec d'éventuels callers
+ * externes — délègue maintenant à `resolveHeaderMapping`.
+ */
+export function assertPlanningHeader(header: unknown[]): void {
+  resolveHeaderMapping(header);
 }
 
 // ─── Parsing date / heure FR ─────────────────────────────────────────────────
@@ -180,32 +280,33 @@ type RowOutcome =
   | { kind: "empty" };
 
 /**
- * Transforme une ligne brute en outcome typé.
+ * Transforme une ligne brute en outcome typé selon le `mapping` résolu.
  *
- * Règle de filtrage : seul `JS / NPO === "JS"` produit un shift. Toute autre
- * valeur (NPO, vide, inconnue) est classée non-service ou ignorée. Aucun
- * champ de la ligne NPO n'est conservé dans le shift retourné.
+ * Filtrage : si `mapping.jsOrNpo !== null` et `row[mapping.jsOrNpo] !== "JS"`,
+ * la ligne est classée non-service (NPO ou autre). Si `mapping.jsOrNpo` est
+ * null (format JS-only sans pivot), toutes les lignes non-vides sont des
+ * candidats SERVICE. Aucun champ NPO sensible ne traverse cette frontière.
  */
 export function parsePlanningRow(
   row: unknown[],
   rowIndex: number,
+  mapping: HeaderMapping,
 ): RowOutcome {
   // Ligne vide / quasi-vide → on ne compte ni en service ni en erreur.
   const allEmpty = row.every((c) => c == null || String(c).trim() === "");
   if (allEmpty) return { kind: "empty" };
 
-  const jsOrNpo = cellString(row[COL.jsOrNpo]);
-
-  // Toute ligne non-"JS" est traitée comme non-service. Pas de pénalité
-  // d'erreur même si la valeur est inattendue : le PO veut un compte
-  // simple SERVICE vs NON_SERVICE, et ne pas perdre de signal sur des
-  // colonnes 17/18/19 partielles que nous ignorons de toute façon.
-  if (jsOrNpo !== "JS") {
-    return { kind: "non-service" };
+  if (mapping.jsOrNpo !== null) {
+    const jsOrNpo = cellString(row[mapping.jsOrNpo]);
+    // Toute ligne non-"JS" est traitée comme non-service.
+    if (jsOrNpo !== "JS") {
+      return { kind: "non-service" };
+    }
   }
+  // Si mapping.jsOrNpo est null (format JS-only), on continue tel quel.
 
   // À partir d'ici, on est sur du SERVICE — il FAUT toutes les bornes.
-  const matricule = cellString(row[COL.matricule]);
+  const matricule = cellString(row[mapping.matricule]);
   if (!matricule) {
     return {
       kind: "error",
@@ -213,28 +314,28 @@ export function parsePlanningRow(
     };
   }
 
-  const dateStart = parseDateFr(row[COL.dateStart]);
+  const dateStart = parseDateFr(row[mapping.dateStart]);
   if (!dateStart) {
     return {
       kind: "error",
       error: { rowIndex, reason: "DATE DEBUT invalide" },
     };
   }
-  const timeStart = parseTimeFr(row[COL.timeStart]);
+  const timeStart = parseTimeFr(row[mapping.timeStart]);
   if (!timeStart) {
     return {
       kind: "error",
       error: { rowIndex, reason: "HEURE DEBUT invalide" },
     };
   }
-  const dateEnd = parseDateFr(row[COL.dateEnd]);
+  const dateEnd = parseDateFr(row[mapping.dateEnd]);
   if (!dateEnd) {
     return {
       kind: "error",
       error: { rowIndex, reason: "DATE FIN invalide" },
     };
   }
-  const timeEnd = parseTimeFr(row[COL.timeEnd]);
+  const timeEnd = parseTimeFr(row[mapping.timeEnd]);
   if (!timeEnd) {
     return {
       kind: "error",
@@ -265,8 +366,8 @@ export function parsePlanningRow(
       matricule,
       startsAt,
       endsAt,
-      jsNumber: cellString(row[COL.jsNumber]),
-      jsCode: cellString(row[COL.jsCode]),
+      jsNumber: cellString(row[mapping.jsNumber]),
+      jsCode: cellString(row[mapping.jsCode]),
     },
   };
 }
@@ -276,17 +377,20 @@ export function parsePlanningRow(
 /**
  * Parse un workbook complet et produit le PlanningParseResult.
  *
- * - L'en-tête est validé strictement (assertPlanningHeader).
- * - Le rawUchSummary capture UCH (col 0) et UCH JS (col 20) — uniquement
+ * - L'en-tête est résolu via `resolveHeaderMapping` (aliases supportés).
+ * - Le rawUchSummary capture UCH d'appartenance et UCH JS — uniquement
  *   pour le rapport d'import, jamais utilisé pour le scope applicatif.
  * - periodStart/periodEnd reflètent l'intervalle SERVICE effectivement
  *   conservé (pas les NPO).
+ * - Si le format n'a pas de pivot `JS / NPO` (export.txt nouveau format),
+ *   toutes les lignes non-vides sont des candidats SERVICE — `rowsNonService`
+ *   reste à 0.
  */
 export function parsePlanningRows(rows: unknown[][]): PlanningParseResult {
   if (rows.length === 0) {
     throw new Error("Fichier planning vide.");
   }
-  assertPlanningHeader(rows[0]);
+  const mapping = resolveHeaderMapping(rows[0]);
 
   const shifts: ParsedShift[] = [];
   const errors: PlanningParseError[] = [];
@@ -303,14 +407,16 @@ export function parsePlanningRows(rows: unknown[][]): PlanningParseResult {
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
-    const outcome = parsePlanningRow(row, i);
+    const outcome = parsePlanningRow(row, i, mapping);
     if (outcome.kind === "empty") continue;
     rowsTotal++;
 
     // UCH d'appartenance et UCH JS sont collectés pour TOUTES les lignes
     // non vides (utile au manager pour repérer un fichier exotique).
-    incrementMap(rawUchSummary.byAppartenance, cellString(row[COL.uch]));
-    incrementMap(rawUchSummary.byAffectation, cellString(row[COL.uchJs]));
+    incrementMap(rawUchSummary.byAppartenance, cellString(row[mapping.uch]));
+    if (mapping.uchJs !== null) {
+      incrementMap(rawUchSummary.byAffectation, cellString(row[mapping.uchJs]));
+    }
 
     if (outcome.kind === "non-service") {
       rowsNonService++;

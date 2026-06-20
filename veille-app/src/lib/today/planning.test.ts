@@ -5,11 +5,23 @@ import type { SessionUser } from "@/lib/auth";
 
 const findManyShift = vi.fn();
 const countImports = vi.fn();
+const findManyVeilleSession = vi.fn();
+const findManyActionValidation = vi.fn();
+const findManyAgentSighting = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     planningShift: { findMany: (...a: unknown[]) => findManyShift(...a) },
     planningImport: { count: (...a: unknown[]) => countImports(...a) },
+    veilleSession: {
+      findMany: (...a: unknown[]) => findManyVeilleSession(...a),
+    },
+    actionValidation: {
+      findMany: (...a: unknown[]) => findManyActionValidation(...a),
+    },
+    agentSighting: {
+      findMany: (...a: unknown[]) => findManyAgentSighting(...a),
+    },
   },
 }));
 
@@ -24,8 +36,14 @@ import {
 beforeEach(() => {
   findManyShift.mockReset();
   countImports.mockReset();
+  findManyVeilleSession.mockReset();
+  findManyActionValidation.mockReset();
+  findManyAgentSighting.mockReset();
   findManyShift.mockResolvedValue([]);
   countImports.mockResolvedValue(0);
+  findManyVeilleSession.mockResolvedValue([]);
+  findManyActionValidation.mockResolvedValue([]);
+  findManyAgentSighting.mockResolvedValue([]);
 });
 
 // ─── Fixtures utilisateur ────────────────────────────────────────────────────
@@ -286,6 +304,44 @@ describe("getAgentsOnDutyToday — items renvoyés", () => {
       openActionsCount: 14,
       daysSinceLastSession: 8,
     });
+  });
+
+  it("agrège l'activité 30 j (sessions+validations+sightings) en buckets quotidiens", async () => {
+    findManyShift.mockResolvedValue([shift({ agentId: "a-spark" })]);
+    countImports.mockResolvedValue(1);
+    // 14:00 NOW, sparkFrom = today − 29j 00:00 → today index = 29
+    findManyVeilleSession.mockResolvedValue([
+      { agentId: "a-spark", startedAt: new Date("2026-06-09T10:00:00") }, // today
+      { agentId: "a-spark", startedAt: new Date("2026-06-07T08:00:00") }, // today-2
+    ]);
+    findManyActionValidation.mockResolvedValue([
+      { agentId: "a-spark", realizedAt: new Date("2026-06-09T13:00:00") }, // today
+    ]);
+    findManyAgentSighting.mockResolvedValue([
+      { agentId: "a-spark", sightedAt: new Date("2026-05-30T09:00:00") }, // today-10
+    ]);
+    const { items } = await getAgentsOnDutyToday(EDITOR, NOW);
+    expect(items[0].activity).toHaveLength(30);
+    expect(items[0].activity[29]).toBe(2); // 1 session + 1 validation aujourd'hui
+    expect(items[0].activity[27]).toBe(1); // 1 session il y a 2 jours
+    expect(items[0].activity[19]).toBe(1); // 1 sighting il y a 10 jours
+    expect(items[0].activity.reduce((a, b) => a + b, 0)).toBe(4);
+  });
+
+  it("renvoie un activity array de 30 zéros si aucune trace", async () => {
+    findManyShift.mockResolvedValue([shift({ agentId: "a-quiet" })]);
+    countImports.mockResolvedValue(1);
+    const { items } = await getAgentsOnDutyToday(EDITOR, NOW);
+    expect(items[0].activity).toEqual(new Array(30).fill(0));
+  });
+
+  it("ne lance pas les requêtes sparkline si aucun shift", async () => {
+    findManyShift.mockResolvedValue([]);
+    countImports.mockResolvedValue(1);
+    await getAgentsOnDutyToday(EDITOR, NOW);
+    expect(findManyVeilleSession).not.toHaveBeenCalled();
+    expect(findManyActionValidation).not.toHaveBeenCalled();
+    expect(findManyAgentSighting).not.toHaveBeenCalled();
   });
 
   it("expose daysSinceLastSession=null si jamais veillé", async () => {

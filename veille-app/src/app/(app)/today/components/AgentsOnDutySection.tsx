@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Icon } from "@/components/icons";
+import { Sparkline } from "@/components/Sparkline";
 import type { AgentOnDutyItem, DutyStatus } from "@/lib/today/planning";
 
 type Props = {
@@ -114,6 +115,17 @@ function AgentOnDutyCard({ item }: { item: AgentOnDutyItem }) {
             </InfoChip>
           )}
         </div>
+      </div>
+      <div
+        className="shrink-0 text-indigo-500 hidden sm:block"
+        title="Activité 30 derniers jours (sessions, validations, croisements)"
+      >
+        <Sparkline
+          data={item.activity}
+          width={110}
+          height={28}
+          ariaLabel={`Activité 30 j de ${item.agentName}`}
+        />
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <Link

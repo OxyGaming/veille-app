@@ -39,6 +39,12 @@ export type AgentOnDutyItem = {
   sessionCount: number;
   /** Nombre d'actions ImportedAction en `localStatus = ACTIVE` pour l'agent. */
   openActionsCount: number;
+  /**
+   * 30 buckets quotidiens d'activité (sessions + validations + sightings) sur
+   * les 30 derniers jours, le dernier index = aujourd'hui. Rendu par le
+   * composant `<Sparkline>`.
+   */
+  activity: number[];
 };
 
 /** Sortie complète consommée par EditorPayload / AdminPayload. */
@@ -115,6 +121,13 @@ export async function getAgentsOnDutyToday(
   const dayStart = startOfDay(now);
   const dayEnd = startOfNextDay(now);
 
+  // Sparkline 30 jours — fenêtre [now-29j 00:00 → now 23:59]. Aligné sur
+  // le pattern de src/app/api/agents/sparklines/route.ts.
+  const SPARK_DAYS = 30;
+  const sparkFrom = new Date(dayStart);
+  sparkFrom.setDate(sparkFrom.getDate() - (SPARK_DAYS - 1));
+  const sparkTo = new Date(dayEnd.getTime() - 1); // inclusif fin de journée
+
   // Compte total des imports — sert à différencier "aucun planning importé"
   // de "planning importé mais aucun agent du scope aujourd'hui". Le compte
   // (et pas le findMany) suffit ; pas d'include ni de data sensible chargée.
@@ -157,6 +170,64 @@ export async function getAgentsOnDutyToday(
     prisma.planningImport.count(),
   ]);
 
+  // Sparkline activité 30 j — récupéré une seule fois pour les agents
+  // effectivement en service aujourd'hui (typiquement quelques dizaines).
+  // Trois sources : VeilleSession, ActionValidation, AgentSighting.
+  // Aligné sur le pattern de /api/agents/sparklines.
+  const dutyAgentIds = Array.from(new Set(shifts.map((s) => s.agentId)));
+  const activityByAgent = new Map<string, number[]>();
+  for (const id of dutyAgentIds) {
+    activityByAgent.set(id, new Array(SPARK_DAYS).fill(0));
+  }
+  if (dutyAgentIds.length > 0) {
+    const [sparkSessions, sparkValidations, sparkSightings] = await Promise.all(
+      [
+        prisma.veilleSession.findMany({
+          where: {
+            agentId: { in: dutyAgentIds },
+            startedAt: { gte: sparkFrom, lte: sparkTo },
+          },
+          select: { agentId: true, startedAt: true },
+        }),
+        prisma.actionValidation.findMany({
+          where: {
+            agentId: { in: dutyAgentIds },
+            realizedAt: { gte: sparkFrom, lte: sparkTo },
+          },
+          select: { agentId: true, realizedAt: true },
+        }),
+        prisma.agentSighting.findMany({
+          where: {
+            agentId: { in: dutyAgentIds },
+            sightedAt: { gte: sparkFrom, lte: sparkTo },
+          },
+          select: { agentId: true, sightedAt: true },
+        }),
+      ],
+    );
+    const DAY_MS_SPARK = 86_400_000;
+    const dayIndex = (d: Date) => {
+      const diff = Math.floor(
+        (d.getTime() - sparkFrom.getTime()) / DAY_MS_SPARK,
+      );
+      return Math.max(0, Math.min(SPARK_DAYS - 1, diff));
+    };
+    for (const s of sparkSessions) {
+      if (!s.agentId) continue;
+      const arr = activityByAgent.get(s.agentId);
+      if (arr) arr[dayIndex(s.startedAt)]++;
+    }
+    for (const v of sparkValidations) {
+      if (!v.agentId) continue;
+      const arr = activityByAgent.get(v.agentId);
+      if (arr) arr[dayIndex(v.realizedAt)]++;
+    }
+    for (const s of sparkSightings) {
+      const arr = activityByAgent.get(s.agentId);
+      if (arr) arr[dayIndex(s.sightedAt)]++;
+    }
+  }
+
   // Dédup par agent : on garde le shift "le plus pertinent" (statut prioritaire).
   // Si plusieurs candidats à statut égal, le startsAt le plus tôt gagne — cohérent
   // avec l'ordre d'affichage final.
@@ -184,6 +255,7 @@ export async function getAgentsOnDutyToday(
       daysSinceLastSession,
       sessionCount: s.agent._count.sessions,
       openActionsCount: s.agent._count.importedActions,
+      activity: activityByAgent.get(s.agentId) ?? new Array(SPARK_DAYS).fill(0),
     };
     const prev = bestByAgent.get(s.agentId);
     if (!prev) {

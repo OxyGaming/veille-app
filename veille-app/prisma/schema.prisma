@@ -53,6 +53,8 @@ model User {
   hiddenAgents     UserAgentHidden[]
   teamActivities   TeamActivity[]
   notifications    Notification[]
+  /// Imports de planning effectués par l'utilisateur.
+  planningImports  PlanningImport[]
 
   @@index([teamId])
   @@index([isActive])
@@ -175,6 +177,8 @@ model Agent {
   visitParticipations SiteVisitParticipant[]
   sightings        AgentSighting[]
   hiddenBy         UserAgentHidden[]
+  /// Créneaux de tour de service importés (cf. PlanningShift).
+  plannings        PlanningShift[]
 
   @@index([teamId])
   @@index([matricule])
@@ -1128,4 +1132,76 @@ model Notification {
   /// SQLite autorise plusieurs NULL pour `dedupKey` → les events sans
   /// clé créent toujours une nouvelle row.
   @@unique([userId, dedupKey])
+}
+
+// ─── Planning agents (tour de service ferroviaire) ────────────────────────────
+
+/// Métadonnées d'un import de planning (1 ligne par import).
+///
+/// Stratégie V1 (cf. memory/planning-import-rules.md) :
+///  - SERVICE uniquement persisté (JS du fichier). Les NPO sont comptabilisées
+///    pour le rapport mais jamais stockées (RGPD : aucun code MA/BM/AY en base).
+///  - Un nouvel import écrase complètement le précédent dans une seule
+///    transaction Prisma (delete + create), pas d'historique des imports.
+///  - Matching agents : par matricule uniquement. Inconnus = ignorés et comptés.
+///  - Pas de FK Team : le scope d'affichage côté `/today` repose sur
+///    `AgentTeam` (memberships Veille existants), pas sur les UCH du fichier.
+model PlanningImport {
+  id                String   @id @default(cuid())
+  importedById      String?
+  fileName          String?
+  /// Période couverte par le fichier (min/max DATE DEBUT des lignes SERVICE).
+  periodStart       DateTime?
+  periodEnd         DateTime?
+  /// Total des lignes lues dans le tableur (hors header).
+  rowsTotal         Int      @default(0)
+  /// Lignes typées JS dans le fichier (toutes, avant matching matricule).
+  rowsService       Int      @default(0)
+  /// Lignes typées NPO dans le fichier — comptées pour info, jamais stockées.
+  rowsNonService    Int      @default(0)
+  /// SERVICE avec matricule connu → un PlanningShift a été créé.
+  rowsImported      Int      @default(0)
+  /// SERVICE avec matricule inconnu côté Veille → ligne ignorée.
+  rowsIgnored       Int      @default(0)
+  /// Lignes en erreur de parsing (date/heure invalide, matricule vide, etc.).
+  rowsErrored       Int      @default(0)
+  /// Liste JSON des matricules inconnus rencontrés (utile au rapport d'import).
+  unknownMatricules String   @default("[]")
+  /// Comptage brut UCH / UCH JS observés dans le fichier (JSON).
+  /// Information seule, jamais utilisée pour le scope applicatif.
+  rawUchSummary     String   @default("{}")
+  createdAt         DateTime @default(now())
+
+  importedBy        User?            @relation(fields: [importedById], references: [id], onDelete: SetNull)
+  shifts            PlanningShift[]
+
+  @@index([createdAt])
+}
+
+/// Un créneau de service d'un agent (SERVICE uniquement en V1).
+///
+/// Le scope d'affichage utilise `AgentTeam` côté requête ; pas de FK Team ici.
+model PlanningShift {
+  id            String   @id @default(cuid())
+  importId      String
+  agentId       String
+  /// Borne basse — DATE DEBUT + HEURE DEBUT, fuseau Europe/Paris.
+  startsAt      DateTime
+  /// Borne haute — DATE FIN + HEURE FIN. Peut être J+1 (service de nuit).
+  endsAt        DateTime
+  /// Référence courte de la JS affichée à l'écran (col NUMERO JS, ex "20412").
+  jsNumber      String?
+  /// Code de la tournée (col CODE JS, ex "LGV/", "VMCAS").
+  /// Non sensible — les codes NPO sont filtrés à la source.
+  jsCode        String?
+  createdAt     DateTime @default(now())
+
+  import        PlanningImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  agent         Agent          @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  /// "Quels shifts pour cet agent ?" — fiche agent / wizard veille.
+  @@index([agentId, startsAt])
+  /// Écran Today : `startsAt < demain` ET `endsAt > maintenant`.
+  @@index([startsAt, endsAt])
+  @@index([importId])
 }

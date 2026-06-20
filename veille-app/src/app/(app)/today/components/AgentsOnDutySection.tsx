@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Icon } from "@/components/icons";
-import { Sparkline } from "@/components/Sparkline";
+import { Sparkline } from "@/components/charts";
 import type { AgentOnDutyItem, DutyStatus } from "@/lib/today/planning";
 
 type Props = {
@@ -104,28 +104,31 @@ function AgentOnDutyCard({ item }: { item: AgentOnDutyItem }) {
             <span className="font-mono text-slate-500">{item.jsCode}</span>
           ) : null}
         </div>
-        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+        <div className="mt-1.5">
           <FreshnessChip days={item.daysSinceLastSession} />
-          <InfoChip>
-            {item.sessionCount} session{item.sessionCount > 1 ? "s" : ""}
-          </InfoChip>
-          {item.openActionsCount > 0 && (
-            <InfoChip tone={item.openActionsCount >= 10 ? "warn" : "neutral"}>
-              {item.openActionsCount} act.
-            </InfoChip>
-          )}
         </div>
       </div>
-      <div
-        className="shrink-0 text-indigo-500 hidden sm:block"
-        title="Activité 30 derniers jours (sessions, validations, croisements)"
-      >
-        <Sparkline
-          data={item.activity}
-          width={110}
-          height={28}
-          ariaLabel={`Activité 30 j de ${item.agentName}`}
-        />
+      {/* Bloc résumé activité — pattern identique à AgentsListClient (fiche agent). */}
+      <div className="text-right shrink-0">
+        <span
+          className={`text-xs font-mono font-semibold px-2 py-0.5 rounded ${
+            item.openActionsCount > 5
+              ? "bg-rose-50 text-rose-700"
+              : item.openActionsCount > 0
+                ? "bg-amber-50 text-amber-700"
+                : "bg-emerald-50 text-emerald-700"
+          }`}
+        >
+          {item.openActionsCount} act.
+        </span>
+        <div className="text-[10px] text-slate-400 mt-0.5">
+          {item.sessionCount} session(s)
+        </div>
+        {item.activity.some((v) => v > 0) && (
+          <div className="mt-0.5 -mr-0.5">
+            <Sparkline values={item.activity} width={72} height={18} />
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <Link
@@ -175,26 +178,6 @@ function FreshnessChip({ days }: { days: number | null }) {
   );
 }
 
-/** Chip neutre pour les compteurs (sessions / actions). */
-function InfoChip({
-  children,
-  tone = "neutral",
-}: {
-  children: React.ReactNode;
-  tone?: "neutral" | "warn";
-}) {
-  const cls =
-    tone === "warn"
-      ? "bg-amber-100 text-amber-800"
-      : "bg-slate-100 text-slate-700";
-  return (
-    <span
-      className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
-    >
-      {children}
-    </span>
-  );
-}
 
 function StatusBadge({ status }: { status: DutyStatus }) {
   const meta = STATUS_META[status];

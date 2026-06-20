@@ -2,7 +2,7 @@
 
 **Périmètre** : C1 (modèle + parser) + C2 (page admin + import transactionnel) + C3 (section `/today`) + C4 (sous-titre autocomplete agent).
 **Branche** : `main`
-**SHAs sprint** : C1 `2ddf5bf` · C2 `68e090a` · C3 `de1cfd5` · C4 `345078a` · recette `<voir SHA final ci-dessous>`
+**SHAs sprint** : C1 `2ddf5bf` · C2 `68e090a` · C3 `de1cfd5` · C4 `345078a` · recette `ab6880e`
 **Règle d'or non négociable** : `PlanningShift` n'est JAMAIS utilisé pour le cloisonnement. Le scope reste `Utilisateur → Team Veille → AgentTeam → Agent`. UCH / UCH JS sont ignorés.
 
 ---
@@ -191,7 +191,8 @@ Aucun débordement horizontal (`scrollWidth === clientWidth`) sur les 4 viewport
 
 ## SHA Git de la recette
 
-À renseigner après commit final de cette recette.
+**`ab6880e92e3c3af8d2589f0f2219f06f89a54183`** (commit du fichier `PLANNING-IMPORT-RECETTE.md`).
+Le SHA final de tag de sprint (incluant cette mise à jour auto-référencée) est renseigné dans le récapitulatif de fin de conversation.
 
 ---
 

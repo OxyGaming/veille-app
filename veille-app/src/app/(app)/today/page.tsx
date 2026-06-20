@@ -33,7 +33,12 @@ export default async function TodayPage() {
         </>
       )}
 
-      {payload.role === "EDITOR" && <EditorDashboard payload={payload} />}
+      {payload.role === "EDITOR" && (
+        <EditorDashboard
+          payload={payload}
+          canImportPlanning={user.role === "ADMIN"}
+        />
+      )}
 
       {payload.role === "ADMIN" && <AdminDashboard payload={payload} />}
 

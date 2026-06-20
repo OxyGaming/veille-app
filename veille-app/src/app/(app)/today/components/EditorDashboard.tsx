@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { EditorPayload, WatchlistItem } from "@/lib/today/types";
 import { Icon } from "@/components/icons";
 import { ActivityFeedSection } from "./ActivityFeedSection";
+import { AgentsOnDutySection } from "./AgentsOnDutySection";
 import { CriticalEcheancesBadge } from "./CriticalEcheancesBadge";
 import { DiagnosticBanner } from "./DiagnosticBanner";
 import { KpiCard } from "./KpiCard";
@@ -9,13 +10,17 @@ import { KpiSection } from "./KpiSection";
 import { WatchlistRow } from "./WatchlistRow";
 import { WatchlistSection } from "./WatchlistSection";
 
-type Props = { payload: EditorPayload };
+type Props = {
+  payload: EditorPayload;
+  /** Vrai si l'utilisateur courant est ADMIN — débloque le CTA d'import planning. */
+  canImportPlanning: boolean;
+};
 
 /**
  * Dashboard EDITOR — bannière diagnostic + KPI périmètre + KPI semaine.
  * Consomme uniquement le payload C3. Aucun fetch ici.
  */
-export function EditorDashboard({ payload }: Props) {
+export function EditorDashboard({ payload, canImportPlanning }: Props) {
   const d = payload.diagnostic;
   const w = payload.weekCounters;
   const sitesToVisit = payload.sitesWithoutVisitTotal;
@@ -69,6 +74,12 @@ export function EditorDashboard({ payload }: Props) {
         <KpiCard label="Visites" value={w.visits} />
         <KpiCard label="Validations" value={w.closedActions} />
       </KpiSection>
+
+      <AgentsOnDutySection
+        items={payload.agentsOnDutyToday}
+        hasPlanningImport={payload.hasPlanningImport}
+        canImportPlanning={canImportPlanning}
+      />
 
       <WatchlistSection
         title="Agents à veiller"

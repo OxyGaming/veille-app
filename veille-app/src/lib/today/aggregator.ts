@@ -9,6 +9,7 @@ import type { SessionUser } from "@/lib/auth";
 import { after } from "next/server";
 import { getCriticalEcheancesItems } from "@/lib/echeances/aggregator";
 import { notifyEcheancesCriticalForUser } from "@/lib/notifications-generators";
+import { getAgentsOnDutyToday } from "./planning";
 import { topItems } from "./priority";
 import {
   getAdminAlerts,
@@ -85,6 +86,7 @@ export async function aggregateEditor(
     sites,
     activityFeed,
     criticalEcheancesItems,
+    onDuty,
   ] = await Promise.all([
     getEditorPerimeter(user),
     getEditorDiagnostic(user, now),
@@ -93,6 +95,7 @@ export async function aggregateEditor(
     getSitesWithoutVisit(user, now),
     getTeamActivity(user, now, 8),
     getCriticalEcheancesItems(user, now),
+    getAgentsOnDutyToday(user, now),
   ]);
   const criticalEcheancesCount = criticalEcheancesItems.length;
 
@@ -116,6 +119,8 @@ export async function aggregateEditor(
     sitesWithoutVisitTotal: sites.total,
     activityFeed,
     criticalEcheancesCount,
+    agentsOnDutyToday: onDuty.items,
+    hasPlanningImport: onDuty.hasPlanningImport,
   };
 }
 
@@ -124,12 +129,14 @@ export async function aggregateAdmin(
   user: SessionUser,
   now: Date,
 ): Promise<AdminPayload> {
-  const [systemStatus, alerts, usage7d, recentActivity] = await Promise.all([
-    getAdminSystemStatus(now),
-    getAdminAlerts(now),
-    getAdminUsage7d(now),
-    getAdminRecentActivity(now),
-  ]);
+  const [systemStatus, alerts, usage7d, recentActivity, onDuty] =
+    await Promise.all([
+      getAdminSystemStatus(now),
+      getAdminAlerts(now),
+      getAdminUsage7d(now),
+      getAdminRecentActivity(now),
+      getAgentsOnDutyToday(user, now),
+    ]);
 
   // Sprint 6 C7 — Notifications critiques de l'ADMIN GLOBAL.
   // `aggregateAdmin` n'est appelé que pour ADMIN GLOBAL (cf. switch
@@ -155,6 +162,8 @@ export async function aggregateAdmin(
     alerts,
     usage7d,
     recentActivity,
+    agentsOnDutyToday: onDuty.items,
+    hasPlanningImport: onDuty.hasPlanningImport,
   };
 }
 

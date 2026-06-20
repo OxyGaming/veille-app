@@ -1,0 +1,175 @@
+/**
+ * Source de données — "Agents en service aujourd'hui" pour la page /today.
+ *
+ * **Règle critique** : le planning sert UNIQUEMENT à enrichir des agents déjà
+ * scopés via les helpers Veille existants. Le cloisonnement reste
+ * `Utilisateur → Team Veille → AgentTeam → Agent`. UCH / UCH JS du fichier
+ * d'import sont délibérément ignorés ici. Cf. memory/planning-import-rules.md.
+ *
+ * Implémentation : filtrage 100 % SQL via la relation `agent → memberships`,
+ * pas de chargement global suivi d'un filtre JS.
+ */
+import { prisma } from "@/lib/prisma";
+import { agentScope, type SessionUser } from "@/lib/auth";
+
+/** Statut visuel d'un agent par rapport au moment courant. */
+export type DutyStatus = "IN_SERVICE" | "LATER" | "FINISHED";
+
+/** Item rendu côté UI dans la section "Agents en service aujourd'hui". */
+export type AgentOnDutyItem = {
+  /** Identifiant unique du shift (sert de key React). */
+  shiftId: string;
+  agentId: string;
+  agentName: string;
+  /** ISO 8601 — l'UI parse pour afficher l'horaire. */
+  startsAt: string;
+  endsAt: string;
+  /** Référence courte de la JS (col NUMERO JS du fichier d'origine). */
+  jsNumber: string | null;
+  /** Code court de la tournée (col CODE JS — jamais une valeur NPO sensible). */
+  jsCode: string | null;
+  /** Vrai si endsAt tombe le jour suivant `startsAt` (service de nuit). */
+  isOvernight: boolean;
+  status: DutyStatus;
+};
+
+/** Sortie complète consommée par EditorPayload / AdminPayload. */
+export type AgentsOnDutyResult = {
+  items: AgentOnDutyItem[];
+  /** Vrai si au moins un PlanningImport existe en base. */
+  hasPlanningImport: boolean;
+};
+
+/** 00:00 du jour calendaire local de `now`. */
+function startOfDay(now: Date): Date {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** 00:00 du jour suivant (= 24 h après startOfDay). */
+function startOfNextDay(now: Date): Date {
+  const d = startOfDay(now);
+  d.setDate(d.getDate() + 1);
+  return d;
+}
+
+/** Détermine le statut d'un shift par rapport à `now`. */
+export function getDutyStatus(
+  startsAt: Date,
+  endsAt: Date,
+  now: Date,
+): DutyStatus {
+  if (startsAt.getTime() > now.getTime()) return "LATER";
+  if (endsAt.getTime() < now.getTime()) return "FINISHED";
+  return "IN_SERVICE";
+}
+
+/** Vrai si `endsAt` n'est pas le même jour calendaire que `startsAt`. */
+export function isOvernightShift(startsAt: Date, endsAt: Date): boolean {
+  return (
+    startsAt.getFullYear() !== endsAt.getFullYear() ||
+    startsAt.getMonth() !== endsAt.getMonth() ||
+    startsAt.getDate() !== endsAt.getDate()
+  );
+}
+
+/** Priorité pour le tri principal (1. EN SERVICE / 2. PLUS TARD / 3. TERMINE). */
+const STATUS_ORDER: Record<DutyStatus, number> = {
+  IN_SERVICE: 0,
+  LATER: 1,
+  FINISHED: 2,
+};
+
+/**
+ * Renvoie les shifts du jour pour les agents du scope de `user`.
+ *
+ * Stratégie :
+ *  1. Une seule requête `findMany` avec where SQL :
+ *     - intersection journée : `startsAt < J+1` ET `endsAt > J`
+ *     - scope : `agent.isVisible = true` + `agentScope(user)`
+ *     L'index composite (startsAt, endsAt) couvre la fenêtre de date ;
+ *     le filtre agent est appliqué par le moteur via la relation indexée.
+ *  2. Dédup par agent côté JS (un même agent peut avoir un service de nuit
+ *     qui se termine + un autre qui commence le même jour). On garde le
+ *     shift avec la priorité de statut la plus forte (IN_SERVICE > LATER >
+ *     FINISHED), puis le startsAt le plus tôt en cas d'égalité.
+ *  3. Tri final : statut puis startsAt asc.
+ *
+ * Volumétrie : sur un mois de planning (~4 000 shifts) avec un scope EDITOR
+ * de quelques dizaines d'agents, la fenêtre journalière ramène au plus
+ * ~80-100 rows avant dédup. La requête reste sub-50 ms.
+ */
+export async function getAgentsOnDutyToday(
+  user: SessionUser,
+  now: Date,
+): Promise<AgentsOnDutyResult> {
+  const dayStart = startOfDay(now);
+  const dayEnd = startOfNextDay(now);
+
+  // Compte total des imports — sert à différencier "aucun planning importé"
+  // de "planning importé mais aucun agent du scope aujourd'hui". Le compte
+  // (et pas le findMany) suffit ; pas d'include ni de data sensible chargée.
+  const [shifts, importCount] = await Promise.all([
+    prisma.planningShift.findMany({
+      where: {
+        startsAt: { lt: dayEnd },
+        endsAt: { gt: dayStart },
+        agent: { isVisible: true, ...agentScope(user) },
+      },
+      select: {
+        id: true,
+        agentId: true,
+        startsAt: true,
+        endsAt: true,
+        jsNumber: true,
+        jsCode: true,
+        agent: {
+          select: { firstName: true, lastName: true },
+        },
+      },
+    }),
+    prisma.planningImport.count(),
+  ]);
+
+  // Dédup par agent : on garde le shift "le plus pertinent" (statut prioritaire).
+  // Si plusieurs candidats à statut égal, le startsAt le plus tôt gagne — cohérent
+  // avec l'ordre d'affichage final.
+  const bestByAgent = new Map<string, AgentOnDutyItem>();
+  for (const s of shifts) {
+    const startsAt = s.startsAt;
+    const endsAt = s.endsAt;
+    const status = getDutyStatus(startsAt, endsAt, now);
+    const candidate: AgentOnDutyItem = {
+      shiftId: s.id,
+      agentId: s.agentId,
+      agentName: `${s.agent.firstName} ${s.agent.lastName}`.trim(),
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      jsNumber: s.jsNumber,
+      jsCode: s.jsCode,
+      isOvernight: isOvernightShift(startsAt, endsAt),
+      status,
+    };
+    const prev = bestByAgent.get(s.agentId);
+    if (!prev) {
+      bestByAgent.set(s.agentId, candidate);
+      continue;
+    }
+    if (
+      STATUS_ORDER[candidate.status] < STATUS_ORDER[prev.status] ||
+      (STATUS_ORDER[candidate.status] === STATUS_ORDER[prev.status] &&
+        candidate.startsAt < prev.startsAt)
+    ) {
+      bestByAgent.set(s.agentId, candidate);
+    }
+  }
+
+  const items = Array.from(bestByAgent.values()).sort((a, b) => {
+    const so = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+    if (so !== 0) return so;
+    return a.startsAt.localeCompare(b.startsAt);
+  });
+
+  return { items, hasPlanningImport: importCount > 0 };
+}

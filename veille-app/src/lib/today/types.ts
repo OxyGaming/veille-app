@@ -209,6 +209,15 @@ export type EditorPayload = {
    * Cliquable depuis Today EDITOR vers `/echeances?urgency=critical`.
    */
   criticalEcheancesCount: number;
+  /**
+   * Agents du scope avec un shift de planning couvrant aujourd'hui (C3).
+   * Source `PlanningShift` enrichie sur `Agent`. Le cloisonnement reste
+   * 100 % piloté par `agentScope(user)` — le planning n'apporte JAMAIS
+   * d'agent au-delà du scope Veille.
+   */
+  agentsOnDutyToday: import("./planning").AgentOnDutyItem[];
+  /** Vrai si au moins un PlanningImport existe — distingue "vide" vs "rien d'importé". */
+  hasPlanningImport: boolean;
 };
 
 /** Alerte système ADMIN. */
@@ -240,6 +249,13 @@ export type AdminPayload = {
   alerts: AdminAlert[];
   usage7d: AdminUsage;
   recentActivity: RecentActivityItem[];
+  /**
+   * Agents en service aujourd'hui — vue ADMIN GLOBAL. Le scope reste piloté
+   * par `agentScope(user)` qui retourne `{}` pour un ADMIN sans scope
+   * restreint, donc tous les agents Veille visibles sont éligibles.
+   */
+  agentsOnDutyToday: import("./planning").AgentOnDutyItem[];
+  hasPlanningImport: boolean;
 };
 
 /** Union — le payload renvoyé par `GET /api/today` selon `user.role`. */

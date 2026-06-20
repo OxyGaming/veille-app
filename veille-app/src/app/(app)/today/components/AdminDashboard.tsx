@@ -1,4 +1,5 @@
 import type { AdminPayload } from "@/lib/today/types";
+import { AgentsOnDutySection } from "./AgentsOnDutySection";
 import { DiagnosticBanner, type DiagnosticState } from "./DiagnosticBanner";
 import { KpiCard } from "./KpiCard";
 import { KpiSection } from "./KpiSection";
@@ -32,6 +33,12 @@ export function AdminDashboard({ payload }: Props) {
         <KpiCard label="Validations" value={u.validatedActions} />
         <KpiCard label="Photos" value={u.photos} />
       </KpiSection>
+
+      <AgentsOnDutySection
+        items={payload.agentsOnDutyToday}
+        hasPlanningImport={payload.hasPlanningImport}
+        canImportPlanning
+      />
 
       <RecentActivitySection
         items={payload.recentActivity}

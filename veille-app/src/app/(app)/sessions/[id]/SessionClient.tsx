@@ -68,7 +68,7 @@ export default function SessionClient({
   agents,
 }: {
   session: Session;
-  agents: { id: string; label: string }[];
+  agents: { id: string; label: string; hint?: string }[];
 }) {
   const router = useRouter();
   const { dialog, ask } = useConfirmDialog();

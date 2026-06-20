@@ -173,3 +173,127 @@ export async function getAgentsOnDutyToday(
 
   return { items, hasPlanningImport: importCount > 0 };
 }
+
+// ─── Hint planning du jour pour un set d'agents (C4) ────────────────────────
+
+/** Format `HH:MM` local du Date (le serveur tourne en Europe/Paris). */
+function formatLocalTime(d: Date): string {
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+/**
+ * Texte court d'enrichissement planning pour la sélection d'agent (autocomplete
+ * du wizard de veille). Pur — testable sans Prisma.
+ *
+ * Sortie attendue côté UI :
+ *  - shift présent IN_SERVICE  : "En service aujourd'hui · 06:00 → 14:00 · JS 20412"
+ *  - shift présent LATER       : "Prévu plus tard · 13:00 → 21:00 · JS 18754"
+ *  - shift présent FINISHED    : "Service terminé · 05:00 → 13:00 · JS 16587"
+ *  - service de nuit           : "En service aujourd'hui · 20:40 → 05:00 (+1) · JS 20412"
+ *  - aucun shift SERVICE (et planning importé) : "Non prévu en service aujourd'hui"
+ *
+ * Aucune information NPO (RP / MA / AY …) n'est exposée — par construction,
+ * `PlanningShift` ne contient que des SERVICE (filtre amont à l'import).
+ */
+export function formatPlanningHint(
+  shift: {
+    startsAt: Date;
+    endsAt: Date;
+    jsNumber: string | null;
+  } | null,
+  now: Date,
+): string {
+  if (!shift) return "Non prévu en service aujourd'hui";
+  const status = getDutyStatus(shift.startsAt, shift.endsAt, now);
+  const overnight = isOvernightShift(shift.startsAt, shift.endsAt);
+  const range = `${formatLocalTime(shift.startsAt)} → ${formatLocalTime(
+    shift.endsAt,
+  )}${overnight ? " (+1)" : ""}`;
+  const js = shift.jsNumber ? ` · JS ${shift.jsNumber}` : "";
+  const label =
+    status === "IN_SERVICE"
+      ? "En service aujourd'hui"
+      : status === "LATER"
+        ? "Prévu plus tard"
+        : "Service terminé";
+  return `${label} · ${range}${js}`;
+}
+
+/**
+ * Renvoie pour un set d'agentIds une Map agentId → texte hint planning du
+ * jour, prêt à afficher dans l'autocomplete agent.
+ *
+ * Stratégie performance :
+ *  - 1 requête `planningShift.findMany` couvrant TOUS les agents demandés en
+ *    une seule passe (pas de N+1 par agent côté client/serveur)
+ *  - 1 `planningImport.count()` pour distinguer "aucun import en base"
+ *    (→ on renvoie Map vide, l'UI n'affiche rien) de "import présent mais
+ *    pas de shift pour l'agent" (→ "Non prévu en service aujourd'hui")
+ *  - select minimal : startsAt, endsAt, jsNumber, agentId (pas de jsCode
+ *    nécessaire, le hint ne l'utilise pas pour rester compact)
+ *
+ * **Pas de scope appliqué ici** : la fonction reçoit déjà des agentIds qui
+ * proviennent du moteur de scope existant (caller doit fournir des agents
+ * du scope user — appel typique : `findMany({where: agentScope(user)})` puis
+ * `getAgentsPlanningHints(ids, now)`). Le planning n'élargit jamais le scope.
+ */
+export async function getAgentsPlanningHints(
+  agentIds: string[],
+  now: Date,
+): Promise<Map<string, string>> {
+  if (agentIds.length === 0) return new Map();
+  const dayStart = startOfDay(now);
+  const dayEnd = startOfNextDay(now);
+  const [shifts, importCount] = await Promise.all([
+    prisma.planningShift.findMany({
+      where: {
+        agentId: { in: agentIds },
+        startsAt: { lt: dayEnd },
+        endsAt: { gt: dayStart },
+      },
+      select: {
+        agentId: true,
+        startsAt: true,
+        endsAt: true,
+        jsNumber: true,
+      },
+    }),
+    prisma.planningImport.count(),
+  ]);
+
+  // Aucun planning en base : on renvoie rien pour ne pas polluer l'UI.
+  if (importCount === 0) return new Map();
+
+  // Dédup par agent : même règle que getAgentsOnDutyToday — statut
+  // prioritaire (IN_SERVICE > LATER > FINISHED) puis startsAt asc.
+  const bestByAgent = new Map<
+    string,
+    { startsAt: Date; endsAt: Date; jsNumber: string | null; status: DutyStatus }
+  >();
+  for (const s of shifts) {
+    const status = getDutyStatus(s.startsAt, s.endsAt, now);
+    const prev = bestByAgent.get(s.agentId);
+    if (
+      !prev ||
+      STATUS_ORDER[status] < STATUS_ORDER[prev.status] ||
+      (STATUS_ORDER[status] === STATUS_ORDER[prev.status] &&
+        s.startsAt < prev.startsAt)
+    ) {
+      bestByAgent.set(s.agentId, {
+        startsAt: s.startsAt,
+        endsAt: s.endsAt,
+        jsNumber: s.jsNumber,
+        status,
+      });
+    }
+  }
+
+  const hints = new Map<string, string>();
+  for (const agentId of agentIds) {
+    const best = bestByAgent.get(agentId) ?? null;
+    hints.set(agentId, formatPlanningHint(best, now));
+  }
+  return hints;
+}

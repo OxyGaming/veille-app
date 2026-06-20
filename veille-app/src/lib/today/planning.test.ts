@@ -14,7 +14,9 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import {
+  formatPlanningHint,
   getAgentsOnDutyToday,
+  getAgentsPlanningHints,
   getDutyStatus,
   isOvernightShift,
 } from "./planning";
@@ -336,5 +338,160 @@ describe("getAgentsOnDutyToday — items renvoyés", () => {
     const { items } = await getAgentsOnDutyToday(EDITOR, NOW);
     expect(items).toHaveLength(1);
     expect(items[0].shiftId).toBe("s-earlier");
+  });
+});
+
+// ─── formatPlanningHint (helper pur) ─────────────────────────────────────────
+
+describe("formatPlanningHint", () => {
+  it("retourne le label IN_SERVICE avec horaire + JS", () => {
+    expect(
+      formatPlanningHint(
+        {
+          startsAt: new Date("2026-06-09T06:00:00"),
+          endsAt: new Date("2026-06-09T14:00:00"),
+          jsNumber: "20412",
+        },
+        NOW,
+      ),
+    ).toBe("En service aujourd'hui · 06:00 → 14:00 · JS 20412");
+  });
+
+  it("retourne le label LATER", () => {
+    expect(
+      formatPlanningHint(
+        {
+          startsAt: new Date("2026-06-09T20:00:00"),
+          endsAt: new Date("2026-06-09T23:00:00"),
+          jsNumber: "18754",
+        },
+        NOW,
+      ),
+    ).toBe("Prévu plus tard · 20:00 → 23:00 · JS 18754");
+  });
+
+  it("retourne le label FINISHED", () => {
+    expect(
+      formatPlanningHint(
+        {
+          startsAt: new Date("2026-06-09T05:00:00"),
+          endsAt: new Date("2026-06-09T09:00:00"),
+          jsNumber: "16587",
+        },
+        NOW,
+      ),
+    ).toBe("Service terminé · 05:00 → 09:00 · JS 16587");
+  });
+
+  it("ajoute (+1) pour un service de nuit", () => {
+    expect(
+      formatPlanningHint(
+        {
+          startsAt: new Date("2026-06-09T20:40:00"),
+          endsAt: new Date("2026-06-10T05:00:00"),
+          jsNumber: "20412",
+        },
+        NOW,
+      ),
+    ).toBe("Prévu plus tard · 20:40 → 05:00 (+1) · JS 20412");
+  });
+
+  it("omet la mention JS si jsNumber est null", () => {
+    expect(
+      formatPlanningHint(
+        {
+          startsAt: new Date("2026-06-09T06:00:00"),
+          endsAt: new Date("2026-06-09T14:00:00"),
+          jsNumber: null,
+        },
+        NOW,
+      ),
+    ).toBe("En service aujourd'hui · 06:00 → 14:00");
+  });
+
+  it("retourne le label vide quand pas de shift", () => {
+    expect(formatPlanningHint(null, NOW)).toBe(
+      "Non prévu en service aujourd'hui",
+    );
+  });
+});
+
+// ─── getAgentsPlanningHints (orchestrateur) ──────────────────────────────────
+
+describe("getAgentsPlanningHints", () => {
+  it("ne lance aucune requête si agentIds est vide", async () => {
+    const map = await getAgentsPlanningHints([], NOW);
+    expect(map.size).toBe(0);
+    expect(findManyShift).not.toHaveBeenCalled();
+    expect(countImports).not.toHaveBeenCalled();
+  });
+
+  it("renvoie une Map vide si aucun PlanningImport en base", async () => {
+    findManyShift.mockResolvedValue([]);
+    countImports.mockResolvedValue(0);
+    const map = await getAgentsPlanningHints(["a1", "a2"], NOW);
+    expect(map.size).toBe(0);
+  });
+
+  it("filtre SQL sur la fenêtre journée + agentIds", async () => {
+    findManyShift.mockResolvedValue([]);
+    countImports.mockResolvedValue(1);
+    await getAgentsPlanningHints(["a1", "a2"], NOW);
+    const args = findManyShift.mock.calls[0][0];
+    expect(args.where.agentId.in).toEqual(["a1", "a2"]);
+    expect(args.where.startsAt.lt).toEqual(new Date("2026-06-10T00:00:00"));
+    expect(args.where.endsAt.gt).toEqual(new Date("2026-06-09T00:00:00"));
+    // Select minimal — agentScope NON appliqué (déjà fait par le caller).
+    expect(args.where).not.toHaveProperty("agent");
+    expect(args.select).toEqual({
+      agentId: true,
+      startsAt: true,
+      endsAt: true,
+      jsNumber: true,
+    });
+  });
+
+  it("renvoie 'Non prévu...' pour les agents sans shift mais planning importé", async () => {
+    findManyShift.mockResolvedValue([
+      {
+        agentId: "a-service",
+        startsAt: new Date("2026-06-09T10:00:00"),
+        endsAt: new Date("2026-06-09T18:00:00"),
+        jsNumber: "20412",
+      },
+    ]);
+    countImports.mockResolvedValue(1);
+
+    const map = await getAgentsPlanningHints(
+      ["a-service", "a-rien", "a-zero"],
+      NOW,
+    );
+    expect(map.get("a-service")).toBe(
+      "En service aujourd'hui · 10:00 → 18:00 · JS 20412",
+    );
+    expect(map.get("a-rien")).toBe("Non prévu en service aujourd'hui");
+    expect(map.get("a-zero")).toBe("Non prévu en service aujourd'hui");
+  });
+
+  it("dédup : un agent avec 2 shifts du jour garde le statut prioritaire", async () => {
+    findManyShift.mockResolvedValue([
+      {
+        agentId: "a-twice",
+        startsAt: new Date("2026-06-09T05:00:00"),
+        endsAt: new Date("2026-06-09T09:00:00"),
+        jsNumber: "old",
+      },
+      {
+        agentId: "a-twice",
+        startsAt: new Date("2026-06-09T12:00:00"),
+        endsAt: new Date("2026-06-09T20:00:00"),
+        jsNumber: "now",
+      },
+    ]);
+    countImports.mockResolvedValue(1);
+    const map = await getAgentsPlanningHints(["a-twice"], NOW);
+    expect(map.get("a-twice")).toBe(
+      "En service aujourd'hui · 12:00 → 20:00 · JS now",
+    );
   });
 });

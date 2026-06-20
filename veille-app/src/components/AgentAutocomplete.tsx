@@ -3,7 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 
-type Agent = { id: string; label: string };
+type Agent = {
+  id: string;
+  label: string;
+  /**
+   * Sous-titre discret affiché sous le label dans la liste et l'encart
+   * sélectionné. C4 : utilisé pour le statut planning du jour
+   * (ex. "En service aujourd'hui · 06:00 → 14:00 · JS 20412"). Information
+   * uniquement — n'influence ni le filtrage, ni la sélection.
+   */
+  hint?: string;
+};
 
 type Props = {
   agents: Agent[];
@@ -101,6 +111,11 @@ export default function AgentAutocomplete({
               Agent veillé
             </div>
             <div className="text-sm font-bold truncate">{selected.label}</div>
+            {selected.hint && (
+              <div className="text-[11px] text-emerald-800/80 truncate mt-0.5">
+                {selected.hint}
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -173,7 +188,20 @@ export default function AgentAutocomplete({
                     >
                       {initialsFromLabel(a.label)}
                     </span>
-                    <span className="truncate">{a.label}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate">{a.label}</span>
+                      {a.hint && (
+                        <span
+                          className={`block truncate text-[11px] mt-0.5 ${
+                            i === highlight
+                              ? "text-indigo-700"
+                              : "text-slate-500"
+                          }`}
+                        >
+                          {a.hint}
+                        </span>
+                      )}
+                    </span>
                   </li>
                 ))
               )}

@@ -15,6 +15,7 @@ const SECTIONS: Section[] = [
   { href: "/admin", label: "Tableau de bord", icon: Icon.Home },
   { href: "/admin/procedures", label: "Procédures", icon: Icon.ClipboardCheck },
   { href: "/admin/imports", label: "Imports actions", icon: Icon.Upload },
+  { href: "/admin/planning", label: "Planning agents", icon: Icon.Calendar, roles: ["ADMIN"] },
   { href: "/admin/actions", label: "Actions (obsolescence)", icon: Icon.Trash, roles: ["ADMIN"] },
   { href: "/admin/teams", label: "Équipes", icon: Icon.Building },
   { href: "/admin/users", label: "Utilisateurs", icon: Icon.Users },

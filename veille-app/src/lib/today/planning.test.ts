@@ -61,6 +61,10 @@ function shift(
     jsCode: string | null;
     firstName: string;
     lastName: string;
+    matricule: string;
+    lastSessionStartedAt: Date | null;
+    sessionCount: number;
+    openActions: number;
   }> = {},
 ) {
   return {
@@ -73,6 +77,14 @@ function shift(
     agent: {
       firstName: overrides.firstName ?? "Romain",
       lastName: overrides.lastName ?? "Di Michele",
+      matricule: overrides.matricule ?? "9504912B",
+      sessions: overrides.lastSessionStartedAt
+        ? [{ startedAt: overrides.lastSessionStartedAt }]
+        : [],
+      _count: {
+        sessions: overrides.sessionCount ?? 0,
+        importedActions: overrides.openActions ?? 0,
+      },
     },
   };
 }
@@ -173,10 +185,20 @@ describe("getAgentsOnDutyToday — construction de la requête", () => {
       isVisible: true,
       memberships: { some: { teamId: { in: ["tA", "tB"] } } },
     });
-    // select minimal : pas d'include large.
-    expect(args.select.agent.select).toEqual({
+    // select minimal : pas d'include large, juste les champs nécessaires
+    // à l'affichage Today (matricule, fraîcheur dernière session, compteurs).
+    expect(args.select.agent.select).toMatchObject({
       firstName: true,
       lastName: true,
+      matricule: true,
+    });
+    expect(args.select.agent.select.sessions).toMatchObject({
+      orderBy: { startedAt: "desc" },
+      take: 1,
+    });
+    expect(args.select.agent.select._count.select).toMatchObject({
+      sessions: true,
+      importedActions: { where: { localStatus: "ACTIVE" } },
     });
   });
 
@@ -225,6 +247,7 @@ describe("getAgentsOnDutyToday — items renvoyés", () => {
         jsCode: "LGV/",
         firstName: "Anna",
         lastName: "Nuit",
+        matricule: "9504912B",
       }),
     ]);
     countImports.mockResolvedValue(1);
@@ -235,11 +258,52 @@ describe("getAgentsOnDutyToday — items renvoyés", () => {
       shiftId: "s-overnight",
       agentId: "a-nuit",
       agentName: "Anna Nuit",
+      agentMatricule: "9504912B",
       jsNumber: "20398",
       jsCode: "LGV/",
       isOvernight: true,
       // 05:00 < 14:00 NOW → FINISHED
       status: "FINISHED",
+    });
+  });
+
+  it("expose matricule, sessionCount, openActionsCount, daysSinceLastSession", async () => {
+    findManyShift.mockResolvedValue([
+      shift({
+        agentId: "a-rich",
+        matricule: "8006107R",
+        lastSessionStartedAt: new Date("2026-06-01T10:00:00"), // 8 jours avant NOW
+        sessionCount: 2,
+        openActions: 14,
+      }),
+    ]);
+    countImports.mockResolvedValue(1);
+
+    const { items } = await getAgentsOnDutyToday(EDITOR, NOW);
+    expect(items[0]).toMatchObject({
+      agentMatricule: "8006107R",
+      sessionCount: 2,
+      openActionsCount: 14,
+      daysSinceLastSession: 8,
+    });
+  });
+
+  it("expose daysSinceLastSession=null si jamais veillé", async () => {
+    findManyShift.mockResolvedValue([
+      shift({
+        agentId: "a-fresh",
+        lastSessionStartedAt: null,
+        sessionCount: 0,
+        openActions: 0,
+      }),
+    ]);
+    countImports.mockResolvedValue(1);
+
+    const { items } = await getAgentsOnDutyToday(EDITOR, NOW);
+    expect(items[0]).toMatchObject({
+      daysSinceLastSession: null,
+      sessionCount: 0,
+      openActionsCount: 0,
     });
   });
 

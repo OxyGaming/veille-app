@@ -84,6 +84,9 @@ function AgentOnDutyCard({ item }: { item: AgentOnDutyItem }) {
           </span>
           <StatusBadge status={item.status} />
         </div>
+        <div className="mt-0.5 text-[11px] font-mono text-slate-500">
+          {item.agentMatricule}
+        </div>
         <div className="mt-1 flex items-center gap-3 text-xs text-slate-600 flex-wrap">
           <span className="font-mono">
             {formatTime(item.startsAt)} → {formatTime(item.endsAt)}
@@ -96,17 +99,20 @@ function AgentOnDutyCard({ item }: { item: AgentOnDutyItem }) {
               </span>
             ) : null}
           </span>
-          {item.jsNumber ? (
-            <span>
-              JS{" "}
-              <span className="font-mono font-medium text-slate-800">
-                {item.jsNumber}
-              </span>
-            </span>
-          ) : null}
           {item.jsCode ? (
             <span className="font-mono text-slate-500">{item.jsCode}</span>
           ) : null}
+        </div>
+        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+          <FreshnessChip days={item.daysSinceLastSession} />
+          <InfoChip>
+            {item.sessionCount} session{item.sessionCount > 1 ? "s" : ""}
+          </InfoChip>
+          {item.openActionsCount > 0 && (
+            <InfoChip tone={item.openActionsCount >= 10 ? "warn" : "neutral"}>
+              {item.openActionsCount} act.
+            </InfoChip>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
@@ -117,7 +123,7 @@ function AgentOnDutyCard({ item }: { item: AgentOnDutyItem }) {
           Fiche agent
         </Link>
         <Link
-          href="/procedures"
+          href={`/sessions/new?agentId=${item.agentId}`}
           className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 min-h-[36px]"
         >
           Démarrer une veille
@@ -125,6 +131,56 @@ function AgentOnDutyCard({ item }: { item: AgentOnDutyItem }) {
         </Link>
       </div>
     </li>
+  );
+}
+
+/** Chip "il y a X jours" — orange si > 30 j, gris sinon ; rouge si jamais. */
+function FreshnessChip({ days }: { days: number | null }) {
+  if (days === null) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-medium text-rose-800">
+        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" aria-hidden />
+        Jamais veillé
+      </span>
+    );
+  }
+  const tone = days > 30 ? "warn" : "info";
+  const cls =
+    tone === "warn"
+      ? "bg-amber-100 text-amber-800"
+      : "bg-slate-100 text-slate-700";
+  const dot =
+    tone === "warn" ? "bg-amber-500" : "bg-emerald-500";
+  const label =
+    days === 0 ? "aujourd'hui" : days === 1 ? "hier" : `il y a ${days} jours`;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} aria-hidden />
+      {label}
+    </span>
+  );
+}
+
+/** Chip neutre pour les compteurs (sessions / actions). */
+function InfoChip({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "warn";
+}) {
+  const cls =
+    tone === "warn"
+      ? "bg-amber-100 text-amber-800"
+      : "bg-slate-100 text-slate-700";
+  return (
+    <span
+      className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
+    >
+      {children}
+    </span>
   );
 }
 

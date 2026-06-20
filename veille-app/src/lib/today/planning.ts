@@ -21,6 +21,8 @@ export type AgentOnDutyItem = {
   shiftId: string;
   agentId: string;
   agentName: string;
+  /** Matricule (clé métier, affiché sous le nom). */
+  agentMatricule: string;
   /** ISO 8601 — l'UI parse pour afficher l'horaire. */
   startsAt: string;
   endsAt: string;
@@ -31,6 +33,12 @@ export type AgentOnDutyItem = {
   /** Vrai si endsAt tombe le jour suivant `startsAt` (service de nuit). */
   isOvernight: boolean;
   status: DutyStatus;
+  /** Jours depuis la dernière session de veille (null si jamais veillé). */
+  daysSinceLastSession: number | null;
+  /** Nombre total de sessions VeilleSession (tous statuts confondus). */
+  sessionCount: number;
+  /** Nombre d'actions ImportedAction en `localStatus = ACTIVE` pour l'agent. */
+  openActionsCount: number;
 };
 
 /** Sortie complète consommée par EditorPayload / AdminPayload. */
@@ -125,7 +133,24 @@ export async function getAgentsOnDutyToday(
         jsNumber: true,
         jsCode: true,
         agent: {
-          select: { firstName: true, lastName: true },
+          select: {
+            firstName: true,
+            lastName: true,
+            matricule: true,
+            // Dernière session pour calculer la fraîcheur ("il y a X jours").
+            sessions: {
+              orderBy: { startedAt: "desc" },
+              take: 1,
+              select: { startedAt: true },
+            },
+            // Compteur sessions total (tous statuts) + actions ouvertes ACTIVE.
+            _count: {
+              select: {
+                sessions: true,
+                importedActions: { where: { localStatus: "ACTIVE" } },
+              },
+            },
+          },
         },
       },
     }),
@@ -135,21 +160,30 @@ export async function getAgentsOnDutyToday(
   // Dédup par agent : on garde le shift "le plus pertinent" (statut prioritaire).
   // Si plusieurs candidats à statut égal, le startsAt le plus tôt gagne — cohérent
   // avec l'ordre d'affichage final.
+  const DAY_MS = 86_400_000;
   const bestByAgent = new Map<string, AgentOnDutyItem>();
   for (const s of shifts) {
     const startsAt = s.startsAt;
     const endsAt = s.endsAt;
     const status = getDutyStatus(startsAt, endsAt, now);
+    const lastSessionAt = s.agent.sessions[0]?.startedAt ?? null;
+    const daysSinceLastSession = lastSessionAt
+      ? Math.floor((now.getTime() - lastSessionAt.getTime()) / DAY_MS)
+      : null;
     const candidate: AgentOnDutyItem = {
       shiftId: s.id,
       agentId: s.agentId,
       agentName: `${s.agent.firstName} ${s.agent.lastName}`.trim(),
+      agentMatricule: s.agent.matricule,
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       jsNumber: s.jsNumber,
       jsCode: s.jsCode,
       isOvernight: isOvernightShift(startsAt, endsAt),
       status,
+      daysSinceLastSession,
+      sessionCount: s.agent._count.sessions,
+      openActionsCount: s.agent._count.importedActions,
     };
     const prev = bestByAgent.get(s.agentId);
     if (!prev) {

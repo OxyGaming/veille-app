@@ -96,12 +96,17 @@ export async function recordActivity(
   // actifs des équipes concernées (acteur exclu). Fire-and-forget : la
   // notif ne doit jamais retarder ou casser l'écriture activité.
   // notifyTeamHistoryAdded catch en interne et renvoie 0 sur erreur.
+  //
+  // C9.1 — on transmet `input.message` (déjà composé via defaultMessageFor)
+  // comme `detailMessage` pour que le destinataire voie le contexte
+  // métier dans sa notif (ex. « Marie a terminé une visite — POS-LYON. »).
   notifyTeamHistoryAdded({
     teamIds,
     entityType: input.entityType,
     entityId: input.entityId,
     actorId: input.actorId ?? null,
     targetUrl: input.targetUrl ?? null,
+    detailMessage: input.message,
   }).catch((e) => {
     log.error("activityFeed.notify.team-history.failed", {
       type: input.type,

@@ -352,6 +352,20 @@ export type NotifyTeamHistoryAddedInput = {
   actorId?: string | null;
   /** URL cible déjà calculée par `recordActivity`. Fallback `/history`. */
   targetUrl?: string | null;
+  /**
+   * Sprint Push V1 C9.1 — message métier déjà formaté (acteur + action +
+   * entité), tel que stocké dans `TeamActivity.message`. Si fourni,
+   * remplace le message générique « Un nouvel élément a été ajouté… »
+   * pour donner immédiatement le contexte au destinataire.
+   *
+   * Exemples :
+   *  - « Marie a terminé une visite — POS-LYON. »
+   *  - « Jessy a validé une action — Affichage poste 7. »
+   *
+   * Le `title` reste « Équipe {teamName} » quand un detailMessage est
+   * fourni, sinon « Nouvel élément d'historique ».
+   */
+  detailMessage?: string | null;
 };
 
 /**
@@ -409,19 +423,30 @@ export async function notifyTeamHistoryAdded(
 
     let created = 0;
     const targetUrl = input.targetUrl ?? "/history";
+    const detail = input.detailMessage?.trim() || null;
     for (const [userId, teamName] of userToTeamName) {
       const dedupKey = `TEAM_HISTORY_ADDED:${input.entityType}:${input.entityId}:${userId}`;
+      // Avec detailMessage : title = équipe (cloisonnement visible),
+      // message = détail métier (acteur + action + entité).
+      // Sans : on garde le couple générique (compat C9 initial).
+      const title = detail
+        ? `Équipe ${teamName}`
+        : "Nouvel élément d'historique";
+      const message = detail
+        ? detail
+        : `Un nouvel élément a été ajouté dans l'historique de l'équipe ${teamName}.`;
       const row = await createNotification({
         userId,
         type: "TEAM_HISTORY_ADDED",
-        title: "Nouvel élément d'historique",
-        message: `Un nouvel élément a été ajouté dans l'historique de l'équipe ${teamName}.`,
+        title,
+        message,
         targetUrl,
         dedupKey,
         metadata: {
           entityType: input.entityType,
           entityId: input.entityId,
           actorId: input.actorId ?? null,
+          teamName,
         },
       });
       if (row) created++;

@@ -451,7 +451,7 @@ describe("notifyTeamHistoryAdded", () => {
     expect(where.userId).toBeUndefined();
   });
 
-  it("happy path — 1 user, 1 équipe → notif créée", async () => {
+  it("happy path SANS detailMessage — title/message génériques (compat C9 initial)", async () => {
     setupTeams([{ id: "tA", name: "Rive Droite Nord" }]);
     setupMemberships([{ userId: "u1", teamId: "tA" }]);
     createNotification.mockResolvedValue({ id: "n1" });
@@ -466,6 +466,32 @@ describe("notifyTeamHistoryAdded", () => {
     );
     expect(arg.targetUrl).toBe("/sessions/s1");
     expect(arg.dedupKey).toBe("TEAM_HISTORY_ADDED:session:s1:u1");
+    expect(arg.metadata.teamName).toBe("Rive Droite Nord");
+  });
+
+  it("AVEC detailMessage — title = Équipe X, message = détail métier (C9.1)", async () => {
+    setupTeams([{ id: "tA", name: "Rive Droite Nord" }]);
+    setupMemberships([{ userId: "u1", teamId: "tA" }]);
+    createNotification.mockResolvedValue({ id: "n1" });
+    const n = await notifyTeamHistoryAdded({
+      ...baseInput,
+      detailMessage: "Marie a terminé une visite — POS-LYON.",
+    });
+    expect(n).toBe(1);
+    const arg = createNotification.mock.calls[0][0];
+    expect(arg.title).toBe("Équipe Rive Droite Nord");
+    expect(arg.message).toBe("Marie a terminé une visite — POS-LYON.");
+    expect(arg.metadata.teamName).toBe("Rive Droite Nord");
+  });
+
+  it("detailMessage trim — string vide ou whitespace → fallback générique", async () => {
+    setupTeams([{ id: "tA", name: "RDN" }]);
+    setupMemberships([{ userId: "u1", teamId: "tA" }]);
+    createNotification.mockResolvedValue({ id: "n1" });
+    await notifyTeamHistoryAdded({ ...baseInput, detailMessage: "   " });
+    expect(createNotification.mock.calls[0][0].title).toBe(
+      "Nouvel élément d'historique",
+    );
   });
 
   it("targetUrl fallback /history si non fourni", async () => {

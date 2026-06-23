@@ -54,8 +54,12 @@ export async function getNotificationRecipients(
 
 export type NotifyActionAssignedInput = {
   actionId: string;
-  agentId: string;
-  agentName: string;
+  /** Cible agent : requise si l'action est rattachée à un agent. */
+  agentId?: string;
+  agentName?: string;
+  /** Cible site : requise si l'action est rattachée à un site. */
+  siteId?: string;
+  siteName?: string;
   teamIds: string[];
   authorId: string;
   actionLabel: string;
@@ -63,12 +67,12 @@ export type NotifyActionAssignedInput = {
 
 /**
  * Notifie les EDITOR + ADMIN des équipes liées à l'action (équipe
- * principale + memberships agent), sauf l'auteur.
+ * principale + memberships agent/site), sauf l'auteur.
  *
  * Dédup : `ACTION_ASSIGNED_TO_ME:{actionId}` — 1 notif par destinataire
  * à vie de l'action.
  *
- * `targetUrl` = fiche agent avec ancre actionId.
+ * `targetUrl` = fiche agent si agentId présent, sinon fiche site.
  */
 export async function notifyActionAssigned(
   input: NotifyActionAssignedInput,
@@ -78,19 +82,25 @@ export async function notifyActionAssigned(
     input.authorId,
   );
   const dedupKey = `ACTION_ASSIGNED_TO_ME:${input.actionId}`;
-  const targetUrl = `/agents/${input.agentId}?actionId=${input.actionId}`;
+  const targetUrl = input.agentId
+    ? `/agents/${input.agentId}?actionId=${input.actionId}`
+    : input.siteId
+      ? `/sites/${input.siteId}`
+      : "/today";
+  const targetName = input.agentName ?? input.siteName ?? "?";
   let created = 0;
   for (const userId of recipients) {
     const row = await createNotification({
       userId,
       type: "ACTION_ASSIGNED_TO_ME",
       title: "Nouvelle action",
-      message: `Une action a été ajoutée sur ${input.agentName} : ${input.actionLabel}`,
+      message: `Une action a été ajoutée sur ${targetName} : ${input.actionLabel}`,
       targetUrl,
       dedupKey,
       metadata: {
         actionId: input.actionId,
-        agentId: input.agentId,
+        ...(input.agentId ? { agentId: input.agentId } : {}),
+        ...(input.siteId ? { siteId: input.siteId } : {}),
       },
     });
     if (row) created++;

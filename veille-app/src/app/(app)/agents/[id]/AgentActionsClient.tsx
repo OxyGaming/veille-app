@@ -245,21 +245,22 @@ export default function AgentActionsClient({
               >
                 <Icon.ClipboardCheck className="w-4 h-4" /> Veiller
               </Link>
-              <button
-                type="button"
-                onClick={() => setAdding(true)}
-                className="btn btn-primary"
-              >
-                <Icon.Plus className="w-4 h-4" /> Ajouter une action
-              </button>
             </>
           )}
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="btn btn-primary"
+          >
+            <Icon.Plus className="w-4 h-4" /> Ajouter une action
+          </button>
         </div>
       </div>
       {adding && (
         <ManualActionModal
-          agentId={agentId}
-          agentName={agentName}
+          targetId={agentId}
+          targetName={agentName}
+          targetKind={targetKind}
           onClose={() => setAdding(false)}
           onCreated={() => {
             setAdding(false);
@@ -717,19 +718,21 @@ function ValidateModal({
 }
 
 /**
- * Modal de création manuelle d'une action sur la fiche d'un agent.
+ * Modal de création manuelle d'une action sur la fiche d'un agent ou d'un site.
  * Tags par défaut : "veille légale" + "obligatoire" — pré-remplis mais
  * supprimables par l'utilisateur s'ils ne s'appliquent pas.
  * Titre obligatoire, échéance par défaut +7 mois (éditable).
  */
 function ManualActionModal({
-  agentId,
-  agentName,
+  targetId,
+  targetName,
+  targetKind,
   onClose,
   onCreated,
 }: {
-  agentId: string;
-  agentName: string;
+  targetId: string;
+  targetName: string;
+  targetKind: "agent" | "site";
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -749,7 +752,11 @@ function ManualActionModal({
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}/actions`, {
+      const url =
+        targetKind === "site"
+          ? `/api/sites/${targetId}/actions`
+          : `/api/agents/${targetId}/actions`;
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -787,7 +794,7 @@ function ManualActionModal({
               Ajouter une action
             </div>
             <div className="text-sm font-semibold truncate">
-              {agentName}
+              {targetName}
             </div>
           </div>
           <button

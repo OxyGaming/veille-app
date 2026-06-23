@@ -14,6 +14,7 @@ import type { Notification } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/logger";
+import { sendPushNotification } from "@/lib/push/sender";
 
 /** Types de notification V1 (cf. D3 Sprint 5). */
 export const NOTIFICATION_TYPES = [
@@ -57,12 +58,20 @@ export type CreateNotificationInput = {
  *
  * Aucun throw n'est jamais propagé : les routes métier peuvent
  * l'appeler en `await` sans `try` supplémentaire.
+ *
+ * **Side-effect push (Sprint Push V1 — C6).** En cas de succès, déclenche
+ * `sendPushNotification` en fire-and-forget. La fonction sender est
+ * garantie « never throws » (catch interne + retour discriminant), et
+ * l'appel est non-await pour ne JAMAIS retarder la création de la
+ * Notification in-app. Une protection `.catch()` finale absorbe tout
+ * unhandledRejection en environnement Node strict.
  */
 export async function createNotification(
   input: CreateNotificationInput,
 ): Promise<Notification | null> {
+  let row: Notification;
   try {
-    return await prisma.notification.create({
+    row = await prisma.notification.create({
       data: {
         userId: input.userId,
         type: input.type,
@@ -93,6 +102,27 @@ export async function createNotification(
     });
     return null;
   }
+
+  // Fire-and-forget — n'affecte jamais le caller métier.
+  sendPushNotification({
+    userId: row.userId,
+    notification: {
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      message: row.message,
+      targetUrl: row.targetUrl,
+      dedupKey: row.dedupKey,
+    },
+  }).catch((e) => {
+    log.error("notification.push.fire-and-forget.failed", {
+      userId: row.userId,
+      type: row.type,
+      err: e instanceof Error ? e.message : String(e),
+    });
+  });
+
+  return row;
 }
 
 /**

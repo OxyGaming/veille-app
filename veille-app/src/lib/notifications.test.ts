@@ -16,6 +16,17 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+// Sprint Push V1 (C6) — createNotification déclenche sendPushNotification
+// en fire-and-forget. On le mock pour ne pas embarquer la chaîne
+// web-push + prisma.pushSubscription + featureFlags dans ces tests-ci.
+const sendPushNotification = vi.fn().mockResolvedValue({
+  status: "skipped",
+  reason: "no-subscription",
+});
+vi.mock("@/lib/push/sender", () => ({
+  sendPushNotification: (...a: unknown[]) => sendPushNotification(...a),
+}));
+
 vi.mock("@prisma/client", async () => {
   // On simule juste la classe d'erreur dont on a besoin
   class PrismaClientKnownRequestError extends Error {
@@ -42,6 +53,11 @@ beforeEach(() => {
   create.mockReset();
   updateMany.mockReset();
   count.mockReset();
+  sendPushNotification.mockReset();
+  sendPushNotification.mockResolvedValue({
+    status: "skipped",
+    reason: "no-subscription",
+  });
 });
 
 // ─── Types constants ────────────────────────────────────────────────────────
@@ -151,6 +167,76 @@ describe("createNotification", () => {
     expect(arg.data.metadata).toBe(
       JSON.stringify({ foo: "bar", nested: { x: 1 } }),
     );
+  });
+
+  // ─── Branchement push (Sprint Push V1 — C6) ─────────────────────────────
+
+  it("succès → déclenche sendPushNotification avec les bons champs", async () => {
+    const fakeRow = {
+      id: "n42",
+      userId: "u1",
+      type: "ECHEANCE_CRITICAL_ON_MY_PERIMETER",
+      title: "T",
+      message: "M",
+      targetUrl: "/sites/s1",
+      dedupKey: "ECHEANCE_CRITICAL_ON_MY_PERIMETER:VISIT_QUARTERLY:s1",
+      readAt: null,
+      createdAt: new Date(),
+      metadata: null,
+    };
+    create.mockResolvedValue(fakeRow);
+    await createNotification({
+      userId: "u1",
+      type: "ECHEANCE_CRITICAL_ON_MY_PERIMETER",
+      title: "T",
+      message: "M",
+      targetUrl: "/sites/s1",
+      dedupKey: fakeRow.dedupKey,
+    });
+    // Permettre au fire-and-forget de tourner
+    await new Promise((r) => setImmediate(r));
+    expect(sendPushNotification).toHaveBeenCalledTimes(1);
+    expect(sendPushNotification.mock.calls[0][0]).toEqual({
+      userId: "u1",
+      notification: {
+        id: "n42",
+        type: "ECHEANCE_CRITICAL_ON_MY_PERIMETER",
+        title: "T",
+        message: "M",
+        targetUrl: "/sites/s1",
+        dedupKey: fakeRow.dedupKey,
+      },
+    });
+  });
+
+  it("échec dédup P2002 → ne déclenche PAS sendPushNotification", async () => {
+    create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("dup", {
+        code: "P2002",
+        clientVersion: "test",
+      }),
+    );
+    await createNotification(baseInput);
+    await new Promise((r) => setImmediate(r));
+    expect(sendPushNotification).not.toHaveBeenCalled();
+  });
+
+  it("erreur Prisma autre → ne déclenche PAS sendPushNotification", async () => {
+    create.mockRejectedValue(new Error("DB down"));
+    await createNotification(baseInput);
+    await new Promise((r) => setImmediate(r));
+    expect(sendPushNotification).not.toHaveBeenCalled();
+  });
+
+  it("createNotification ne throw PAS si sendPushNotification rejette", async () => {
+    const fakeRow = { id: "n1", userId: "u1", type: "X", title: "T", message: "M", targetUrl: null, dedupKey: null, readAt: null, createdAt: new Date(), metadata: null };
+    create.mockResolvedValue(fakeRow);
+    sendPushNotification.mockRejectedValue(new Error("push crashed"));
+    const res = await createNotification(baseInput);
+    expect(res).toBe(fakeRow);
+    // Laisse le fire-and-forget se résoudre (le .catch absorbe l'erreur)
+    await new Promise((r) => setImmediate(r));
+    // Pas d'erreur remontée — le test ne plante pas.
   });
 });
 

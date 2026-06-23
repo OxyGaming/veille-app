@@ -10,6 +10,7 @@
  */
 
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getSessionUser } from "@/lib/auth";
 import { aggregateNotifications } from "@/lib/notifications-aggregator";
 import { EnablePushBanner } from "@/components/push/EnablePushBanner";
@@ -23,13 +24,21 @@ export default async function NotificationsPage() {
   const initial = await aggregateNotifications(user.id, { filter: "all" });
   return (
     <div className="max-w-5xl mx-auto pb-10">
-      <header className="px-4 lg:px-8 pt-4">
-        <p className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
-          Personnel
-        </p>
-        <h1 className="text-2xl font-bold text-slate-900 mt-1">
-          Notifications
-        </h1>
+      <header className="px-4 lg:px-8 pt-4 flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
+            Personnel
+          </p>
+          <h1 className="text-2xl font-bold text-slate-900 mt-1">
+            Notifications
+          </h1>
+        </div>
+        <Link
+          href="/account/notifications"
+          className="self-end rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Préférences
+        </Link>
       </header>
       <div className="px-4 lg:px-8 pt-4">
         <EnablePushBanner />

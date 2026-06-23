@@ -13,50 +13,56 @@ datasource db {
 /// - EDITOR : peut éditer procédures et points clés
 /// - USER   : peut lancer des veilles et valider des actions sur son équipe
 model User {
-  id              String   @id @default(cuid())
-  email           String   @unique
-  name            String
-  password        String // bcrypt-like hash via scrypt côté Node (cf. lib/password.ts)
-  role            String   @default("USER") // ADMIN | EDITOR | USER
-  isActive        Boolean  @default(true)
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  name                String
+  password            String // bcrypt-like hash via scrypt côté Node (cf. lib/password.ts)
+  role                String    @default("USER") // ADMIN | EDITOR | USER
+  isActive            Boolean   @default(true)
   /// Équipe principale (par défaut au login, à des fins d'affichage).
   /// Le scope effectif passe par UserTeam (many-to-many).
-  teamId          String?
+  teamId              String?
   /// Permet à un USER d'utiliser temporairement la vue cross-équipe.
-  viewAllTeams    Boolean  @default(false)
+  viewAllTeams        Boolean   @default(false)
   /// Sprint 6 C2 — préférence ADMIN de périmètre de pilotage.
   /// Null = comportement par défaut (GLOBAL pour ADMIN, ignoré pour les
   /// autres rôles). Valeurs : "GLOBAL" | "MY_TEAMS" | "TEAM".
-  adminScopeMode       String?
+  adminScopeMode      String?
   /// Sprint 6 C2 — équipe sélectionnée quand `adminScopeMode = "TEAM"`.
   /// Forcé à null en mode GLOBAL et MY_TEAMS (cf. helpers lib/).
-  adminTeamId          String?
+  adminTeamId         String?
   /// Sprint 6 C2 — horodatage du dernier changement de préférence.
   /// Permet de tracer l'historique côté client sans AuditLog (D7).
-  adminScopeUpdatedAt  DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  adminScopeUpdatedAt DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  team             Team?              @relation("UserPrimaryTeam", fields: [teamId], references: [id], onDelete: SetNull)
+  team                   Team?                   @relation("UserPrimaryTeam", fields: [teamId], references: [id], onDelete: SetNull)
   /// Appartenances multi-équipes — c'est cette table qui détermine le scope.
-  memberships      UserTeam[]
-  sessions         VeilleSession[]
-  observations     ObservationItem[]
-  comments         Comment[]
-  validations      ActionValidation[]
-  uploadedPhotos   Photo[]
-  auditLogs        AuditLog[]
-  siteVisits       SiteVisit[]        @relation("SiteVisitObserver")
-  sightings        AgentSighting[]
-  siteSightings    SiteSighting[]
-  icareMarks       IcareEntry[]
-  hiddenAgents     UserAgentHidden[]
-  teamActivities   TeamActivity[]
-  notifications    Notification[]
+  memberships            UserTeam[]
+  sessions               VeilleSession[]
+  observations           ObservationItem[]
+  comments               Comment[]
+  validations            ActionValidation[]
+  uploadedPhotos         Photo[]
+  auditLogs              AuditLog[]
+  siteVisits             SiteVisit[]             @relation("SiteVisitObserver")
+  sightings              AgentSighting[]
+  siteSightings          SiteSighting[]
+  icareMarks             IcareEntry[]
+  hiddenAgents           UserAgentHidden[]
+  teamActivities         TeamActivity[]
+  notifications          Notification[]
   /// Imports de planning effectués par l'utilisateur.
-  planningImports  PlanningImport[]
+  planningImports        PlanningImport[]
   /// RCI rédigés par l'utilisateur.
-  rcis             Rci[]
+  rcis                   Rci[]
+  /// Abonnements push (1 par appareil / navigateur installé).
+  /// Sprint Push V1 — cf. PushSubscription.
+  pushSubscriptions      PushSubscription[]
+  /// Préférences de notification (push + futurs canaux). 0 ou 1 row par user.
+  /// Créée lazy à la 1ʳᵉ visite de "Mon compte → Notifications".
+  notificationPreference NotificationPreference?
 
   @@index([teamId])
   @@index([isActive])
@@ -71,8 +77,8 @@ model UserAgentHidden {
   agentId  String
   hiddenAt DateTime @default(now())
 
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  agent    Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   @@unique([userId, agentId])
   @@index([userId])
@@ -86,12 +92,12 @@ model UserAgentHidden {
 /// refType ∈ { "visit", "session", "validation", "sighting", "site-sighting",
 ///             "note", "site-note" }.
 model IcareEntry {
-  id        String   @id @default(cuid())
-  refType   String
-  refId     String
-  doneAt    DateTime @default(now())
-  doneById  String
-  doneBy    User     @relation(fields: [doneById], references: [id], onDelete: Cascade)
+  id       String   @id @default(cuid())
+  refType  String
+  refId    String
+  doneAt   DateTime @default(now())
+  doneById String
+  doneBy   User     @relation(fields: [doneById], references: [id], onDelete: Cascade)
 
   @@unique([refType, refId])
   @@index([refType, refId])
@@ -101,15 +107,15 @@ model IcareEntry {
 /// Le champ `role` permet de qualifier un user comme "manager" d'une équipe
 /// (cf. spec : "un utilisateur gère une ou plusieurs équipes").
 model UserTeam {
-  id        String   @id @default(cuid())
-  userId    String
-  teamId    String
+  id       String   @id @default(cuid())
+  userId   String
+  teamId   String
   /// MEMBER | MANAGER. MANAGER = peut gérer la composition de l'équipe.
-  role      String   @default("MEMBER")
-  joinedAt  DateTime @default(now())
+  role     String   @default("MEMBER")
+  joinedAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([userId, teamId])
   @@index([teamId])
@@ -127,24 +133,24 @@ model Team {
   updatedAt DateTime @updatedAt
 
   /// Users dont l'équipe est leur équipe "principale" (legacy).
-  users           User[]              @relation("UserPrimaryTeam")
+  users            User[]             @relation("UserPrimaryTeam")
   /// Liens explicites many-to-many.
-  userMemberships UserTeam[]
+  userMemberships  UserTeam[]
   /// Agents dont l'équipe est leur équipe "principale" (legacy).
-  agents          Agent[]             @relation("AgentPrimaryTeam")
+  agents           Agent[]            @relation("AgentPrimaryTeam")
   /// Liens explicites many-to-many.
   agentMemberships AgentTeam[]
-  sites           Site[]              @relation("SitePrimaryTeam")
-  siteMemberships SiteTeam[]
-  sessions        VeilleSession[]
-  importedActions ImportedAction[]
-  validations     ActionValidation[]
-  imports         ActionImport[]
-  visits          SiteVisit[]
-  sightings       AgentSighting[]
-  siteSightings   SiteSighting[]
-  activities      TeamActivity[]
-  rcis            Rci[]
+  sites            Site[]             @relation("SitePrimaryTeam")
+  siteMemberships  SiteTeam[]
+  sessions         VeilleSession[]
+  importedActions  ImportedAction[]
+  validations      ActionValidation[]
+  imports          ActionImport[]
+  visits           SiteVisit[]
+  sightings        AgentSighting[]
+  siteSightings    SiteSighting[]
+  activities       TeamActivity[]
+  rcis             Rci[]
 }
 
 // ─── Référentiel métier (commun à toutes les équipes) ─────────────────────────
@@ -152,36 +158,36 @@ model Team {
 /// Agent terrain — créé/maintenu lors des imports Excel.
 /// Le matricule (ex "9012096G") est la clé métier.
 model Agent {
-  id            String   @id @default(cuid())
-  matricule     String   @unique
-  lastName      String
-  firstName     String
+  id        String   @id @default(cuid())
+  matricule String   @unique
+  lastName  String
+  firstName String
   /// Libellé d'origine extrait du fichier Excel (utile pour le débogage des imports).
-  rawLabel      String?
+  rawLabel  String?
   /// Équipe principale (legacy). Le scope effectif passe par AgentTeam.
-  teamId        String?
-  posteId       String?
-  secteurId     String?
-  isActive      Boolean  @default(true)
+  teamId    String?
+  posteId   String?
+  secteurId String?
+  isActive  Boolean  @default(true)
   /// Visibilité dans les listes courantes. False = masqué partout sauf historique.
   /// Jamais supprimé (cf. spec).
-  isVisible     Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  isVisible Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  team             Team?            @relation("AgentPrimaryTeam", fields: [teamId], references: [id], onDelete: SetNull)
+  team                Team?                  @relation("AgentPrimaryTeam", fields: [teamId], references: [id], onDelete: SetNull)
   /// Appartenances multi-équipes — un agent peut figurer dans plusieurs équipes.
-  memberships      AgentTeam[]
-  poste            Poste?           @relation(fields: [posteId], references: [id], onDelete: SetNull)
-  secteur          Secteur?         @relation(fields: [secteurId], references: [id], onDelete: SetNull)
-  sessions         VeilleSession[]
-  importedActions  ImportedAction[]
-  validations      ActionValidation[]
+  memberships         AgentTeam[]
+  poste               Poste?                 @relation(fields: [posteId], references: [id], onDelete: SetNull)
+  secteur             Secteur?               @relation(fields: [secteurId], references: [id], onDelete: SetNull)
+  sessions            VeilleSession[]
+  importedActions     ImportedAction[]
+  validations         ActionValidation[]
   visitParticipations SiteVisitParticipant[]
-  sightings        AgentSighting[]
-  hiddenBy         UserAgentHidden[]
+  sightings           AgentSighting[]
+  hiddenBy            UserAgentHidden[]
   /// Créneaux de tour de service importés (cf. PlanningShift).
-  plannings        PlanningShift[]
+  plannings           PlanningShift[]
 
   @@index([teamId])
   @@index([matricule])
@@ -192,13 +198,13 @@ model Agent {
 /// Lien many-to-many agent ↔ équipe.
 /// Cf. spec : "un agent peut appartenir à plusieurs équipes".
 model AgentTeam {
-  id        String   @id @default(cuid())
-  agentId   String
-  teamId    String
-  joinedAt  DateTime @default(now())
+  id       String   @id @default(cuid())
+  agentId  String
+  teamId   String
+  joinedAt DateTime @default(now())
 
-  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  team  Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([agentId, teamId])
   @@index([teamId])
@@ -220,10 +226,10 @@ model AgentSighting {
   /// Référence externe pour l'idempotence des imports (ex. "pointage-718").
   externalRef String?  @unique
 
-  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  team        Team     @relation(fields: [teamId], references: [id])
-  observer    User     @relation(fields: [observerId], references: [id])
-  photos      Photo[]
+  agent    Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  team     Team    @relation(fields: [teamId], references: [id])
+  observer User    @relation(fields: [observerId], references: [id])
+  photos   Photo[]
 
   @@index([agentId])
   @@index([teamId])
@@ -245,10 +251,10 @@ model SiteSighting {
   /// Référence externe pour l'idempotence des imports.
   externalRef String?  @unique
 
-  site        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  team        Team     @relation(fields: [teamId], references: [id])
-  observer    User     @relation(fields: [observerId], references: [id])
-  photos      Photo[]
+  site     Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  team     Team    @relation(fields: [teamId], references: [id])
+  observer User    @relation(fields: [observerId], references: [id])
+  photos   Photo[]
 
   @@index([siteId])
   @@index([teamId])
@@ -262,38 +268,38 @@ model SiteSighting {
 /// gare, dépôt, local technique…).
 /// Identique en logique à Agent : multi-équipes, visibilité, soft-delete.
 model Site {
-  id          String   @id @default(cuid())
+  id              String   @id @default(cuid())
   /// Code court éventuel (ex. "POS-PEYRAUD").
-  code        String?  @unique
-  name        String
+  code            String?  @unique
+  name            String
   /// Type libre : "Poste d'aiguillage", "Gare", "Dépôt", "Local technique"…
-  type        String?
-  address     String?
-  description String?
+  type            String?
+  address         String?
+  description     String?
   /// Équipe principale (legacy ; le scope effectif passe par SiteTeam).
-  teamId      String?
-  isActive    Boolean  @default(true)
+  teamId          String?
+  isActive        Boolean  @default(true)
   /// Visibilité dans les listes courantes (cf. Agent.isVisible).
-  isVisible   Boolean  @default(true)
+  isVisible       Boolean  @default(true)
   /// Présence d'un local de graissage sur le site. Si false, la section
   /// « 3 - Locaux de graissage » est filtrée du PDF de visite planifiée.
-  hasGreasingArea Boolean @default(false)
+  hasGreasingArea Boolean  @default(false)
   /// Nature occupé/inoccupé du site. Détermine la cadence des visites
   /// PLANIFIÉES (180 j si occupé / 365 j si inoccupé). N'affecte PAS
   /// la cadence des visites trimestrielles (toujours 90 j).
   /// Cf. memory/business-rules.md §Visites.
-  isOccupied      Boolean @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isOccupied      Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  team             Team?              @relation("SitePrimaryTeam", fields: [teamId], references: [id], onDelete: SetNull)
-  memberships      SiteTeam[]
-  visits           SiteVisit[]
-  importedActions  ImportedAction[]
+  team              Team?              @relation("SitePrimaryTeam", fields: [teamId], references: [id], onDelete: SetNull)
+  memberships       SiteTeam[]
+  visits            SiteVisit[]
+  importedActions   ImportedAction[]
   actionValidations ActionValidation[]
-  sightings        SiteSighting[]
+  sightings         SiteSighting[]
   /// Catalogue d'équipements attendus pour les visites de type INVENTORY.
-  equipments       SiteEquipment[]
+  equipments        SiteEquipment[]
 
   @@index([teamId])
   @@index([isVisible])
@@ -310,7 +316,7 @@ model Site {
 /// réglementaires, registres, plans d'évacuation, équipements spécifiques,
 /// documents obligatoires, moyens de communication, etc.
 model SiteEquipment {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   siteId           String
   /// Libellé visible (ex. "Extincteur N°4 (CO2 2kg)", "Plan d'évacuation").
   label            String
@@ -320,19 +326,19 @@ model SiteEquipment {
   /// Quantité attendue (null si non quantifiable, ex. plan, registre).
   expectedQuantity Int?
   /// True si l'élément a une date de péremption à suivre.
-  isPerishable     Boolean  @default(false)
+  isPerishable     Boolean   @default(false)
   /// Date de péremption de l'exemplaire actuellement en place
   /// (réactualisée à chaque renouvellement).
   expirationDate   DateTime?
   /// Notes libres (ref produit, emplacement précis, fournisseur…).
   notes            String?
-  isActive         Boolean  @default(true)
-  sortOrder        Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  isActive         Boolean   @default(true)
+  sortOrder        Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  site             Site                   @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  observations     SiteVisitObservation[]
+  site         Site                   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  observations SiteVisitObservation[]
 
   @@index([siteId])
   @@index([category])
@@ -341,13 +347,13 @@ model SiteEquipment {
 
 /// Lien many-to-many site ↔ équipe.
 model SiteTeam {
-  id        String   @id @default(cuid())
-  siteId    String
-  teamId    String
-  joinedAt  DateTime @default(now())
+  id       String   @id @default(cuid())
+  siteId   String
+  teamId   String
+  joinedAt DateTime @default(now())
 
-  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([siteId, teamId])
   @@index([teamId])
@@ -358,19 +364,19 @@ model SiteTeam {
 /// Modèle de visite — définit la grille (sections + items).
 /// Configurable depuis le back-office : on n'est pas figé aux 2 templates seedés.
 model SiteVisitTemplate {
-  id           String   @id @default(cuid())
-  slug         String   @unique
-  name         String
-  description  String?
+  id                    String   @id @default(cuid())
+  slug                  String   @unique
+  name                  String
+  description           String?
   /// Layout PDF : VEILLE (design moderne) ou SNCF (fidèle au document d'origine).
-  pdfLayout    String   @default("VEILLE")
+  pdfLayout             String   @default("VEILLE")
   /// Type de moteur :
   ///  - CHECKLIST  : items définis par le template (Trimestrielle incendie,
   ///                 Planifiée EIC RA). Comportement historique.
   ///  - INVENTORY  : items générés depuis le catalogue SiteEquipment du site
   ///                 visité. La saisie suit la logique "conformité par défaut" :
   ///                 l'agent ne pointe que les écarts.
-  kind         String   @default("CHECKLIST")
+  kind                  String   @default("CHECKLIST")
   /// Périodicité attendue en jours (null = libre). Sert à identifier les
   /// visites en retard et alimenter un futur tableau de bord conformité.
   expectedFrequencyDays Int?
@@ -378,51 +384,51 @@ model SiteVisitTemplate {
   /// JSON : [{ key, label, type: "text"|"checkbox", required? }, …].
   /// V1 affiche juste date + site ; les autres champs restent stockés mais
   /// non saisis (extension future).
-  metaSchema   String   @default("[]")
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  metaSchema            String   @default("[]")
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  sections     SiteVisitSection[]
-  visits       SiteVisit[]
+  sections SiteVisitSection[]
+  visits   SiteVisit[]
 }
 
 /// Une section regroupe des items à observer (ex. "Extincteurs", "Poste de travail").
 model SiteVisitSection {
-  id          String   @id @default(cuid())
-  templateId  String
-  title       String
+  id         String  @id @default(cuid())
+  templateId String
+  title      String
   /// Icône (emoji ou slug Lucide).
-  icon        String?
+  icon       String?
   /// Mode d'évaluation :
   ///  - PER_ITEM    : un statut Oui/Non/Sans objet par item (trimestrielle)
   ///  - PER_SECTION : un statut Conforme/Non conforme/Sans objet global,
   ///                   les items servent juste de checkpoints lisibles
-  evalMode    String   @default("PER_ITEM")
-  sortOrder   Int      @default(0)
+  evalMode   String  @default("PER_ITEM")
+  sortOrder  Int     @default(0)
   /// Tag de catégorisation (ex. "Incendie", "Électrique", "Coactivité")
   /// — reproduit la colonne italique des PDF EIC RA.
-  category    String?
+  category   String?
   /// Texte fixe affiché dans la colonne "Précisions" du PDF SNCF
   /// (ex. "Contenu repris dans le GRH0003").
-  precisions  String?
-  isActive    Boolean  @default(true)
+  precisions String?
+  isActive   Boolean @default(true)
 
-  template    SiteVisitTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  items       SiteVisitItem[]
+  template     SiteVisitTemplate      @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  items        SiteVisitItem[]
   observations SiteVisitObservation[]
 
   @@index([templateId, sortOrder])
 }
 
 model SiteVisitItem {
-  id         String  @id @default(cuid())
-  sectionId  String
-  label      String
-  sortOrder  Int     @default(0)
-  isActive   Boolean @default(true)
+  id        String  @id @default(cuid())
+  sectionId String
+  label     String
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
 
-  section    SiteVisitSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  section      SiteVisitSection       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   observations SiteVisitObservation[]
 
   @@index([sectionId, sortOrder])
@@ -430,31 +436,31 @@ model SiteVisitItem {
 
 /// Une visite réalisée — instance d'un template, sur un site.
 model SiteVisit {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   templateId     String
   siteId         String
   teamId         String
   observerId     String
   /// Date de la visite (séparée de createdAt qui = horodatage technique).
-  visitDate      DateTime @default(now())
+  visitDate      DateTime  @default(now())
   /// Statut workflow.
-  status         String   @default("active") // draft | active | completed | archived
+  status         String    @default("active") // draft | active | completed | archived
   finishedAt     DateTime?
   generalComment String?
   /// Métadonnées d'en-tête saisies (clé → valeur). JSON souple.
   /// V1 contient au moins { siteName, visitDate }, le reste sera enrichi.
-  metadata       String   @default("{}")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  metadata       String    @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  template       SiteVisitTemplate    @relation(fields: [templateId], references: [id])
-  site           Site                 @relation(fields: [siteId], references: [id])
-  team           Team                 @relation(fields: [teamId], references: [id])
-  observer       User                 @relation("SiteVisitObserver", fields: [observerId], references: [id])
-  participants   SiteVisitParticipant[]
-  observations   SiteVisitObservation[]
+  template        SiteVisitTemplate        @relation(fields: [templateId], references: [id])
+  site            Site                     @relation(fields: [siteId], references: [id])
+  team            Team                     @relation(fields: [teamId], references: [id])
+  observer        User                     @relation("SiteVisitObserver", fields: [observerId], references: [id])
+  participants    SiteVisitParticipant[]
+  observations    SiteVisitObservation[]
   nonConformities SiteVisitNonConformity[]
-  reports        SiteVisitReport[]
+  reports         SiteVisitReport[]
 
   @@index([siteId])
   @@index([teamId])
@@ -468,7 +474,7 @@ model SiteVisit {
 }
 
 model SiteVisitParticipant {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   visitId   String
   /// Soit lié à un Agent existant, soit texte libre.
   agentId   String?
@@ -476,33 +482,33 @@ model SiteVisitParticipant {
   function  String?
   /// Signature : V2 (base64 image ou data URI canvas). V1 = null.
   signature String?
-  sortOrder Int      @default(0)
+  sortOrder Int     @default(0)
 
-  visit     SiteVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  agent     Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  visit SiteVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  agent Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
 
   @@index([visitId])
 }
 
 /// Observation au niveau item (PER_ITEM) ou section (itemId=null, PER_SECTION).
 model SiteVisitObservation {
-  id         String   @id @default(cuid())
-  visitId    String
+  id                     String    @id @default(cuid())
+  visitId                String
   /// Section : NOT NULL en mode CHECKLIST, NULL en mode INVENTORY.
   /// L'observation INVENTORY est rattachée à un SiteEquipment via `equipmentId`.
-  sectionId  String?
-  itemId     String?
+  sectionId              String?
+  itemId                 String?
   /// Lien vers l'équipement du catalogue site (mode INVENTORY uniquement).
   /// onDelete: SetNull pour préserver l'historique si l'équipement est retiré
   /// du catalogue après une visite.
-  equipmentId String?
+  equipmentId            String?
   /// Couvre les modes :
   ///  PER_ITEM    : OUI | NON | SANS_OBJET
   ///  PER_SECTION : CONFORME | NON_CONFORME | SANS_OBJET
   ///  INVENTORY   : dérivé de `present` et `discrepancyType` —
   ///                OUI si conforme, NON si écart, SANS_OBJET si non applicable
-  status     String   @default("PENDING")
-  comment    String?
+  status                 String    @default("PENDING")
+  comment                String?
   /// Champs INVENTORY (nullable en mode CHECKLIST).
   ///
   /// Source de vérité du constat de présence en mode INVENTORY :
@@ -517,13 +523,13 @@ model SiteVisitObservation {
   ///   MISSING | EXPIRED | QUANTITY_LOW | DAMAGED | NONE.
   /// NULL = pas encore évalué.
   discrepancyType        String?
-  recordedAt DateTime @default(now())
-  recordedById String?
+  recordedAt             DateTime  @default(now())
+  recordedById           String?
 
-  visit      SiteVisit          @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  section    SiteVisitSection?  @relation(fields: [sectionId], references: [id])
-  item       SiteVisitItem?     @relation(fields: [itemId], references: [id], onDelete: SetNull)
-  equipment  SiteEquipment?     @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+  visit     SiteVisit         @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  section   SiteVisitSection? @relation(fields: [sectionId], references: [id])
+  item      SiteVisitItem?    @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  equipment SiteEquipment?    @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
 
   // Une observation par couple section+item dans un mode CHECKLIST.
   @@unique([visitId, sectionId, itemId])
@@ -556,8 +562,8 @@ model SiteVisitNonConformity {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  visit             SiteVisit       @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  generatedAction   ImportedAction? @relation("NCAction", fields: [generatedActionId], references: [id], onDelete: SetNull)
+  visit           SiteVisit       @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  generatedAction ImportedAction? @relation("NCAction", fields: [generatedActionId], references: [id], onDelete: SetNull)
 
   @@index([visitId])
 }
@@ -572,16 +578,16 @@ model SiteVisitReport {
   payload     String   @default("{}")
   createdAt   DateTime @default(now())
 
-  visit       SiteVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  visit SiteVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
 
   @@index([visitId])
 }
 
 /// Poste — RR, AC, ASP, etc.
 model Poste {
-  id       String  @id @default(cuid())
-  name     String  @unique
-  acronym  String?
+  id          String  @id @default(cuid())
+  name        String  @unique
+  acronym     String?
   description String?
 
   agents   Agent[]
@@ -590,12 +596,12 @@ model Poste {
 
 /// Secteur — RIVE DROITE NORD, etc.
 model Secteur {
-  id        String  @id @default(cuid())
-  name      String  @unique
-  code      String?
+  id   String  @id @default(cuid())
+  name String  @unique
+  code String?
 
-  agents    Agent[]
-  sessions  VeilleSession[]
+  agents   Agent[]
+  sessions VeilleSession[]
 }
 
 /// Contact — annuaire interne.
@@ -635,30 +641,30 @@ model Abreviation {
 /// Procédure de veille — paramétrable depuis le back-office.
 /// Pas de teamId : les procédures sont communes (spec).
 model Procedure {
-  id           String   @id @default(cuid())
+  id                    String   @id @default(cuid())
   /// Domaine (ex. "Circulation", "Traction électrique").
-  domain       String
+  domain                String
   /// Thème (sous-domaine).
-  theme        String?
+  theme                 String?
   /// Point clé — titre principal affiché.
-  title        String
+  title                 String
   /// Gravité 0..4 (0=Non technique, 4=critique).
-  gravity      Int      @default(3)
+  gravity               Int      @default(3)
   /// Documents de référence (séparés par virgule pour rester simple).
-  documents    String   @default("[]") // JSON tableau
+  documents             String   @default("[]") // JSON tableau
   /// Description du risque associé.
-  risk         String?
+  risk                  String?
   /// Ordre d'affichage dans le silo de son domaine.
-  sortOrder    Int      @default(0)
-  isActive     Boolean  @default(true)
+  sortOrder             Int      @default(0)
+  isActive              Boolean  @default(true)
   /// Si vrai, le commentaire général est obligatoire à la fin de la veille.
-  requireGeneralComment Boolean @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  requireGeneralComment Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  items                ChecklistItem[]
+  items                 ChecklistItem[]
   procedureObservations ProcedureObservation[]
-  importedActions      ImportedAction[]
+  importedActions       ImportedAction[]
 
   @@index([domain])
   @@index([isActive])
@@ -666,31 +672,31 @@ model Procedure {
 
 /// Point de checklist d'une procédure.
 model ChecklistItem {
-  id            String   @id @default(cuid())
-  procedureId   String
-  label         String
+  id                 String   @id @default(cuid())
+  procedureId        String
+  label              String
   /// Gravité spécifique du point (peut différer de la procédure).
-  gravity       Int?
-  sortOrder     Int      @default(0)
+  gravity            Int?
+  sortOrder          Int      @default(0)
   /// Commentaire obligatoire si non conforme.
-  requireCommentIfKO Boolean @default(false)
+  requireCommentIfKO Boolean  @default(false)
   /// Photo obligatoire si non conforme.
-  requirePhotoIfKO   Boolean @default(false)
+  requirePhotoIfKO   Boolean  @default(false)
   /// Référence réglementaire pointée par la pastille "?" du libellé
   /// (ex. "DC03969 § 8.4.1"). Affichée dans le popover d'aide.
-  helpReference String?
+  helpReference      String?
   /// Texte d'explication courte (1-3 phrases) affiché dans le popover
   /// d'aide. Décrit ce qu'on vérifie, pas comment.
-  helpText      String?
+  helpText           String?
   /// % historique de conformité (peut être enrichi plus tard).
   historicConformPct Int?
   historicSampleSize Int?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  procedure     Procedure         @relation(fields: [procedureId], references: [id], onDelete: Cascade)
-  observations  ObservationItem[]
+  procedure    Procedure         @relation(fields: [procedureId], references: [id], onDelete: Cascade)
+  observations ObservationItem[]
 
   @@index([procedureId, sortOrder])
 }
@@ -699,32 +705,32 @@ model ChecklistItem {
 
 /// Une session = une veille terrain conduite par un observateur sur un agent.
 model VeilleSession {
-  id              String    @id @default(cuid())
-  teamId          String
-  observerId      String
-  agentId         String?
-  posteId         String?
-  secteurId       String?
+  id                String    @id @default(cuid())
+  teamId            String
+  observerId        String
+  agentId           String?
+  posteId           String?
+  secteurId         String?
   /// Statut workflow : draft | active | completed | archived
-  status          String    @default("draft")
-  startedAt       DateTime  @default(now())
-  finishedAt      DateTime?
+  status            String    @default("draft")
+  startedAt         DateTime  @default(now())
+  finishedAt        DateTime?
   /// Commentaire général sur la session.
-  generalComment  String?
+  generalComment    String?
   /// JSON éventuel d'éléments synchronisés (pour audit offline → online).
-  clientGeneratedId String? @unique
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  clientGeneratedId String?   @unique
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  team        Team    @relation(fields: [teamId], references: [id])
-  observer    User    @relation(fields: [observerId], references: [id])
-  agent       Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  poste       Poste?  @relation(fields: [posteId], references: [id], onDelete: SetNull)
-  secteur     Secteur? @relation(fields: [secteurId], references: [id], onDelete: SetNull)
-  procedures  ProcedureObservation[]
-  comments    Comment[]
-  photos      Photo[]
-  reports     Report[]
+  team       Team                   @relation(fields: [teamId], references: [id])
+  observer   User                   @relation(fields: [observerId], references: [id])
+  agent      Agent?                 @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  poste      Poste?                 @relation(fields: [posteId], references: [id], onDelete: SetNull)
+  secteur    Secteur?               @relation(fields: [secteurId], references: [id], onDelete: SetNull)
+  procedures ProcedureObservation[]
+  comments   Comment[]
+  photos     Photo[]
+  reports    Report[]
 
   @@index([teamId])
   @@index([observerId])
@@ -735,29 +741,29 @@ model VeilleSession {
 
 /// Lien session ↔ procédure : permet d'observer plusieurs procédures dans une seule session.
 model ProcedureObservation {
-  id           String   @id @default(cuid())
-  sessionId    String
-  procedureId  String
+  id             String   @id @default(cuid())
+  sessionId      String
+  procedureId    String
   generalComment String?
-  createdAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
 
-  session      VeilleSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  procedure    Procedure         @relation(fields: [procedureId], references: [id])
-  items        ObservationItem[]
+  session   VeilleSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  procedure Procedure         @relation(fields: [procedureId], references: [id])
+  items     ObservationItem[]
 
   @@unique([sessionId, procedureId])
 }
 
 /// Observation d'un point de checklist dans une session.
 model ObservationItem {
-  id                    String   @id @default(cuid())
+  id                     String   @id @default(cuid())
   procedureObservationId String
-  checklistItemId       String
+  checklistItemId        String
   /// Statut : CONFORME | NON_CONFORME | NON_OBSERVE | NON_APPLICABLE | A_REVOIR
-  status                String   @default("NON_OBSERVE")
-  comment               String?
-  recordedAt            DateTime @default(now())
-  recordedById          String
+  status                 String   @default("NON_OBSERVE")
+  comment                String?
+  recordedAt             DateTime @default(now())
+  recordedById           String
 
   procedureObservation ProcedureObservation @relation(fields: [procedureObservationId], references: [id], onDelete: Cascade)
   checklistItem        ChecklistItem        @relation(fields: [checklistItemId], references: [id])
@@ -787,16 +793,16 @@ model ObservationHistory {
 
 /// Commentaires libres rattachés à une session ou à une observation.
 model Comment {
-  id          String   @id @default(cuid())
-  sessionId   String?
+  id            String   @id @default(cuid())
+  sessionId     String?
   observationId String?
-  authorId    String
-  content     String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  authorId      String
+  content       String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  session     VeilleSession?   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  author      User             @relation(fields: [authorId], references: [id])
+  session VeilleSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  author  User           @relation(fields: [authorId], references: [id])
 
   @@index([sessionId])
   @@index([observationId])
@@ -826,12 +832,12 @@ model Photo {
   byteSize        Int?
   createdAt       DateTime @default(now())
 
-  session       VeilleSession?    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  observation   ObservationItem?  @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  agentSighting AgentSighting?    @relation(fields: [agentSightingId], references: [id], onDelete: Cascade)
-  siteSighting  SiteSighting?     @relation(fields: [siteSightingId], references: [id], onDelete: Cascade)
-  rci           Rci?              @relation(fields: [rciId], references: [id], onDelete: Cascade)
-  uploader      User              @relation(fields: [uploaderId], references: [id])
+  session       VeilleSession?   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  observation   ObservationItem? @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  agentSighting AgentSighting?   @relation(fields: [agentSightingId], references: [id], onDelete: Cascade)
+  siteSighting  SiteSighting?    @relation(fields: [siteSightingId], references: [id], onDelete: Cascade)
+  rci           Rci?             @relation(fields: [rciId], references: [id], onDelete: Cascade)
+  uploader      User             @relation(fields: [uploaderId], references: [id])
 
   @@index([sessionId])
   @@index([observationId])
@@ -846,13 +852,13 @@ model Photo {
 /// Le payload JSON sérialise l'intégralité du wizard (libre côté schéma pour
 /// suivre les évolutions du modèle officiel sans migration à chaque version).
 model Rci {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   /// Équipe propriétaire ; un brouillon est partagé entre tous les membres de cette équipe.
   teamId        String
   /// Auteur (créateur du brouillon).
   authorId      String
   /// DRAFT | FINAL — FINAL = .docx généré et transmis, gel en lecture seule.
-  status        String   @default("DRAFT")
+  status        String    @default("DRAFT")
   /// Numéro de dossier normé JJMMAAHHMM-Lieu (auto-généré côté client).
   dossierNumber String?
   /// Horodatage de l'événement (source de vérité, redondant avec le payload).
@@ -860,9 +866,9 @@ model Rci {
   /// Titre court pour l'affichage en liste (nature + lieu).
   title         String?
   /// Payload JSON des champs du wizard (stringifié, parsé côté app).
-  payload       String   @default("{}")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  payload       String    @default("{}")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   team   Team    @relation(fields: [teamId], references: [id])
   author User    @relation(fields: [authorId], references: [id])
@@ -883,7 +889,7 @@ model Report {
   payload     String   @default("{}")
   createdAt   DateTime @default(now())
 
-  session     VeilleSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session VeilleSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
 }
@@ -897,7 +903,7 @@ model Report {
 /// agentId=NULL et même externalId restent autorisés (acceptable car les
 /// actions sans agent n'apparaissent pas dans la vue agent).
 model ImportedAction {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   externalId      String
   teamId          String
   /// Cible : un agent OU un site (ou aucun pour les vieux imports).
@@ -907,7 +913,7 @@ model ImportedAction {
   procedureId     String?
   /// Statut local : ACTIVE | REPLACED | OBSOLETE | VALIDATED_LOCAL
   /// (le statut d'origine est conservé dans `originalStatus`)
-  localStatus     String   @default("ACTIVE")
+  localStatus     String    @default("ACTIVE")
   originalStatus  String?
   type            String?
   subType         String?
@@ -932,7 +938,7 @@ model ImportedAction {
   actionPlan      String?
   importId        String?
   /// Timestamp du dernier import qui a touché cette action.
-  lastSeenAt      DateTime @default(now())
+  lastSeenAt      DateTime  @default(now())
   /// Empreinte logique pour détecter les doublons (même agent peut recevoir
   /// plusieurs IDs Action distincts mais identiques en contenu).
   /// Calculée à l'import : SHA1(keyPoint + comment + dueAt + actionPlan).
@@ -943,16 +949,16 @@ model ImportedAction {
   /// "obligatoire", "sécurité", "suivi DPX", "compétence", "terrain".
   /// La colonne `type` héritée de l'Excel reste, mais `tags` permet la
   /// classification multi-dimensionnelle ajoutée côté application.
-  tags            String   @default("[]")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  tags            String    @default("[]")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  team        Team             @relation(fields: [teamId], references: [id])
-  agent       Agent?           @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  site        Site?            @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  procedure   Procedure?       @relation(fields: [procedureId], references: [id], onDelete: SetNull)
-  import      ActionImport?    @relation(fields: [importId], references: [id], onDelete: SetNull)
-  validations ActionValidation[]
+  team          Team                    @relation(fields: [teamId], references: [id])
+  agent         Agent?                  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  site          Site?                   @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  procedure     Procedure?              @relation(fields: [procedureId], references: [id], onDelete: SetNull)
+  import        ActionImport?           @relation(fields: [importId], references: [id], onDelete: SetNull)
+  validations   ActionValidation[]
   nonConformity SiteVisitNonConformity? @relation("NCAction")
 
   @@unique([externalId, agentId])
@@ -971,22 +977,22 @@ model ImportedAction {
 
 /// Historique d'un import Excel.
 model ActionImport {
-  id              String   @id @default(cuid())
-  teamId          String
-  importedById    String?
-  fileName        String?
-  rowsTotal       Int      @default(0)
-  rowsCreated     Int      @default(0)
-  rowsUpdated     Int      @default(0)
-  rowsObsoleted   Int      @default(0)
-  rowsErrored     Int      @default(0)
-  agentsCreated   Int      @default(0)
-  unknownAgents   Int      @default(0)
+  id            String   @id @default(cuid())
+  teamId        String
+  importedById  String?
+  fileName      String?
+  rowsTotal     Int      @default(0)
+  rowsCreated   Int      @default(0)
+  rowsUpdated   Int      @default(0)
+  rowsObsoleted Int      @default(0)
+  rowsErrored   Int      @default(0)
+  agentsCreated Int      @default(0)
+  unknownAgents Int      @default(0)
   /// Résumé JSON de l'import (warnings, erreurs détaillées).
-  summary         String   @default("{}")
-  createdAt       DateTime @default(now())
+  summary       String   @default("{}")
+  createdAt     DateTime @default(now())
 
-  team           Team             @relation(fields: [teamId], references: [id])
+  team            Team             @relation(fields: [teamId], references: [id])
   importedActions ImportedAction[]
 
   @@index([teamId])
@@ -996,21 +1002,21 @@ model ActionImport {
 /// Validation d'une action depuis l'application.
 /// Une action validée n'apparaît plus dans la liste à traiter mais reste dans l'historique.
 model ActionValidation {
-  id           String   @id @default(cuid())
-  actionId     String
-  agentId      String?
-  siteId       String?
+  id            String   @id @default(cuid())
+  actionId      String
+  agentId       String?
+  siteId        String?
   validatedById String
-  teamId       String
-  realizedAt   DateTime @default(now())
-  comment      String?
-  createdAt    DateTime @default(now())
+  teamId        String
+  realizedAt    DateTime @default(now())
+  comment       String?
+  createdAt     DateTime @default(now())
 
-  action       ImportedAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
-  agent        Agent?         @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  site         Site?          @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  validatedBy  User           @relation(fields: [validatedById], references: [id])
-  team         Team           @relation(fields: [teamId], references: [id])
+  action      ImportedAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  agent       Agent?         @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  site        Site?          @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  validatedBy User           @relation(fields: [validatedById], references: [id])
+  team        Team           @relation(fields: [teamId], references: [id])
 
   @@index([actionId])
   @@index([agentId])
@@ -1024,30 +1030,30 @@ model ActionValidation {
 // ─── Liens utiles ─────────────────────────────────────────────────────────────
 
 model LinkCategory {
-  id        String   @id @default(cuid())
-  name      String   @unique
+  id        String  @id @default(cuid())
+  name      String  @unique
   /// Icône Lucide (ex "link", "book", "external-link").
   icon      String?
   color     String?
-  sortOrder Int      @default(0)
-  isActive  Boolean  @default(true)
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
 
-  links     Link[]
+  links Link[]
 }
 
 model Link {
-  id           String   @id @default(cuid())
-  categoryId   String
-  label        String
-  url          String
-  description  String?
-  icon         String?
-  color        String?
-  sortOrder    Int      @default(0)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  id          String   @id @default(cuid())
+  categoryId  String
+  label       String
+  url         String
+  description String?
+  icon        String?
+  color       String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
 
-  category     LinkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  category LinkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@index([categoryId, sortOrder])
 }
@@ -1121,8 +1127,8 @@ model TeamActivity {
   /// Données techniques additionnelles (JSON souple, pas indexé).
   metadata    String   @default("{}")
 
-  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  actor       User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  team  Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([teamId, createdAt])
   @@index([actorId])
@@ -1143,9 +1149,9 @@ model TeamActivity {
 /// contrainte d'unicité. Convention : `{TYPE}:{sourceId}` ou
 /// `{TYPE}:{sourceId}:{YYYY-MM-DD}` pour les types récurrents.
 model Notification {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   /// `null` = non lue. Date de lecture sinon.
   readAt    DateTime?
   /// Type d'événement — cf. src/lib/notifications.ts (`NOTIFICATION_TYPES`).
@@ -1162,15 +1168,15 @@ model Notification {
   /// Données techniques additionnelles (JSON souple, pas indexé).
   metadata  String?
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  /// Couvre les requêtes typiques : notifs non lues d'un user (badge),
-  /// liste paginée par date desc.
-  @@index([userId, readAt, createdAt])
   /// Dédup stricte : un même event ne crée pas N notifs au même user.
   /// SQLite autorise plusieurs NULL pour `dedupKey` → les events sans
   /// clé créent toujours une nouvelle row.
   @@unique([userId, dedupKey])
+  /// Couvre les requêtes typiques : notifs non lues d'un user (badge),
+  /// liste paginée par date desc.
+  @@index([userId, readAt, createdAt])
 }
 
 // ─── Planning agents (tour de service ferroviaire) ────────────────────────────
@@ -1186,33 +1192,33 @@ model Notification {
 ///  - Pas de FK Team : le scope d'affichage côté `/today` repose sur
 ///    `AgentTeam` (memberships Veille existants), pas sur les UCH du fichier.
 model PlanningImport {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   importedById      String?
   fileName          String?
   /// Période couverte par le fichier (min/max DATE DEBUT des lignes SERVICE).
   periodStart       DateTime?
   periodEnd         DateTime?
   /// Total des lignes lues dans le tableur (hors header).
-  rowsTotal         Int      @default(0)
+  rowsTotal         Int       @default(0)
   /// Lignes typées JS dans le fichier (toutes, avant matching matricule).
-  rowsService       Int      @default(0)
+  rowsService       Int       @default(0)
   /// Lignes typées NPO dans le fichier — comptées pour info, jamais stockées.
-  rowsNonService    Int      @default(0)
+  rowsNonService    Int       @default(0)
   /// SERVICE avec matricule connu → un PlanningShift a été créé.
-  rowsImported      Int      @default(0)
+  rowsImported      Int       @default(0)
   /// SERVICE avec matricule inconnu côté Veille → ligne ignorée.
-  rowsIgnored       Int      @default(0)
+  rowsIgnored       Int       @default(0)
   /// Lignes en erreur de parsing (date/heure invalide, matricule vide, etc.).
-  rowsErrored       Int      @default(0)
+  rowsErrored       Int       @default(0)
   /// Liste JSON des matricules inconnus rencontrés (utile au rapport d'import).
-  unknownMatricules String   @default("[]")
+  unknownMatricules String    @default("[]")
   /// Comptage brut UCH / UCH JS observés dans le fichier (JSON).
   /// Information seule, jamais utilisée pour le scope applicatif.
-  rawUchSummary     String   @default("{}")
-  createdAt         DateTime @default(now())
+  rawUchSummary     String    @default("{}")
+  createdAt         DateTime  @default(now())
 
-  importedBy        User?            @relation(fields: [importedById], references: [id], onDelete: SetNull)
-  shifts            PlanningShift[]
+  importedBy User?           @relation(fields: [importedById], references: [id], onDelete: SetNull)
+  shifts     PlanningShift[]
 
   @@index([createdAt])
 }
@@ -1221,26 +1227,107 @@ model PlanningImport {
 ///
 /// Le scope d'affichage utilise `AgentTeam` côté requête ; pas de FK Team ici.
 model PlanningShift {
-  id            String   @id @default(cuid())
-  importId      String
-  agentId       String
+  id        String   @id @default(cuid())
+  importId  String
+  agentId   String
   /// Borne basse — DATE DEBUT + HEURE DEBUT, fuseau Europe/Paris.
-  startsAt      DateTime
+  startsAt  DateTime
   /// Borne haute — DATE FIN + HEURE FIN. Peut être J+1 (service de nuit).
-  endsAt        DateTime
+  endsAt    DateTime
   /// Référence courte de la JS affichée à l'écran (col NUMERO JS, ex "20412").
-  jsNumber      String?
+  jsNumber  String?
   /// Code de la tournée (col CODE JS, ex "LGV/", "VMCAS").
   /// Non sensible — les codes NPO sont filtrés à la source.
-  jsCode        String?
-  createdAt     DateTime @default(now())
+  jsCode    String?
+  createdAt DateTime @default(now())
 
-  import        PlanningImport @relation(fields: [importId], references: [id], onDelete: Cascade)
-  agent         Agent          @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  import PlanningImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  agent  Agent          @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   /// "Quels shifts pour cet agent ?" — fiche agent / wizard veille.
   @@index([agentId, startsAt])
   /// Écran Today : `startsAt < demain` ET `endsAt > maintenant`.
   @@index([startsAt, endsAt])
   @@index([importId])
+}
+
+// ─── Push notifications (Sprint Push V1) ─────────────────────────────────────
+
+/// Abonnement push d'un terminal — 1 row par couple (user, endpoint).
+///
+/// Un utilisateur peut posséder plusieurs appareils (téléphone Android,
+/// iPad PWA, navigateur desktop). Chaque navigateur produit son propre
+/// `endpoint` côté push service (FCM / Mozilla AS / Apple).
+///
+/// L'`endpoint` est globalement unique : la même URL ne peut pas viser
+/// deux users. Sa longueur typique est 200-500 caractères.
+///
+/// Suppression cascade si User supprimé. Aucune trace résiduelle des
+/// abonnements (RGPD — pas de logging d'endpoint en clair non plus,
+/// cf. docs/push-notifications.md §Sécurité).
+model PushSubscription {
+  id            String    @id @default(cuid())
+  userId        String
+  /// URL fournie par PushManager.subscribe — clé d'unicité globale.
+  endpoint      String    @unique
+  /// Clé p256dh base64url — chiffrement E2E du payload (RFC 8291).
+  /// Considérée comme secret côté serveur : à ne pas logger.
+  p256dh        String
+  /// Clé d'authentification base64url — auth tag du chiffrement.
+  /// Considérée comme secret côté serveur : à ne pas logger.
+  auth          String
+  /// User-agent au moment de l'abonnement (debug, désinscription manuelle).
+  userAgent     String?
+  /// Plateforme détectée côté client : "android" | "ios" | "desktop" | "other".
+  /// Sert aux stats et à un futur tuning (ex. payload size iOS).
+  platform      String?
+  /// Dernier 200/201 confirmé par le push service. Permet de purger les
+  /// abonnements zombies (timeout, etc.) sans erreur explicite.
+  lastSuccessAt DateTime?
+  /// Dernier 4xx/5xx remonté par le push service. NULL = aucune erreur connue.
+  lastErrorAt   DateTime?
+  /// Code HTTP du dernier échec (404, 410, 413, 429, 500…). Utilisé par
+  /// la purge auto : 404/410 = endpoint mort, supprimé immédiatement.
+  lastErrorCode Int?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Lookup principal : "tous les appareils d'un user" lors d'un envoi.
+  @@index([userId])
+  /// Purge auto des endpoints en erreur (cron hebdo).
+  @@index([lastErrorAt])
+}
+
+/// Préférences de notification d'un utilisateur (push + futurs canaux).
+///
+/// V1 = 3 booléens stricts (master + 2 catégories). L'ajout d'une nouvelle
+/// catégorie = 1 migration + 1 colonne (plus simple à requêter qu'un JSON).
+///
+/// Défauts métier (cf. C2 — ne sont effectifs que côté déclencheur) :
+///  - pushEnabled   = true pour tous les rôles ;
+///  - catEcheances  = true (le déclencheur n'envoie qu'aux EDITOR/ADMIN, donc
+///    le défaut true est inerte pour USER) ;
+///  - catEquipes    = true pour tous les rôles (seule notif que USER reçoit).
+///
+/// 1 row par user (`userId` unique). Créée lazy à la 1ʳᵉ visite de
+/// "Mon compte → Notifications" ou au 1ᵉʳ déclencheur push.
+model NotificationPreference {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  /// Master switch — false ⇒ aucun push pour ce user, toutes catégories
+  /// confondues. Les Notification in-app continuent d'être créées.
+  pushEnabled  Boolean  @default(true)
+  /// Catégorie "échéances critiques" — alimente le cron quotidien
+  /// (cf. POST /api/cron/echeances-push). Réservée aux EDITOR/ADMIN côté
+  /// déclencheur, mais la colonne reste présente pour tous les rôles.
+  catEcheances Boolean  @default(true)
+  /// Catégorie "équipes" — déclenchée à l'ajout dans une équipe
+  /// (TEAM_MEMBERSHIP_ADDED). Seule catégorie reçue par les USER.
+  catEquipes   Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

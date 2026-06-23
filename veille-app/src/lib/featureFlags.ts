@@ -30,3 +30,15 @@ export function isTodayEnabled(): boolean {
 export function isEcheancesEnabled(): boolean {
   return readBool(process.env.ENABLE_ECHEANCES, true);
 }
+
+/**
+ * Notifications push (Sprint Push V1).
+ * Activé par défaut. Désactivable via `ENABLE_PUSH=false` :
+ *  - les Notification in-app continuent d'être créées comme avant ;
+ *  - aucun POST web-push n'est émis ;
+ *  - les API /api/push/* renvoient 503.
+ * Utile pour rollback rapide en cas d'incident côté push service.
+ */
+export function isPushEnabled(): boolean {
+  return readBool(process.env.ENABLE_PUSH, true);
+}

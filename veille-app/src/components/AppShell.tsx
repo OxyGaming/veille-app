@@ -45,6 +45,7 @@ const BASE_NAV_DESKTOP = [
   { href: "/stats", label: "Statistiques", icon: Icon.Filter },
   { href: "/links", label: "Liens utiles", icon: Icon.Link },
   { href: "/contacts", label: "Contacts", icon: Icon.Phone },
+  { href: "/rci", label: "RCI", icon: Icon.AlertTriangle },
 ];
 
 const PILOTAGE_ITEM = {

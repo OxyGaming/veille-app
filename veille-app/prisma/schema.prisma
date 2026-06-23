@@ -55,6 +55,8 @@ model User {
   notifications    Notification[]
   /// Imports de planning effectués par l'utilisateur.
   planningImports  PlanningImport[]
+  /// RCI rédigés par l'utilisateur.
+  rcis             Rci[]
 
   @@index([teamId])
   @@index([isActive])
@@ -142,6 +144,7 @@ model Team {
   sightings       AgentSighting[]
   siteSightings   SiteSighting[]
   activities      TeamActivity[]
+  rcis            Rci[]
 }
 
 // ─── Référentiel métier (commun à toutes les équipes) ─────────────────────────
@@ -808,6 +811,8 @@ model Photo {
   agentSightingId String?
   /// Photo rattachée à un « Vu / Commentaire » sur un site.
   siteSightingId  String?
+  /// Photo jointe à un RCI (annexe ou schéma).
+  rciId           String?
   uploaderId      String
   /// Chemin relatif au dossier d'uploads ("photos/<sessionId>/<uuid>.jpg") ou data: URI temporaire.
   storagePath     String
@@ -825,13 +830,47 @@ model Photo {
   observation   ObservationItem?  @relation(fields: [observationId], references: [id], onDelete: Cascade)
   agentSighting AgentSighting?    @relation(fields: [agentSightingId], references: [id], onDelete: Cascade)
   siteSighting  SiteSighting?     @relation(fields: [siteSightingId], references: [id], onDelete: Cascade)
+  rci           Rci?              @relation(fields: [rciId], references: [id], onDelete: Cascade)
   uploader      User              @relation(fields: [uploaderId], references: [id])
 
   @@index([sessionId])
   @@index([observationId])
   @@index([agentSightingId])
   @@index([siteSightingId])
+  @@index([rciId])
   @@index([syncStatus])
+}
+
+/// RCI (Relevé de Constatations Immédiates) — partie 1 « Avis immédiat » SNCF.
+/// Brouillon partagé par équipe : tous les membres voient et peuvent compléter.
+/// Le payload JSON sérialise l'intégralité du wizard (libre côté schéma pour
+/// suivre les évolutions du modèle officiel sans migration à chaque version).
+model Rci {
+  id            String   @id @default(cuid())
+  /// Équipe propriétaire ; un brouillon est partagé entre tous les membres de cette équipe.
+  teamId        String
+  /// Auteur (créateur du brouillon).
+  authorId      String
+  /// DRAFT | FINAL — FINAL = .docx généré et transmis, gel en lecture seule.
+  status        String   @default("DRAFT")
+  /// Numéro de dossier normé JJMMAAHHMM-Lieu (auto-généré côté client).
+  dossierNumber String?
+  /// Horodatage de l'événement (source de vérité, redondant avec le payload).
+  eventAt       DateTime?
+  /// Titre court pour l'affichage en liste (nature + lieu).
+  title         String?
+  /// Payload JSON des champs du wizard (stringifié, parsé côté app).
+  payload       String   @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  team   Team    @relation(fields: [teamId], references: [id])
+  author User    @relation(fields: [authorId], references: [id])
+  photos Photo[]
+
+  @@index([teamId, status])
+  @@index([authorId])
+  @@index([updatedAt])
 }
 
 /// Compte rendu généré (PDF) — persisté pour traçabilité.

@@ -22,16 +22,23 @@ export async function POST(req: Request) {
   const sessionId = form.get("sessionId");
   const agentSightingId = form.get("agentSightingId");
   const siteSightingId = form.get("siteSightingId");
+  const rciId = form.get("rciId");
   const legend = (form.get("legend") as string) || null;
   const clientId = (form.get("clientId") as string) || null;
   if (!(file instanceof Blob)) {
     return NextResponse.json({ error: "Fichier manquant" }, { status: 400 });
   }
-  if (!observationId && !sessionId && !agentSightingId && !siteSightingId) {
+  if (
+    !observationId &&
+    !sessionId &&
+    !agentSightingId &&
+    !siteSightingId &&
+    !rciId
+  ) {
     return NextResponse.json(
       {
         error:
-          "observationId, sessionId, agentSightingId ou siteSightingId requis",
+          "observationId, sessionId, agentSightingId, siteSightingId ou rciId requis",
       },
       { status: 400 }
     );
@@ -71,6 +78,11 @@ export async function POST(req: Request) {
         { status: 404 }
       );
     teamId = sg.teamId;
+  } else if (typeof rciId === "string" && rciId) {
+    const r = await prisma.rci.findUnique({ where: { id: rciId } });
+    if (!r)
+      return NextResponse.json({ error: "RCI inconnu" }, { status: 404 });
+    teamId = r.teamId;
   }
   const scope = teamScope(u);
   // Note : scope.teamId peut être un objet { in: [...] } depuis le refactor
@@ -103,6 +115,7 @@ export async function POST(req: Request) {
       sessionId: (sessionId as string) || null,
       agentSightingId: (agentSightingId as string) || null,
       siteSightingId: (siteSightingId as string) || null,
+      rciId: (rciId as string) || null,
       uploaderId: u.id,
       storagePath,
       clientId,

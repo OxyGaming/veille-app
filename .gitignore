@@ -61,3 +61,8 @@ public/swe-worker-*.js
 # Données Excel sources (volumineuses, à archiver à part)
 data*.xlsx
 data*.xlsm
+
+# Artefacts d'audit/debug RCI (extractions XML, copies docx temporaires…)
+_rci_*
+~$*
+*.docx.tmp

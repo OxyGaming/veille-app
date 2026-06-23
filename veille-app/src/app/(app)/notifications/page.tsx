@@ -12,6 +12,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { aggregateNotifications } from "@/lib/notifications-aggregator";
+import { EnablePushBanner } from "@/components/push/EnablePushBanner";
 import { NotificationsList } from "./components/NotificationsList";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +31,9 @@ export default async function NotificationsPage() {
           Notifications
         </h1>
       </header>
+      <div className="px-4 lg:px-8 pt-4">
+        <EnablePushBanner />
+      </div>
       <NotificationsList initial={initial} />
     </div>
   );

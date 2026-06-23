@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EcheanceItem } from "@/lib/echeances/types";
 
 const findManyUser = vi.fn();
+const findManyTeam = vi.fn();
+const findManyUserTeam = vi.fn();
 const createNotification = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findMany: (...a: unknown[]) => findManyUser(...a) },
+    team: { findMany: (...a: unknown[]) => findManyTeam(...a) },
+    userTeam: { findMany: (...a: unknown[]) => findManyUserTeam(...a) },
   },
 }));
 
@@ -19,11 +23,16 @@ import {
   notifyActionAssigned,
   notifyActionValidated,
   notifyEcheancesCriticalForUser,
+  notifyTeamHistoryAdded,
+  notifyTeamMembershipAdded,
+  notifyTeamMembershipAddedSafe,
   notifyVisitFinished,
 } from "./notifications-generators";
 
 beforeEach(() => {
   findManyUser.mockReset();
+  findManyTeam.mockReset();
+  findManyUserTeam.mockReset();
   createNotification.mockReset();
   createNotification.mockResolvedValue({ id: "n_fake" });
 });
@@ -326,5 +335,216 @@ describe("notifyEcheancesCriticalForUser", () => {
     expect(createNotification.mock.calls[0][0].message).toContain(
       "en retard de 42 j",
     );
+  });
+});
+
+// ─── notifyTeamMembershipAdded (Sprint Push V1 — C9) ────────────────────────
+
+describe("notifyTeamMembershipAdded", () => {
+  const baseInput = {
+    userId: "u1",
+    teamId: "tA",
+    teamName: "Rive Droite Nord",
+    actorId: "admin1",
+  };
+
+  it("happy path — Notification créée avec bons champs", async () => {
+    createNotification.mockResolvedValue({ id: "n1" });
+    const n = await notifyTeamMembershipAdded(baseInput);
+    expect(n).toBe(1);
+    const arg = createNotification.mock.calls[0][0];
+    expect(arg.userId).toBe("u1");
+    expect(arg.type).toBe("TEAM_MEMBERSHIP_ADDED");
+    expect(arg.title).toBe("Nouvelle équipe");
+    expect(arg.message).toBe(
+      "Vous avez été ajouté à l'équipe Rive Droite Nord.",
+    );
+    expect(arg.targetUrl).toBe("/today");
+    expect(arg.dedupKey).toBe("TEAM_MEMBERSHIP_ADDED:tA:u1");
+    expect(arg.metadata).toEqual({ teamId: "tA", actorId: "admin1" });
+  });
+
+  it("dédup → renvoie 0 si createNotification renvoie null (P2002)", async () => {
+    createNotification.mockResolvedValue(null);
+    const n = await notifyTeamMembershipAdded(baseInput);
+    expect(n).toBe(0);
+  });
+
+  it("dedupKey stable — 2 appels avec (teamId, userId) identiques → même clé", async () => {
+    createNotification.mockResolvedValue({ id: "n1" });
+    await notifyTeamMembershipAdded(baseInput);
+    await notifyTeamMembershipAdded(baseInput);
+    const k1 = createNotification.mock.calls[0][0].dedupKey;
+    const k2 = createNotification.mock.calls[1][0].dedupKey;
+    expect(k1).toBe(k2);
+  });
+
+  it("actor self-add — admin s'ajoute lui-même → notif créée quand même", async () => {
+    createNotification.mockResolvedValue({ id: "n1" });
+    const n = await notifyTeamMembershipAdded({
+      userId: "admin1",
+      teamId: "tA",
+      teamName: "X",
+      actorId: "admin1",
+    });
+    expect(n).toBe(1);
+    expect(createNotification.mock.calls[0][0].userId).toBe("admin1");
+  });
+
+  it("Safe — catch en silence si createNotification throw", async () => {
+    createNotification.mockRejectedValue(new Error("boom"));
+    const n = await notifyTeamMembershipAddedSafe(baseInput);
+    expect(n).toBe(0);
+  });
+});
+
+// ─── notifyTeamHistoryAdded (Sprint Push V1 — C9) ───────────────────────────
+
+describe("notifyTeamHistoryAdded", () => {
+  const baseInput = {
+    teamIds: ["tA"],
+    entityType: "session",
+    entityId: "s1",
+    actorId: "u-actor",
+    targetUrl: "/sessions/s1",
+  };
+
+  function setupTeams(teams: { id: string; name: string }[]) {
+    findManyTeam.mockResolvedValue(teams);
+  }
+
+  function setupMemberships(rows: { userId: string; teamId: string }[]) {
+    findManyUserTeam.mockResolvedValue(rows);
+  }
+
+  it("teamIds vide → 0, aucune requête", async () => {
+    const n = await notifyTeamHistoryAdded({ ...baseInput, teamIds: [] });
+    expect(n).toBe(0);
+    expect(findManyTeam).not.toHaveBeenCalled();
+    expect(findManyUserTeam).not.toHaveBeenCalled();
+  });
+
+  it("teamIds dédupliqués (set+filter)", async () => {
+    setupTeams([{ id: "tA", name: "RDN" }]);
+    setupMemberships([]);
+    await notifyTeamHistoryAdded({
+      ...baseInput,
+      teamIds: ["tA", "tA", "", null as unknown as string],
+    });
+    expect(findManyTeam.mock.calls[0][0].where.id.in).toEqual(["tA"]);
+  });
+
+  it("acteur exclu du fetch memberships", async () => {
+    setupTeams([{ id: "tA", name: "RDN" }]);
+    setupMemberships([]);
+    await notifyTeamHistoryAdded(baseInput);
+    const where = findManyUserTeam.mock.calls[0][0].where;
+    expect(where.userId).toEqual({ not: "u-actor" });
+    expect(where.user).toEqual({ isActive: true });
+  });
+
+  it("sans actorId → où.userId absent", async () => {
+    setupTeams([{ id: "tA", name: "RDN" }]);
+    setupMemberships([]);
+    await notifyTeamHistoryAdded({ ...baseInput, actorId: null });
+    const where = findManyUserTeam.mock.calls[0][0].where;
+    expect(where.userId).toBeUndefined();
+  });
+
+  it("happy path — 1 user, 1 équipe → notif créée", async () => {
+    setupTeams([{ id: "tA", name: "Rive Droite Nord" }]);
+    setupMemberships([{ userId: "u1", teamId: "tA" }]);
+    createNotification.mockResolvedValue({ id: "n1" });
+    const n = await notifyTeamHistoryAdded(baseInput);
+    expect(n).toBe(1);
+    const arg = createNotification.mock.calls[0][0];
+    expect(arg.userId).toBe("u1");
+    expect(arg.type).toBe("TEAM_HISTORY_ADDED");
+    expect(arg.title).toBe("Nouvel élément d'historique");
+    expect(arg.message).toBe(
+      "Un nouvel élément a été ajouté dans l'historique de l'équipe Rive Droite Nord.",
+    );
+    expect(arg.targetUrl).toBe("/sessions/s1");
+    expect(arg.dedupKey).toBe("TEAM_HISTORY_ADDED:session:s1:u1");
+  });
+
+  it("targetUrl fallback /history si non fourni", async () => {
+    setupTeams([{ id: "tA", name: "RDN" }]);
+    setupMemberships([{ userId: "u1", teamId: "tA" }]);
+    createNotification.mockResolvedValue({ id: "n1" });
+    await notifyTeamHistoryAdded({ ...baseInput, targetUrl: null });
+    expect(createNotification.mock.calls[0][0].targetUrl).toBe("/history");
+  });
+
+  it("multi-équipes — user dédupliqué (1 notif même s'il appartient à 2 équipes)", async () => {
+    setupTeams([
+      { id: "tA", name: "Alpha" },
+      { id: "tB", name: "Beta" },
+    ]);
+    // u1 dans tA ET tB ; u2 uniquement dans tB
+    setupMemberships([
+      { userId: "u1", teamId: "tA" },
+      { userId: "u1", teamId: "tB" },
+      { userId: "u2", teamId: "tB" },
+    ]);
+    createNotification.mockResolvedValue({ id: "n" });
+    const n = await notifyTeamHistoryAdded({
+      ...baseInput,
+      teamIds: ["tA", "tB"],
+    });
+    expect(n).toBe(2);
+    // 1 createNotification par destinataire, pas 3
+    expect(createNotification).toHaveBeenCalledTimes(2);
+    const userIds = createNotification.mock.calls.map((c) => c[0].userId);
+    expect(userIds.sort()).toEqual(["u1", "u2"]);
+  });
+
+  it("dedupKey contient userId — 2 users → 2 dedupKeys distincts", async () => {
+    setupTeams([{ id: "tA", name: "RDN" }]);
+    setupMemberships([
+      { userId: "u1", teamId: "tA" },
+      { userId: "u2", teamId: "tA" },
+    ]);
+    createNotification.mockResolvedValue({ id: "n" });
+    await notifyTeamHistoryAdded(baseInput);
+    const keys = createNotification.mock.calls.map((c) => c[0].dedupKey);
+    expect(keys).toEqual([
+      "TEAM_HISTORY_ADDED:session:s1:u1",
+      "TEAM_HISTORY_ADDED:session:s1:u2",
+    ]);
+  });
+
+  it("aucun membre éligible → 0", async () => {
+    setupTeams([{ id: "tA", name: "RDN" }]);
+    setupMemberships([]);
+    const n = await notifyTeamHistoryAdded(baseInput);
+    expect(n).toBe(0);
+    expect(createNotification).not.toHaveBeenCalled();
+  });
+
+  it("doublon — createNotification renvoie null pour 1 user → compte juste les créés", async () => {
+    setupTeams([{ id: "tA", name: "RDN" }]);
+    setupMemberships([
+      { userId: "u1", teamId: "tA" },
+      { userId: "u2", teamId: "tA" },
+    ]);
+    createNotification
+      .mockResolvedValueOnce({ id: "n1" })
+      .mockResolvedValueOnce(null); // u2 déjà notifié
+    const n = await notifyTeamHistoryAdded(baseInput);
+    expect(n).toBe(1);
+  });
+
+  it("isActive=true exigé dans le where memberships (cloisonnement strict)", async () => {
+    setupTeams([{ id: "tA", name: "RDN" }]);
+    setupMemberships([]);
+    await notifyTeamHistoryAdded(baseInput);
+    expect(findManyUserTeam.mock.calls[0][0].where.user.isActive).toBe(true);
+  });
+
+  it("erreur Prisma → catch + 0 (jamais de throw)", async () => {
+    findManyTeam.mockRejectedValue(new Error("DB down"));
+    const n = await notifyTeamHistoryAdded(baseInput);
+    expect(n).toBe(0);
   });
 });

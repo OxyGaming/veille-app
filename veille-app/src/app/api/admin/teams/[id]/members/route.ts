@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
+import { notifyTeamMembershipAddedSafe } from "@/lib/notifications-generators";
 
 const schema = z.object({
   /** Liste complète des userIds membres. */
@@ -49,8 +50,9 @@ export async function PATCH(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  let actor;
   try {
-    await requireRole("ADMIN");
+    actor = await requireRole("ADMIN");
   } catch (r) {
     return r as Response;
   }
@@ -69,6 +71,11 @@ export async function PATCH(
     );
   }
 
+  // Sprint Push V1 C9 — capturer la liste des users effectivement
+  // ajoutés pour notifier hors transaction (la transaction reste
+  // métier-only, pas d'I/O en dépendance).
+  let addedUserIds: string[] = [];
+
   await prisma.$transaction(async (tx) => {
     if (parsed.data.userIds) {
       const wanted = new Set(parsed.data.userIds);
@@ -76,6 +83,7 @@ export async function PATCH(
       const currentIds = new Set(current.map((m) => m.userId));
       const toRemove = current.filter((m) => !wanted.has(m.userId));
       const toAdd = [...wanted].filter((u) => !currentIds.has(u));
+      addedUserIds = toAdd;
       if (toRemove.length) {
         await tx.userTeam.deleteMany({
           where: { id: { in: toRemove.map((m) => m.id) } },
@@ -101,6 +109,28 @@ export async function PATCH(
       }
     }
   });
+
+  // Sprint Push V1 C9 — notif aux users ajoutés (1 par user, dédupliquée
+  // par dedupKey TEAM_MEMBERSHIP_ADDED:{teamId}:{userId}). Hors-transaction
+  // pour ne pas faire dépendre l'écriture métier d'une notif. `Safe`
+  // garantit qu'aucune erreur ne casse la route.
+  // Aucune notif pour les agents ajoutés (pas un user).
+  if (addedUserIds.length > 0) {
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: { name: true },
+    });
+    if (team) {
+      for (const userId of addedUserIds) {
+        await notifyTeamMembershipAddedSafe({
+          userId,
+          teamId,
+          teamName: team.name,
+          actorId: actor.id,
+        });
+      }
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

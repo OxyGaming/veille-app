@@ -16,12 +16,16 @@ import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/logger";
 import { sendPushNotification } from "@/lib/push/sender";
 
-/** Types de notification V1 (cf. D3 Sprint 5). */
+/** Types de notification V1 (cf. D3 Sprint 5 + Sprint Push V1 C9). */
 export const NOTIFICATION_TYPES = [
   "ACTION_ASSIGNED_TO_ME",
   "ACTION_VALIDATED_ON_MY_ACTION",
   "VISIT_FINISHED_ON_MY_SITE",
   "ECHEANCE_CRITICAL_ON_MY_PERIMETER",
+  /** Sprint Push V1 C9 — ajout du destinataire dans une équipe. */
+  "TEAM_MEMBERSHIP_ADDED",
+  /** Sprint Push V1 C9 — nouvel élément dans l'historique de l'équipe. */
+  "TEAM_HISTORY_ADDED",
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

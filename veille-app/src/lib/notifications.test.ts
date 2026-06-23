@@ -63,16 +63,18 @@ beforeEach(() => {
 // ─── Types constants ────────────────────────────────────────────────────────
 
 describe("NOTIFICATION_TYPES + isKnownNotificationType", () => {
-  it("expose exactement les 4 types V1", () => {
+  it("expose les 6 types V1 (4 + 2 ajoutés Sprint Push C9)", () => {
     expect(NOTIFICATION_TYPES).toEqual([
       "ACTION_ASSIGNED_TO_ME",
       "ACTION_VALIDATED_ON_MY_ACTION",
       "VISIT_FINISHED_ON_MY_SITE",
       "ECHEANCE_CRITICAL_ON_MY_PERIMETER",
+      "TEAM_MEMBERSHIP_ADDED",
+      "TEAM_HISTORY_ADDED",
     ]);
   });
 
-  it("reconnaît les 4 types valides", () => {
+  it("reconnaît les types valides", () => {
     for (const t of NOTIFICATION_TYPES) {
       expect(isKnownNotificationType(t)).toBe(true);
     }

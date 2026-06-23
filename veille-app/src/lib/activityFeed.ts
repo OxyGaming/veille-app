@@ -13,6 +13,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/logger";
+import { notifyTeamHistoryAdded } from "@/lib/notifications-generators";
 
 /** Liste exhaustive des types d'événements suivis V1 + V1.1 équipement. */
 export const ACTIVITY_TYPES = [
@@ -90,6 +91,26 @@ export async function recordActivity(
       metadata,
     })),
   });
+
+  // Sprint Push V1 C9 — déclenche TEAM_HISTORY_ADDED pour les membres
+  // actifs des équipes concernées (acteur exclu). Fire-and-forget : la
+  // notif ne doit jamais retarder ou casser l'écriture activité.
+  // notifyTeamHistoryAdded catch en interne et renvoie 0 sur erreur.
+  notifyTeamHistoryAdded({
+    teamIds,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    actorId: input.actorId ?? null,
+    targetUrl: input.targetUrl ?? null,
+  }).catch((e) => {
+    log.error("activityFeed.notify.team-history.failed", {
+      type: input.type,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      err: e instanceof Error ? e.message : String(e),
+    });
+  });
+
   return res.count;
 }
 

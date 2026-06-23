@@ -276,3 +276,164 @@ function composeEcheanceMessage(item: EcheanceItem): string {
   }
   return parts.join(" — ");
 }
+
+// ─── Type 5 — TEAM_MEMBERSHIP_ADDED (Sprint Push V1 C9) ──────────────────────
+
+export type NotifyTeamMembershipAddedInput = {
+  /** Destinataire — l'utilisateur ajouté à l'équipe. */
+  userId: string;
+  teamId: string;
+  teamName: string;
+  /** ADMIN qui a effectué l'ajout (peut être le destinataire lui-même). */
+  actorId?: string | null;
+};
+
+/**
+ * Notifie l'utilisateur ajouté à une équipe. USER + EDITOR + ADMIN
+ * peuvent recevoir.
+ *
+ * Décision actor self-add (admin qui s'ajoute lui-même) : on notifie
+ * quand même. Raison : trace dans le centre de notifications,
+ * cohérent avec la règle « le destinataire = l'utilisateur ajouté ».
+ *
+ * Dédup : `TEAM_MEMBERSHIP_ADDED:{teamId}:{userId}`. Conséquence
+ * acceptée V1 : retirer puis réajouter ne re-notifie pas (la notif
+ * précédente est toujours en base).
+ *
+ * `targetUrl` = `/today` — pas de page équipe accessible aux non-ADMIN.
+ */
+export async function notifyTeamMembershipAdded(
+  input: NotifyTeamMembershipAddedInput,
+): Promise<number> {
+  const dedupKey = `TEAM_MEMBERSHIP_ADDED:${input.teamId}:${input.userId}`;
+  const row = await createNotification({
+    userId: input.userId,
+    type: "TEAM_MEMBERSHIP_ADDED",
+    title: "Nouvelle équipe",
+    message: `Vous avez été ajouté à l'équipe ${input.teamName}.`,
+    targetUrl: "/today",
+    dedupKey,
+    metadata: {
+      teamId: input.teamId,
+      actorId: input.actorId ?? null,
+    },
+  });
+  return row ? 1 : 0;
+}
+
+/**
+ * Variante non-bloquante (catch + log). À utiliser dans les routes
+ * mutantes pour ne jamais casser l'opération principale d'ajout.
+ */
+export async function notifyTeamMembershipAddedSafe(
+  input: NotifyTeamMembershipAddedInput,
+): Promise<number> {
+  try {
+    return await notifyTeamMembershipAdded(input);
+  } catch (e) {
+    log.error("notifications.team-membership.failed", {
+      userId: input.userId,
+      teamId: input.teamId,
+      err: e instanceof Error ? e.message : String(e),
+    });
+    return 0;
+  }
+}
+
+// ─── Type 6 — TEAM_HISTORY_ADDED (Sprint Push V1 C9) ─────────────────────────
+
+export type NotifyTeamHistoryAddedInput = {
+  /** Équipes concernées par l'événement (union à notifier). */
+  teamIds: string[];
+  /** Type d'entité d'origine (visit, session, action, agent, equipment, site). */
+  entityType: string;
+  entityId: string;
+  /** Auteur de l'event — exclu des destinataires. Null si système. */
+  actorId?: string | null;
+  /** URL cible déjà calculée par `recordActivity`. Fallback `/history`. */
+  targetUrl?: string | null;
+};
+
+/**
+ * Notifie les membres actifs des équipes concernées qu'un nouvel
+ * élément a été ajouté à leur historique.
+ *
+ * Règles cloisonnement :
+ *  - SELECT users WHERE membership.teamId IN (input.teamIds) AND
+ *    user.isActive = true. → JAMAIS un user hors équipe.
+ *  - Dédup côté résultat (un user dans N équipes du périmètre →
+ *    1 seule notification, garantie par la clé Unique sur
+ *    (userId, dedupKey) avec userId dans dedupKey).
+ *  - Acteur exclu.
+ *
+ * Dédup : `TEAM_HISTORY_ADDED:{entityType}:{entityId}:{userId}` —
+ * un même event ne crée jamais N notifs au même user.
+ *
+ * Le push suit en cascade via `createNotification → sendPushNotification`
+ * (C6). `catEquipes=false` côté préférence → push skip, notif in-app
+ * conservée. Conforme spec.
+ */
+export async function notifyTeamHistoryAdded(
+  input: NotifyTeamHistoryAddedInput,
+): Promise<number> {
+  const teamIds = [
+    ...new Set(input.teamIds.filter((t): t is string => typeof t === "string" && t.length > 0)),
+  ];
+  if (teamIds.length === 0) return 0;
+
+  try {
+    const teams = await prisma.team.findMany({
+      where: { id: { in: teamIds } },
+      select: { id: true, name: true },
+    });
+    const teamNameById = new Map(teams.map((t) => [t.id, t.name]));
+
+    // Memberships : on récupère une row par (user, team) du périmètre,
+    // active, hors acteur. La dédup user est appliquée côté JS pour
+    // garder la 1ère teamName rencontrée (suffisant pour le message
+    // générique demandé en spec).
+    const memberships = await prisma.userTeam.findMany({
+      where: {
+        teamId: { in: teamIds },
+        user: { isActive: true },
+        ...(input.actorId ? { userId: { not: input.actorId } } : {}),
+      },
+      select: { userId: true, teamId: true },
+    });
+
+    const userToTeamName = new Map<string, string>();
+    for (const m of memberships) {
+      if (userToTeamName.has(m.userId)) continue;
+      userToTeamName.set(m.userId, teamNameById.get(m.teamId) ?? "—");
+    }
+
+    let created = 0;
+    const targetUrl = input.targetUrl ?? "/history";
+    for (const [userId, teamName] of userToTeamName) {
+      const dedupKey = `TEAM_HISTORY_ADDED:${input.entityType}:${input.entityId}:${userId}`;
+      const row = await createNotification({
+        userId,
+        type: "TEAM_HISTORY_ADDED",
+        title: "Nouvel élément d'historique",
+        message: `Un nouvel élément a été ajouté dans l'historique de l'équipe ${teamName}.`,
+        targetUrl,
+        dedupKey,
+        metadata: {
+          entityType: input.entityType,
+          entityId: input.entityId,
+          actorId: input.actorId ?? null,
+        },
+      });
+      if (row) created++;
+    }
+    return created;
+  } catch (e) {
+    log.error("notifications.team-history.failed", {
+      teamIds,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      err: e instanceof Error ? e.message : String(e),
+    });
+    return 0;
+  }
+}

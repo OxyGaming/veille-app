@@ -55,10 +55,9 @@ export function DashboardActionsProgress({ data }: { data: Data }) {
           </p>
         </div>
       ) : (
-        // C13.2 — Plus de cap : on garde tous les groupes. Scroll
-        // vertical si la liste dépasse ~15 lignes (la hauteur visible
-        // approximative correspond à un viewport mobile confortable).
-        <ul className="space-y-2 rounded-xl border border-slate-200 bg-white p-3 max-h-[640px] overflow-y-auto">
+        // C13.3 — Plus de scroll : la liste se déroule naturellement
+        // dans la page (la pagination reste possible via le Hub Échéances).
+        <ul className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
           {data.items.map((g) => (
             <ActionGroupRow key={g.title} group={g} />
           ))}
@@ -125,20 +124,29 @@ function ActionGroupRow({ group: g }: { group: DashboardActionGroup }) {
       </div>
       {pendingCount > 0 && (
         <div className="mt-1.5">
+          {/* C13.3 — Bouton compact : icône chevron seule + petit
+              compteur. Le libellé long est remplacé par un title. */}
           <button
             type="button"
             onClick={() => setOpen((s) => !s)}
             aria-expanded={open}
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800"
+            aria-label={
+              open
+                ? "Masquer le détail"
+                : `Voir les ${pendingCount} ${noun}${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}`
+            }
+            title={
+              open
+                ? "Masquer le détail"
+                : `Voir les ${pendingCount} ${noun}${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}`
+            }
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
           >
-            {open ? (
-              <Icon.ChevronUp className="w-3 h-3" aria-hidden />
-            ) : (
-              <Icon.ChevronDown className="w-3 h-3" aria-hidden />
-            )}
-            {open
-              ? "Masquer le détail"
-              : `Voir les ${pendingCount} ${noun}${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}`}
+            <Icon.ChevronDown
+              className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`}
+              aria-hidden
+            />
+            <span className="font-mono">{pendingCount}</span>
           </button>
           {open && (
             <ul className="mt-2 flex flex-wrap gap-1.5">

@@ -55,11 +55,34 @@ export type DashboardTrend = {
 /** C13 — Catégorisation V1 des NC par template. */
 export type NcKind = "INVENTORY" | "QUARTERLY" | "PLANNED" | "OTHER";
 
+/** Une non-conformité ouverte affichée dans la liste détaillée du dashboard. */
+export type DashboardOpenNcItem = {
+  id: string;
+  kind: NcKind;
+  kindLabel: string;
+  siteId: string;
+  siteName: string;
+  /** Description courte de la NC (tronquée côté UI si besoin). */
+  description: string;
+  /** Date de détection (ISO 8601 — `createdAt` de la NC). */
+  detectedAt: string;
+  /** Lien direct vers le rapport de visite d'où vient la NC. */
+  visitReportUrl: string;
+};
+
 export type DashboardOpenNCs = {
   /** Total des NC non redressées dans le périmètre. */
   total: number;
-  /** Détail par catégorie de visite (rendu en barres). */
+  /** Compteurs par catégorie de visite (rendu en chips). */
   byKind: { kind: NcKind; label: string; count: number }[];
+  /**
+   * C13.3 — Liste détaillée des NC, triées par date détection desc
+   * (les plus récentes en premier). Cap à 100 pour éviter un payload
+   * géant — un compteur `extra` indique le surplus.
+   */
+  items: DashboardOpenNcItem[];
+  /** Nombre de NC non incluses dans `items` (au-delà du cap). */
+  extra: number;
 };
 
 /** Une cible (agent ou site) encore en attente sur un groupe d'actions. */
@@ -333,6 +356,8 @@ export async function aggregateDashboard(
       take: 10_000,
     }),
     // C13 — NC non redressées dans le scope (via teamScope sur SiteVisit).
+    // C13.3 — Select enrichi avec description + createdAt pour la liste
+    // détaillée affichée dans le dashboard.
     prisma.siteVisitNonConformity.findMany({
       where: {
         redressedDate: null,
@@ -340,14 +365,18 @@ export async function aggregateDashboard(
       },
       select: {
         id: true,
+        description: true,
+        createdAt: true,
         visit: {
           select: {
+            id: true,
             siteId: true,
             site: { select: { id: true, name: true } },
             template: { select: { kind: true, slug: true } },
           },
         },
       },
+      orderBy: { createdAt: "desc" },
       take: 10_000,
     }),
     // C13 — Toutes les actions du périmètre (ACTIVE + VALIDATED_LOCAL)
@@ -402,26 +431,45 @@ export async function aggregateDashboard(
   };
 
   // ─── C13 — NC non redressées par catégorie de visite ─────────────────────
+  // C13.3 — En plus du décompte par catégorie, on expose la liste
+  // détaillée des NC (site, description, date) pour un pilotage concret.
+  const NC_LIST_CAP = 100;
   const ncCountByKind: Record<NcKind, number> = {
     INVENTORY: 0,
     QUARTERLY: 0,
     PLANNED: 0,
     OTHER: 0,
   };
+  const ncItemsAll: DashboardOpenNcItem[] = [];
   for (const nc of openNcRows) {
-    const k = classifyNcKind(nc.visit.template);
-    ncCountByKind[k]++;
+    const kind = classifyNcKind(nc.visit.template);
+    ncCountByKind[kind]++;
+    if (!nc.visit.site) continue;
+    ncItemsAll.push({
+      id: nc.id,
+      kind,
+      kindLabel: NC_KIND_LABEL[kind],
+      siteId: nc.visit.site.id,
+      siteName: nc.visit.site.name,
+      description: truncateTitle(nc.description, 140),
+      detectedAt: nc.createdAt.toISOString(),
+      visitReportUrl: `/visits/${nc.visit.id}/report`,
+    });
   }
   // L'ordre des kinds importe pour le rendu (gauche → droite).
   const openNonConformities: DashboardOpenNCs = {
     total: openNcRows.length,
     byKind: (["INVENTORY", "QUARTERLY", "PLANNED", "OTHER"] as NcKind[])
-      .filter((k) => ncCountByKind[k] > 0 || k !== "OTHER")
+      // C13.3 — Ne montre que les catégories avec au moins 1 NC ouverte
+      // pour réduire le bruit visuel.
+      .filter((k) => ncCountByKind[k] > 0)
       .map((k) => ({
         kind: k,
         label: NC_KIND_LABEL[k],
         count: ncCountByKind[k],
       })),
+    items: ncItemsAll.slice(0, NC_LIST_CAP),
+    extra: Math.max(0, ncItemsAll.length - NC_LIST_CAP),
   };
 
   // ─── C13 — Actions agrégées par titre ────────────────────────────────────

@@ -2,70 +2,95 @@ import Link from "next/link";
 import type { DashboardOpenNCs as Data } from "@/lib/dashboard-aggregator";
 
 /**
- * NC non redressées par type de visite (C13).
+ * NC non redressées (C13 + C13.3).
  *
- * Barres horizontales proportionnelles au total. Lien vers `/history`
- * filtré au clic du compteur.
+ * Compteurs par catégorie en haut (chips colorés), puis liste détaillée
+ * des NC avec site + description + date + lien direct vers le rapport
+ * de visite. Pas de bouton « Détail » — chaque NC est cliquable.
  */
 export function DashboardOpenNCs({ data }: { data: Data }) {
-  const max = Math.max(1, ...data.byKind.map((k) => k.count));
   return (
     <section className="px-4 lg:px-8 mt-8">
       <div className="flex items-baseline justify-between mb-2">
         <h2 className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
           Non-conformités non redressées
+          {data.total > 0 && (
+            <span className="ml-1.5 normal-case font-sans text-slate-400">
+              ({data.total})
+            </span>
+          )}
         </h2>
-        <Link
-          href="/history?type=visit"
-          className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800"
-        >
-          Détail →
-        </Link>
       </div>
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="flex items-baseline gap-2 mb-3">
-          <span className="text-3xl font-bold text-rose-700">{data.total}</span>
-          <span className="text-xs text-slate-500">
-            NC ouvertes au total
-          </span>
-        </div>
-        {data.byKind.length === 0 ? (
+      {data.total === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-5 text-center">
           <p className="text-sm text-slate-500">
             Aucune non-conformité ouverte.
           </p>
-        ) : (
-          <ul className="space-y-2.5">
-            {data.byKind.map((k) => {
-              const widthPct = Math.round((k.count / max) * 100);
-              return (
-                <li key={k.kind}>
-                  <div className="flex items-baseline justify-between text-xs">
-                    <span className="font-medium text-slate-700">
-                      {k.label}
-                    </span>
-                    <span className="font-mono font-semibold text-slate-900">
-                      {k.count}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+          {/* Compteurs par catégorie en chips colorés. */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {data.byKind.map((k) => (
+              <span
+                key={k.kind}
+                className="inline-flex items-center gap-1.5 rounded-md bg-rose-50 px-2 py-1 text-xs"
+                title={`${k.count} NC ${k.label}`}
+              >
+                <span className="font-mono font-semibold text-rose-700">
+                  {k.count}
+                </span>
+                <span className="text-slate-700">{k.label}</span>
+              </span>
+            ))}
+          </div>
+          {/* Liste détaillée — un item par NC. */}
+          <ul className="divide-y divide-slate-100">
+            {data.items.map((nc) => (
+              <li key={nc.id} className="py-2.5">
+                <Link
+                  href={nc.visitReportUrl}
+                  className="group block hover:bg-slate-50 -mx-2 px-2 py-1 rounded-md"
+                >
+                  <div className="flex items-baseline justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-medium text-slate-600 uppercase">
+                          {nc.kindLabel}
+                        </span>
+                        <span className="text-sm font-medium text-slate-900 truncate group-hover:text-indigo-700">
+                          {nc.siteName}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-slate-600 line-clamp-2">
+                        {nc.description}
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                      {formatDetected(nc.detectedAt)}
                     </span>
                   </div>
-                  <div
-                    className="mt-1 h-2 rounded-full bg-slate-100 overflow-hidden"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={max}
-                    aria-valuenow={k.count}
-                    aria-label={`${k.label} : ${k.count} non-conformités`}
-                  >
-                    <div
-                      className="h-full bg-rose-500"
-                      style={{ width: `${Math.max(2, widthPct)}%` }}
-                    />
-                  </div>
-                </li>
-              );
-            })}
+                </Link>
+              </li>
+            ))}
+            {data.extra > 0 && (
+              <li className="py-2 text-center text-[11px] text-slate-500">
+                + {data.extra} non listée{data.extra > 1 ? "s" : ""}
+              </li>
+            )}
           </ul>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
+}
+
+/** Date ISO → "JJ/MM/AA" pour économiser la largeur. */
+function formatDetected(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = String(d.getFullYear()).slice(2);
+  return `${day}/${month}/${year}`;
 }

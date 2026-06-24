@@ -210,25 +210,32 @@ export default function AgentActionsClient({
             : `${actions.length} action${actions.length > 1 ? "s" : ""} en cours.`}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* C11.3 — harmonisé avec les cartes /today : carrés icône-only. */}
           <button
             type="button"
             onClick={() => setSighting(true)}
-            className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:text-emerald-700 inline-flex items-center gap-1.5"
+            className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 w-9 h-9"
             title={
               targetKind === "site"
                 ? "Marquer une prise en compte du site"
                 : "Marquer une simple prise en compte de l'agent (sans veille)"
             }
+            aria-label={
+              targetKind === "site"
+                ? "Marquer une prise en compte du site"
+                : `Marquer ${agentName} comme vu`
+            }
           >
-            <Icon.Check className="w-4 h-4" /> Vu
+            <Icon.Eye className="w-4 h-4" aria-hidden />
           </button>
           <button
             type="button"
             onClick={() => setNoting(true)}
-            className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700 inline-flex items-center gap-1.5"
+            className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 w-9 h-9"
             title="Commentaire personnalisé (texte libre + photos)"
+            aria-label="Ajouter un commentaire"
           >
-            <Icon.MessageSquare className="w-4 h-4" /> Commentaire
+            <Icon.MessageSquare className="w-4 h-4" aria-hidden />
           </button>
           {targetKind === "agent" && (
             <>

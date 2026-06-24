@@ -5,6 +5,8 @@ import { agentScope, requireUser } from "@/lib/auth";
 import {
   defaultMessageFor,
   defaultTargetUrlFor,
+  formatQuotedSnippet,
+  joinActivityParts,
   recordActivitySafe,
 } from "@/lib/activityFeed";
 
@@ -94,11 +96,17 @@ export async function POST(
     entityType: "agent",
     entityId: agentId,
     entityLabel: agentName,
-    message: defaultMessageFor({
-      type,
-      actorName: u.name,
-      entityLabel: agentName,
-    }),
+    // Enrichi C10 — on inclut le commentaire (optionnel pour SIGHT,
+    // obligatoire pour NOTE) directement dans le message pour qu'il
+    // soit visible côté push et /notifications sans cliquer.
+    message: joinActivityParts([
+      defaultMessageFor({
+        type,
+        actorName: u.name,
+        entityLabel: agentName,
+      }),
+      formatQuotedSnippet(parsed.data.comment),
+    ]),
     targetUrl: defaultTargetUrlFor({ entityType: "agent", entityId: agentId }),
     metadata: {
       sightingId: sighting.id,

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { requireUser, assertTeamAccess } from "@/lib/auth";
 import {
   defaultMessageFor,
+  formatQuotedSnippet,
+  joinActivityParts,
   recordActivitySafe,
 } from "@/lib/activityFeed";
 import { notifyActionValidated } from "@/lib/notifications-generators";
@@ -107,11 +109,15 @@ export async function POST(
     entityType: "action",
     entityId: action.id,
     entityLabel: label,
-    message: defaultMessageFor({
-      type: "ACTION_VALIDATED",
-      actorName: u.name,
-      entityLabel: label,
-    }),
+    // Enrichi C10 — commentaire de validation s'il est fourni.
+    message: joinActivityParts([
+      defaultMessageFor({
+        type: "ACTION_VALIDATED",
+        actorName: u.name,
+        entityLabel: label,
+      }),
+      formatQuotedSnippet(parsed.data.comment),
+    ]),
     targetUrl,
     metadata: {
       actionId: action.id,

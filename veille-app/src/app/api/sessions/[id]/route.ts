@@ -5,6 +5,8 @@ import { requireUser, teamScope } from "@/lib/auth";
 import {
   defaultMessageFor,
   defaultTargetUrlFor,
+  formatQuotedSnippet,
+  joinActivityParts,
   recordActivitySafe,
 } from "@/lib/activityFeed";
 
@@ -161,6 +163,23 @@ export async function PATCH(
         if (it.status === "NON_CONFORME") nonConformitiesCount++;
       }
     }
+    // Enrichi C10 — message inclut les intitulés de procédures observées,
+    // le bilan (points / NC) et le commentaire général. Cap 3 procédures
+    // listées sinon "+N" pour rester sous la limite de payload push.
+    const procedureTitles = existing.procedures
+      .map((po) => po.procedure.title?.trim())
+      .filter((t): t is string => Boolean(t));
+    let procedurePart: string | null = null;
+    if (procedureTitles.length > 0) {
+      procedurePart =
+        procedureTitles.length <= 3
+          ? `Procédures : ${procedureTitles.join(", ")}.`
+          : `Procédures : ${procedureTitles.slice(0, 3).join(", ")} (+${procedureTitles.length - 3}).`;
+    }
+    const statsPart =
+      itemsCount > 0
+        ? `${itemsCount} point${itemsCount > 1 ? "s" : ""}, ${nonConformitiesCount} NC.`
+        : null;
     await recordActivitySafe({
       teamIds: [updated.teamId],
       actorId: u.id,
@@ -169,11 +188,16 @@ export async function PATCH(
       entityType: "session",
       entityId: updated.id,
       entityLabel: agentName,
-      message: defaultMessageFor({
-        type: "SESSION_FINISHED",
-        actorName: u.name,
-        entityLabel: agentName,
-      }),
+      message: joinActivityParts([
+        defaultMessageFor({
+          type: "SESSION_FINISHED",
+          actorName: u.name,
+          entityLabel: agentName,
+        }),
+        procedurePart,
+        statsPart,
+        formatQuotedSnippet(existing.generalComment),
+      ]),
       targetUrl: `/sessions/${updated.id}/report`,
       metadata: {
         agentId: existing.agentId,

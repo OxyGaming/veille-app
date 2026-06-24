@@ -7,6 +7,8 @@ import { agentScope, requireUser } from "@/lib/auth";
 import { encodeTags, normalizeTag } from "@/lib/tags";
 import {
   defaultMessageFor,
+  formatQuotedSnippet,
+  joinActivityParts,
   recordActivitySafe,
 } from "@/lib/activityFeed";
 import { notifyActionAssigned } from "@/lib/notifications-generators";
@@ -119,11 +121,15 @@ export async function POST(
     entityType: "action",
     entityId: created.id,
     entityLabel: agentName,
-    message: defaultMessageFor({
-      type: "ACTION_CREATED",
-      actorName: u.name,
-      entityLabel: agentName,
-    }),
+    // Enrichi C10 — titre/keyPoint de l'action dans le message.
+    message: joinActivityParts([
+      defaultMessageFor({
+        type: "ACTION_CREATED",
+        actorName: u.name,
+        entityLabel: agentName,
+      }),
+      formatQuotedSnippet(title),
+    ]),
     targetUrl: `/agents/${agentId}`,
     metadata: {
       actionId: created.id,

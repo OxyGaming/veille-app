@@ -4,6 +4,8 @@ import {
   ACTIVITY_ENTITY_TYPES,
   defaultMessageFor,
   defaultTargetUrlFor,
+  formatQuotedSnippet,
+  joinActivityParts,
 } from "./activityFeed";
 
 /**
@@ -154,5 +156,75 @@ describe("defaultTargetUrlFor", () => {
     expect(
       defaultTargetUrlFor({ entityType: "session", entityId: "" }),
     ).toBeNull();
+  });
+});
+
+// ─── formatQuotedSnippet + joinActivityParts (C10) ──────────────────────────
+
+describe("formatQuotedSnippet", () => {
+  it("encadre un texte non vide entre guillemets français", () => {
+    expect(formatQuotedSnippet("RAS")).toBe("« RAS »");
+  });
+
+  it("trim le texte avant traitement", () => {
+    expect(formatQuotedSnippet("  bonjour  ")).toBe("« bonjour »");
+  });
+
+  it("renvoie null si vide ou whitespace", () => {
+    expect(formatQuotedSnippet(null)).toBeNull();
+    expect(formatQuotedSnippet(undefined)).toBeNull();
+    expect(formatQuotedSnippet("")).toBeNull();
+    expect(formatQuotedSnippet("   ")).toBeNull();
+  });
+
+  it("tronque avec ellipse si > max chars", () => {
+    const long = "a".repeat(200);
+    const out = formatQuotedSnippet(long, 50);
+    expect(out).toBe(`« ${"a".repeat(49)}… »`);
+    expect(out!.length).toBeLessThan(60);
+  });
+
+  it("ne tronque pas si exactement max chars", () => {
+    const fifty = "a".repeat(50);
+    expect(formatQuotedSnippet(fifty, 50)).toBe(`« ${fifty} »`);
+  });
+
+  it("default max = 140 chars", () => {
+    const huge = "x".repeat(500);
+    const out = formatQuotedSnippet(huge);
+    expect(out).toContain("…");
+    expect(out!.length).toBeLessThan(150);
+  });
+});
+
+describe("joinActivityParts", () => {
+  it("joint avec un espace, ignore null/undefined/vide", () => {
+    expect(
+      joinActivityParts(["A", null, "B", undefined, "", "  ", "C"]),
+    ).toBe("A B C");
+  });
+
+  it("trim chaque part avant join", () => {
+    expect(joinActivityParts(["  A  ", " B"])).toBe("A B");
+  });
+
+  it("tout vide → string vide", () => {
+    expect(joinActivityParts([null, undefined, "", "  "])).toBe("");
+  });
+
+  it("composition réelle — message + snippet", () => {
+    const out = joinActivityParts([
+      "Jessy a vu Tom Martin.",
+      formatQuotedSnippet("RAS au poste."),
+    ]);
+    expect(out).toBe("Jessy a vu Tom Martin. « RAS au poste. »");
+  });
+
+  it("composition réelle — pas de snippet → message brut sans espace final", () => {
+    const out = joinActivityParts([
+      "Jessy a vu Tom Martin.",
+      formatQuotedSnippet(null),
+    ]);
+    expect(out).toBe("Jessy a vu Tom Martin.");
   });
 });

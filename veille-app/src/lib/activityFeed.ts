@@ -143,6 +143,37 @@ export async function recordActivitySafe(
 // ─── Helpers purs (testables sans Prisma) ────────────────────────────────────
 
 /**
+ * Tronque un texte libre et l'encadre de guillemets français pour
+ * l'intégrer à un message d'activité / push. Vide → null (le caller
+ * n'ajoute rien). Tronquage à `max` chars (défaut 140) avec ellipse.
+ *
+ * Utilisé par les call-sites de `recordActivitySafe` pour enrichir
+ * automatiquement le message avec un commentaire utilisateur.
+ */
+export function formatQuotedSnippet(
+  text: string | null | undefined,
+  max = 140,
+): string | null {
+  const t = text?.trim();
+  if (!t) return null;
+  if (t.length <= max) return `« ${t} »`;
+  return `« ${t.slice(0, max - 1).trimEnd()}… »`;
+}
+
+/**
+ * Joint plusieurs fragments en filtrant les valeurs vides/null. Évite
+ * les doubles espaces et facilite la composition côté call-site.
+ */
+export function joinActivityParts(
+  parts: (string | null | undefined)[],
+): string {
+  return parts
+    .map((p) => p?.trim())
+    .filter((p): p is string => Boolean(p && p.length > 0))
+    .join(" ");
+}
+
+/**
  * Compose un message humain par défaut depuis le type d'événement, le nom
  * de l'acteur et le libellé de l'entité. Reste neutre quand les données
  * manquent (« Quelqu'un », « — »).

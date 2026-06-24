@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { requireUser, siteScope } from "@/lib/auth";
 import {
   defaultMessageFor,
+  formatQuotedSnippet,
+  joinActivityParts,
   recordActivitySafe,
 } from "@/lib/activityFeed";
 
@@ -118,6 +120,12 @@ export async function POST(
       ]),
     ];
     const label = `${data.category.trim()} — ${data.label.trim()}`;
+    // Enrichi C10 — quantité attendue, date de péremption, notes.
+    const detailBits: string[] = [];
+    if (data.expectedQuantity)
+      detailBits.push(`Qté ${data.expectedQuantity}.`);
+    if (data.expirationDate)
+      detailBits.push(`Péremption ${data.expirationDate.slice(0, 10)}.`);
     await recordActivitySafe({
       teamIds,
       actorId: u.id,
@@ -126,11 +134,15 @@ export async function POST(
       entityType: "equipment",
       entityId: created.id,
       entityLabel: label,
-      message: defaultMessageFor({
-        type: "EQUIPMENT_ADDED",
-        actorName: u.name,
-        entityLabel: label,
-      }),
+      message: joinActivityParts([
+        defaultMessageFor({
+          type: "EQUIPMENT_ADDED",
+          actorName: u.name,
+          entityLabel: label,
+        }),
+        detailBits.join(" ") || null,
+        formatQuotedSnippet(data.notes),
+      ]),
       targetUrl: `/sites/${siteId}`,
       metadata: {
         siteId,

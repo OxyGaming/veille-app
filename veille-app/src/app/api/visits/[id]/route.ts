@@ -12,6 +12,8 @@ import {
 } from "@/lib/tags";
 import {
   defaultMessageFor,
+  formatQuotedSnippet,
+  joinActivityParts,
   recordActivitySafe,
 } from "@/lib/activityFeed";
 import { notifyVisitFinished } from "@/lib/notifications-generators";
@@ -176,6 +178,11 @@ export async function PATCH(
       where: { visitId: updated.id },
     });
     const label = `${existing.template.name} — ${existing.site.name}`;
+    // Enrichi C10 — bilan NC + commentaire général.
+    const ncPart =
+      ncCount > 0
+        ? `${ncCount} non-conformité${ncCount > 1 ? "s" : ""}.`
+        : "Aucune non-conformité.";
     await recordActivitySafe({
       teamIds,
       actorId: u.id,
@@ -184,11 +191,15 @@ export async function PATCH(
       entityType: "visit",
       entityId: updated.id,
       entityLabel: label,
-      message: defaultMessageFor({
-        type: "VISIT_FINISHED",
-        actorName: u.name,
-        entityLabel: label,
-      }),
+      message: joinActivityParts([
+        defaultMessageFor({
+          type: "VISIT_FINISHED",
+          actorName: u.name,
+          entityLabel: label,
+        }),
+        ncPart,
+        formatQuotedSnippet(updated.generalComment ?? existing.generalComment),
+      ]),
       targetUrl: `/visits/${updated.id}/report`,
       metadata: {
         siteId: existing.siteId,
@@ -323,6 +334,14 @@ async function generateInventoryNonConformities(visitId: string, teamId: string)
           ...siteFull.memberships.map((m) => m.teamId),
         ]),
       ];
+      // Enrichi C10 — type d'écart en clair + commentaire d'observation.
+      const discrepancyLabel =
+        ({
+          MISSING: "Élément manquant.",
+          EXPIRED: "Élément périmé.",
+          QUANTITY_LOW: "Quantité insuffisante.",
+          DAMAGED: "Élément détérioré.",
+        } as const)[o.discrepancyType as string] ?? "Écart constaté.";
       await recordActivitySafe({
         teamIds,
         actorId: null,
@@ -331,11 +350,15 @@ async function generateInventoryNonConformities(visitId: string, teamId: string)
         entityType: "equipment",
         entityId: o.equipment.id,
         entityLabel: eqLabel,
-        message: defaultMessageFor({
-          type: "EQUIPMENT_NON_COMPLIANT",
-          actorName: "Système",
-          entityLabel: eqLabel,
-        }),
+        message: joinActivityParts([
+          defaultMessageFor({
+            type: "EQUIPMENT_NON_COMPLIANT",
+            actorName: "Système",
+            entityLabel: eqLabel,
+          }),
+          discrepancyLabel,
+          formatQuotedSnippet(o.comment),
+        ]),
         targetUrl: `/sites/${visit.siteId}`,
         metadata: {
           visitId,

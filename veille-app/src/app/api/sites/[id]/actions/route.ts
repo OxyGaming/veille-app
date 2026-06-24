@@ -7,6 +7,8 @@ import { requireUser, siteScope } from "@/lib/auth";
 import { encodeTags, normalizeTag } from "@/lib/tags";
 import {
   defaultMessageFor,
+  formatQuotedSnippet,
+  joinActivityParts,
   recordActivitySafe,
 } from "@/lib/activityFeed";
 import { notifyActionAssigned } from "@/lib/notifications-generators";
@@ -111,11 +113,15 @@ export async function POST(
     entityType: "action",
     entityId: created.id,
     entityLabel: site.name,
-    message: defaultMessageFor({
-      type: "ACTION_CREATED",
-      actorName: u.name,
-      entityLabel: site.name,
-    }),
+    // Enrichi C10 — titre/keyPoint de l'action dans le message.
+    message: joinActivityParts([
+      defaultMessageFor({
+        type: "ACTION_CREATED",
+        actorName: u.name,
+        entityLabel: site.name,
+      }),
+      formatQuotedSnippet(title),
+    ]),
     targetUrl: `/sites/${siteId}`,
     metadata: {
       actionId: created.id,

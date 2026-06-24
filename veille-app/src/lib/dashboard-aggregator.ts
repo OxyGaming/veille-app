@@ -24,6 +24,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { aggregateEcheances } from "@/lib/echeances/aggregator";
 import type { EcheanceItem } from "@/lib/echeances/types";
+import { parseTags } from "@/lib/tags";
 
 export type DashboardPeriod = 30 | 90;
 
@@ -133,13 +134,27 @@ export type DashboardActionGroup = {
    * groupe (ISO 8601). `null` si aucune action n'a de date.
    */
   nextDueAt: string | null;
+  /**
+   * C17 — Union des tags rencontrés sur l'ensemble des actions du
+   * groupe (dédupliqués, triés asc). Utilisé pour le filtre côté UI.
+   */
+  tags: string[];
 };
 
 export type DashboardActionsProgress = {
-  /** Groupes ayant au moins 1 action ACTIVE. Tri : moins avancés en premier (priorité visuelle). */
+  /**
+   * Groupes ayant au moins 1 action ACTIVE.
+   * C17 — Tri par défaut : taux décroissant (plus avancés en premier).
+   * Le user peut changer le tri côté UI via le sélecteur.
+   */
   items: DashboardActionGroup[];
   /** Nombre total de groupes distincts avant la limite affichée. */
   totalGroups: number;
+  /**
+   * C17 — Tags distincts présents sur l'ensemble des groupes (union,
+   * dédupliqués, triés asc). Alimente le filtre côté UI.
+   */
+  availableTags: string[];
 };
 
 export type DashboardTopSite = {
@@ -419,6 +434,8 @@ export async function aggregateDashboard(
         },
         actionPlan: true,
         dueAt: true,
+        // C17 — Tags pour permettre le filtre côté UI.
+        tags: true,
       },
       take: 10_000,
     }),
@@ -509,7 +526,11 @@ export async function aggregateDashboard(
     firstPlan: string | null;
     /** Date la plus proche parmi les actions ACTIVE. */
     nextDueAt: Date | null;
+    /** C17 — Union des tags rencontrés sur les actions du groupe. */
+    tags: Set<string>;
   };
+  // C17 — Catalogue global des tags rencontrés (pour le filtre UI).
+  const globalTags = new Set<string>();
   const actionByTitle = new Map<string, AggrAction>();
   for (const a of actionGroupRows) {
     const title = truncateTitle(a.keyPoint);
@@ -520,11 +541,19 @@ export async function aggregateDashboard(
       plans: new Set<string | null>(),
       firstPlan: null,
       nextDueAt: null,
+      tags: new Set<string>(),
     };
     agg.total++;
     const planNorm = a.actionPlan?.trim() || null;
     agg.plans.add(planNorm);
     if (planNorm && !agg.firstPlan) agg.firstPlan = planNorm;
+    // C17 — Tags : on stocke côté groupe ET au catalogue global.
+    for (const t of parseTags(a.tags)) {
+      const trimmed = t.trim();
+      if (!trimmed) continue;
+      agg.tags.add(trimmed);
+      globalTags.add(trimmed);
+    }
     if (a.localStatus === "VALIDATED_LOCAL") {
       agg.done++;
     } else {
@@ -587,18 +616,17 @@ export async function aggregateDashboard(
       pendingExtra,
       planLabel,
       nextDueAt: agg.nextDueAt ? agg.nextDueAt.toISOString() : null,
+      tags: [...agg.tags].sort((a, b) => a.localeCompare(b, "fr")),
     });
   }
-  // Tri : moins avancés (% croissant) puis taille (total décroissant)
-  // pour mettre les gros chantiers en haut.
-  allGroups.sort((a, b) => a.percent - b.percent || b.total - a.total);
-  // C13.2 — Cap retiré : on affiche tous les groupes pour éviter qu'une
-  // action nouvellement créée disparaisse silencieusement du dashboard.
-  // Le scroll vertical côté UI gère la lisibilité quand la liste devient
-  // longue.
+  // C17 — Tri par défaut : taux de complétion DÉCROISSANT (les plus
+  // avancés en premier) puis taille croissante (les petits chantiers
+  // bientôt finis remontent). Le user peut changer côté UI.
+  allGroups.sort((a, b) => b.percent - a.percent || a.total - b.total);
   const actionsProgress: DashboardActionsProgress = {
     items: allGroups,
     totalGroups: allGroups.length,
+    availableTags: [...globalTags].sort((a, b) => a.localeCompare(b, "fr")),
   };
 
   // ─── C13 — Top sites prioritaires ────────────────────────────────────────

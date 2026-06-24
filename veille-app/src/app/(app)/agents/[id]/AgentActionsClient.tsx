@@ -237,12 +237,15 @@ export default function AgentActionsClient({
           >
             <Icon.MessageSquare className="w-4 h-4" aria-hidden />
           </button>
+          {/* C11.6 — harmonisé carré icône-only comme Vu / Comm. */}
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="btn btn-primary"
+            className="inline-flex items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 hover:bg-amber-50 w-9 h-9"
+            title="Ajouter une action à traiter pour cet agent"
+            aria-label="Ajouter une action"
           >
-            <Icon.Plus className="w-4 h-4" /> Ajouter une action
+            <Icon.Plus className="w-4 h-4" aria-hidden />
           </button>
           {targetKind === "agent" && (
             // C11.5 — bouton démarrer une veille placé en dernier

@@ -237,9 +237,16 @@ export default function AgentActionsClient({
           >
             <Icon.MessageSquare className="w-4 h-4" aria-hidden />
           </button>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="btn btn-primary"
+          >
+            <Icon.Plus className="w-4 h-4" /> Ajouter une action
+          </button>
           {targetKind === "agent" && (
-            // C11.4 — harmonisé avec les cartes /today : plein indigo
-            // avec libellé complet + chevron.
+            // C11.5 — bouton démarrer une veille placé en dernier
+            // (action principale à droite).
             <Link
               href={`/sessions/new?agentId=${agentId}`}
               className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 min-h-[36px]"
@@ -249,13 +256,6 @@ export default function AgentActionsClient({
               <Icon.ChevronRight className="w-3.5 h-3.5" aria-hidden />
             </Link>
           )}
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="btn btn-primary"
-          >
-            <Icon.Plus className="w-4 h-4" /> Ajouter une action
-          </button>
         </div>
       </div>
       {adding && (

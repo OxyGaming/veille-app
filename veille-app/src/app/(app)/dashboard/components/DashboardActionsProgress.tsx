@@ -123,30 +123,32 @@ function ActionGroupRow({ group: g }: { group: DashboardActionGroup }) {
         <div className={`h-full ${barColor}`} style={{ width: `${widthPct}%` }} />
       </div>
       {pendingCount > 0 && (
-        <div className="mt-1.5">
-          {/* C13.3 — Bouton compact : icône chevron seule + petit
-              compteur. Le libellé long est remplacé par un title. */}
-          <button
-            type="button"
-            onClick={() => setOpen((s) => !s)}
-            aria-expanded={open}
-            aria-label={
-              open
-                ? "Masquer le détail"
-                : `Voir les ${pendingCount} ${noun}${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}`
-            }
-            title={
-              open
-                ? "Masquer le détail"
-                : `Voir les ${pendingCount} ${noun}${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}`
-            }
-            className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white w-7 h-7 text-slate-600 hover:bg-slate-50"
-          >
-            <Icon.ChevronDown
-              className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`}
-              aria-hidden
-            />
-          </button>
+        <>
+          {/* C13.5 — Chevron aligné à droite, cohérent avec les autres
+              icônes du dashboard. */}
+          <div className="mt-1.5 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setOpen((s) => !s)}
+              aria-expanded={open}
+              aria-label={
+                open
+                  ? "Masquer le détail"
+                  : `Voir les ${pendingCount} ${noun}${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}`
+              }
+              title={
+                open
+                  ? "Masquer le détail"
+                  : `Voir les ${pendingCount} ${noun}${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}`
+              }
+              className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white w-7 h-7 text-slate-600 hover:bg-slate-50"
+            >
+              <Icon.ChevronDown
+                className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`}
+                aria-hidden
+              />
+            </button>
+          </div>
           {open && (
             <ul className="mt-2 flex flex-wrap gap-1.5">
               {g.pending.map((p, i) => (
@@ -160,7 +162,7 @@ function ActionGroupRow({ group: g }: { group: DashboardActionGroup }) {
               )}
             </ul>
           )}
-        </div>
+        </>
       )}
     </li>
   );

@@ -238,22 +238,16 @@ export default function AgentActionsClient({
             <Icon.MessageSquare className="w-4 h-4" aria-hidden />
           </button>
           {targetKind === "agent" && (
-            <>
-              {/*
-                NB : on utilise `text-base` (et non `text-xs` comme les
-                boutons frères Vu/Commentaire) parce qu'un reset global
-                `button { font: inherit }` neutralise text-xs sur les
-                <button> ; sans cet ajustement le lien <a> rendrait plus
-                petit que les boutons (12 px vs 16 px) — visible à l'œil.
-              */}
-              <Link
-                href={`/sessions/new?agentId=${agentId}`}
-                className="text-base font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-700 inline-flex items-center gap-1.5"
-                title="Démarrer une nouvelle session de veille pour cet agent"
-              >
-                <Icon.ClipboardCheck className="w-4 h-4" /> Veiller
-              </Link>
-            </>
+            // C11.4 — harmonisé avec les cartes /today : plein indigo
+            // avec libellé complet + chevron.
+            <Link
+              href={`/sessions/new?agentId=${agentId}`}
+              className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 min-h-[36px]"
+              title="Démarrer une nouvelle session de veille pour cet agent"
+            >
+              Démarrer une veille
+              <Icon.ChevronRight className="w-3.5 h-3.5" aria-hidden />
+            </Link>
           )}
           <button
             type="button"

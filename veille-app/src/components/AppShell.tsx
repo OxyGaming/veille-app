@@ -67,9 +67,11 @@ export default function AppShell({
   const isEditor = isAdmin || user.role === "EDITOR";
   const showEcheances = echeancesEnabled && isEditor;
 
+  // C18 — Mobile : Pilotage remplace Échéances (l'accès aux échéances
+  // reste dispo via le menu desktop + lien depuis le dashboard).
   const navMobile = [
     ...(todayEnabled ? [TODAY_ITEM] : []),
-    ...(showEcheances ? [ECHEANCES_ITEM] : []),
+    ...(isEditor ? [PILOTAGE_ITEM] : []),
     ...BASE_NAV_MOBILE,
   ];
   const navDesktop = [

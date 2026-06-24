@@ -9,6 +9,18 @@ import type {
   DashboardActionsProgress as Data,
 } from "@/lib/dashboard-aggregator";
 
+/**
+ * C18 — Normalise une chaîne pour la recherche : minuscules + retire
+ * les accents (NFD + suppression des combining diacritics). Permet à
+ * "echeance" de matcher "Échéance".
+ */
+function normalizeForSearch(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
 /** C17 — Options de tri exposées côté UI. */
 type SortKey = "percentDesc" | "percentAsc" | "dueAsc" | "totalDesc";
 
@@ -64,17 +76,37 @@ function formatDueDate(iso: string | null): string {
  * Top 10 affiché, lien vers `/admin/actions` pour le détail complet.
  */
 export function DashboardActionsProgress({ data }: { data: Data }) {
-  // C17 — Filtre tag (multi) + tri côté client. Les données complètes
-  // sont déjà chargées en SSR, on filtre/tri en mémoire.
+  // C17 — Filtre tag (multi) + tri côté client.
+  // C18 — Moteur de recherche côté client (titre, plan, agents/sites,
+  // tags). Les données complètes sont déjà chargées en SSR.
   const [sortKey, setSortKey] = useState<SortKey>("percentDesc");
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
 
   const filtered = useMemo(() => {
-    if (selectedTags.size === 0) return data.items;
-    return data.items.filter((g) =>
-      g.tags.some((t) => selectedTags.has(t)),
-    );
-  }, [data.items, selectedTags]);
+    let arr = data.items;
+    // Filtre tag (OR multi).
+    if (selectedTags.size > 0) {
+      arr = arr.filter((g) => g.tags.some((t) => selectedTags.has(t)));
+    }
+    // Filtre recherche : un groupe matche si la query est trouvée dans
+    // n'importe lequel des champs suivants (titre, plan, tags, labels
+    // des agents/sites en attente). Accents insensibles via NFD.
+    const q = search.trim();
+    if (q) {
+      const nq = normalizeForSearch(q);
+      arr = arr.filter((g) => {
+        const haystackParts: string[] = [
+          g.title,
+          g.planLabel ?? "",
+          ...g.tags,
+          ...g.pending.map((p) => p.label),
+        ];
+        return normalizeForSearch(haystackParts.join(" ")).includes(nq);
+      });
+    }
+    return arr;
+  }, [data.items, selectedTags, search]);
 
   const sorted = useMemo(
     () => sortGroups(filtered, sortKey),
@@ -102,7 +134,9 @@ export function DashboardActionsProgress({ data }: { data: Data }) {
           {sorted.length > 0 && (
             <span className="ml-1.5 normal-case font-sans text-slate-400">
               ({sorted.length}
-              {selectedTags.size > 0 && ` / ${data.items.length}`})
+              {(selectedTags.size > 0 || search.trim() !== "") &&
+                ` / ${data.items.length}`}
+              )
             </span>
           )}
         </h2>
@@ -113,6 +147,37 @@ export function DashboardActionsProgress({ data }: { data: Data }) {
           Hub échéances →
         </Link>
       </div>
+
+      {/* C18 — Champ de recherche en haut (titre, plan, agents, tags). */}
+      {data.items.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 mb-2">
+          <div className="relative">
+            <Icon.Search
+              className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none"
+              aria-hidden
+            />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher un titre, un plan, un agent, un tag…"
+              aria-label="Rechercher dans les actions"
+              className="w-full pl-7 pr-8 py-1.5 text-xs rounded-md border border-slate-300 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Effacer la recherche"
+                title="Effacer"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <Icon.X className="w-3.5 h-3.5" aria-hidden />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* C17 — Barre filtre tags + sélecteur de tri. */}
       {data.items.length > 0 && (
@@ -173,8 +238,8 @@ export function DashboardActionsProgress({ data }: { data: Data }) {
       {sorted.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white p-5 text-center">
           <p className="text-sm text-slate-500">
-            {selectedTags.size > 0
-              ? "Aucune action ne correspond aux tags sélectionnés."
+            {search.trim() !== "" || selectedTags.size > 0
+              ? "Aucune action ne correspond à votre recherche."
               : "Aucune action en cours dans votre périmètre."}
           </p>
         </div>

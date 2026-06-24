@@ -18,6 +18,10 @@ describe("getCategoryForType", () => {
     expect(getCategoryForType("TEAM_MEMBERSHIP_ADDED")).toBe("catEquipes");
   });
 
+  it("TEAM_HISTORY_ADDED → catEquipes (C9.2)", () => {
+    expect(getCategoryForType("TEAM_HISTORY_ADDED")).toBe("catEquipes");
+  });
+
   it("types existants NON mappés en V1 → null (pas de push)", () => {
     expect(getCategoryForType("ACTION_ASSIGNED_TO_ME")).toBeNull();
     expect(getCategoryForType("ACTION_VALIDATED_ON_MY_ACTION")).toBeNull();

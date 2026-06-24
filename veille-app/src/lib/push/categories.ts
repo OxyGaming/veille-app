@@ -31,12 +31,17 @@ export const PUSH_CATEGORY_KEYS: readonly PushCategoryKey[] = [
  * Mapping type → catégorie. Les `NotificationType` non listés ne sont
  * pas poussés en V1. Utiliser des string keys plutôt que le type union
  * `NotificationType` permet d'inclure des types pas encore déclarés
- * (cf. `TEAM_MEMBERSHIP_ADDED` qui sera ajouté à `NOTIFICATION_TYPES`
- * en C9).
+ * (cf. `TEAM_MEMBERSHIP_ADDED` ajouté en C9).
+ *
+ * TEAM_HISTORY_ADDED utilise catEquipes : volume élevé attendu (1
+ * notif par membre et par event de recordActivity, parmi 9 types),
+ * désactivable individuellement par chaque user dans
+ * `/account/notifications` si trop bruyant.
  */
 const CATEGORY_BY_TYPE: Readonly<Record<string, PushCategoryKey>> = {
   ECHEANCE_CRITICAL_ON_MY_PERIMETER: "catEcheances",
   TEAM_MEMBERSHIP_ADDED: "catEquipes",
+  TEAM_HISTORY_ADDED: "catEquipes",
 } as const;
 
 /**

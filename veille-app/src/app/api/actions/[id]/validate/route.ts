@@ -128,7 +128,20 @@ export async function POST(
         data: { expirationDate: parsedExpiration },
       });
     }
-    return validation;
+    // C14 — Ferme la NC liée si l'action en provient. Couvre les 3 cas :
+    //  - Visite INVENTORY auto-générée (cf. /api/visits/[id]/route.ts
+    //    generateInventoryNonConformities) → SiteVisitNonConformity créée
+    //    avec generatedActionId.
+    //  - Trimestrielle / Planifiée NC saisie manuellement avec
+    //    generateAction=true (cf. /api/visits/[id]/non-conformities/route.ts).
+    // Filtre `redressedDate: null` : idempotent + ne réécrase pas un
+    // redressement déjà saisi à la main. updateMany no-op silencieux
+    // si l'action n'a pas de NC associée (action manuelle / import Excel).
+    const ncUpdate = await tx.siteVisitNonConformity.updateMany({
+      where: { generatedActionId: action.id, redressedDate: null },
+      data: { redressedDate: realizedAt },
+    });
+    return { validation, ncRedressedCount: ncUpdate.count };
   });
 
   // C12 — Flux d'activité EQUIPMENT_REPLACED quand on a réellement
@@ -215,7 +228,8 @@ export async function POST(
       actionId: action.id,
       agentId: action.agentId,
       siteId: action.siteId,
-      validationId: result.id,
+      validationId: result.validation.id,
+      ncRedressedCount: result.ncRedressedCount,
       realizedAt: realizedAt.toISOString(),
     },
   });
@@ -231,5 +245,8 @@ export async function POST(
     actionLabel: label,
   });
 
-  return NextResponse.json(result);
+  return NextResponse.json({
+    ...result.validation,
+    ncRedressedCount: result.ncRedressedCount,
+  });
 }

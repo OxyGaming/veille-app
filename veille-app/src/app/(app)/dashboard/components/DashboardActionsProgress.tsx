@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
-import { displayTag } from "@/lib/tags";
 import type {
   DashboardActionGroup,
   DashboardActionsProgress as Data,
@@ -76,55 +75,32 @@ function formatDueDate(iso: string | null): string {
  * Top 10 affiché, lien vers `/admin/actions` pour le détail complet.
  */
 export function DashboardActionsProgress({ data }: { data: Data }) {
-  // C17 — Filtre tag (multi) + tri côté client.
   // C18 — Moteur de recherche côté client (titre, plan, agents/sites,
   // tags). Les données complètes sont déjà chargées en SSR.
+  // C18.1 — Filtre tags retiré : la recherche couvre les tags via
+  // g.tags inclus dans le haystack.
   const [sortKey, setSortKey] = useState<SortKey>("percentDesc");
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
 
   const filtered = useMemo(() => {
-    let arr = data.items;
-    // Filtre tag (OR multi).
-    if (selectedTags.size > 0) {
-      arr = arr.filter((g) => g.tags.some((t) => selectedTags.has(t)));
-    }
-    // Filtre recherche : un groupe matche si la query est trouvée dans
-    // n'importe lequel des champs suivants (titre, plan, tags, labels
-    // des agents/sites en attente). Accents insensibles via NFD.
     const q = search.trim();
-    if (q) {
-      const nq = normalizeForSearch(q);
-      arr = arr.filter((g) => {
-        const haystackParts: string[] = [
-          g.title,
-          g.planLabel ?? "",
-          ...g.tags,
-          ...g.pending.map((p) => p.label),
-        ];
-        return normalizeForSearch(haystackParts.join(" ")).includes(nq);
-      });
-    }
-    return arr;
-  }, [data.items, selectedTags, search]);
+    if (!q) return data.items;
+    const nq = normalizeForSearch(q);
+    return data.items.filter((g) => {
+      const haystackParts: string[] = [
+        g.title,
+        g.planLabel ?? "",
+        ...g.tags,
+        ...g.pending.map((p) => p.label),
+      ];
+      return normalizeForSearch(haystackParts.join(" ")).includes(nq);
+    });
+  }, [data.items, search]);
 
   const sorted = useMemo(
     () => sortGroups(filtered, sortKey),
     [filtered, sortKey],
   );
-
-  function toggleTag(tag: string) {
-    setSelectedTags((prev) => {
-      const next = new Set(prev);
-      if (next.has(tag)) next.delete(tag);
-      else next.add(tag);
-      return next;
-    });
-  }
-
-  function clearTags() {
-    setSelectedTags(new Set());
-  }
 
   return (
     <section className="px-4 lg:px-8 mt-8">
@@ -134,9 +110,7 @@ export function DashboardActionsProgress({ data }: { data: Data }) {
           {sorted.length > 0 && (
             <span className="ml-1.5 normal-case font-sans text-slate-400">
               ({sorted.length}
-              {(selectedTags.size > 0 || search.trim() !== "") &&
-                ` / ${data.items.length}`}
-              )
+              {search.trim() !== "" && ` / ${data.items.length}`})
             </span>
           )}
         </h2>
@@ -179,7 +153,8 @@ export function DashboardActionsProgress({ data }: { data: Data }) {
         </div>
       )}
 
-      {/* C17 — Barre filtre tags + sélecteur de tri. */}
+      {/* C18.1 — Sélecteur de tri seul (filtre tags retiré, redondant
+          avec le moteur de recherche). */}
       {data.items.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 mb-2 flex items-center gap-3 flex-wrap">
           <label className="text-[11px] font-medium text-slate-600 inline-flex items-center gap-1.5">
@@ -196,49 +171,13 @@ export function DashboardActionsProgress({ data }: { data: Data }) {
               ))}
             </select>
           </label>
-          {data.availableTags.length > 0 && (
-            <>
-              <span className="text-[11px] text-slate-400">·</span>
-              <span className="text-[11px] font-medium text-slate-600">
-                Tags :
-              </span>
-              <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-                {data.availableTags.map((t) => {
-                  const active = selectedTags.has(t);
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => toggleTag(t)}
-                      className={
-                        active
-                          ? "inline-flex items-center rounded-md bg-indigo-600 text-white px-2 py-0.5 text-[11px] font-medium"
-                          : "inline-flex items-center rounded-md bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium hover:bg-slate-200"
-                      }
-                    >
-                      {displayTag(t)}
-                    </button>
-                  );
-                })}
-                {selectedTags.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={clearTags}
-                    className="inline-flex items-center rounded-md border border-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
-                  >
-                    Effacer
-                  </button>
-                )}
-              </div>
-            </>
-          )}
         </div>
       )}
 
       {sorted.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white p-5 text-center">
           <p className="text-sm text-slate-500">
-            {search.trim() !== "" || selectedTags.size > 0
+            {search.trim() !== ""
               ? "Aucune action ne correspond à votre recherche."
               : "Aucune action en cours dans votre périmètre."}
           </p>

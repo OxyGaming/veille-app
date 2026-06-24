@@ -150,11 +150,6 @@ export type DashboardActionsProgress = {
   items: DashboardActionGroup[];
   /** Nombre total de groupes distincts avant la limite affichée. */
   totalGroups: number;
-  /**
-   * C17 — Tags distincts présents sur l'ensemble des groupes (union,
-   * dédupliqués, triés asc). Alimente le filtre côté UI.
-   */
-  availableTags: string[];
 };
 
 export type DashboardTopSite = {
@@ -529,8 +524,6 @@ export async function aggregateDashboard(
     /** C17 — Union des tags rencontrés sur les actions du groupe. */
     tags: Set<string>;
   };
-  // C17 — Catalogue global des tags rencontrés (pour le filtre UI).
-  const globalTags = new Set<string>();
   const actionByTitle = new Map<string, AggrAction>();
   for (const a of actionGroupRows) {
     const title = truncateTitle(a.keyPoint);
@@ -547,12 +540,11 @@ export async function aggregateDashboard(
     const planNorm = a.actionPlan?.trim() || null;
     agg.plans.add(planNorm);
     if (planNorm && !agg.firstPlan) agg.firstPlan = planNorm;
-    // C17 — Tags : on stocke côté groupe ET au catalogue global.
+    // C17 — Tags : stockés par groupe pour alimenter la recherche client.
     for (const t of parseTags(a.tags)) {
       const trimmed = t.trim();
       if (!trimmed) continue;
       agg.tags.add(trimmed);
-      globalTags.add(trimmed);
     }
     if (a.localStatus === "VALIDATED_LOCAL") {
       agg.done++;
@@ -626,7 +618,6 @@ export async function aggregateDashboard(
   const actionsProgress: DashboardActionsProgress = {
     items: allGroups,
     totalGroups: allGroups.length,
-    availableTags: [...globalTags].sort((a, b) => a.localeCompare(b, "fr")),
   };
 
   // ─── C13 — Top sites prioritaires ────────────────────────────────────────

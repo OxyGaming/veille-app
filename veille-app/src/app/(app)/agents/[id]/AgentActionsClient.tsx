@@ -205,7 +205,14 @@ export default function AgentActionsClient({
       toast.success(
         equipmentUpdate ? "Remplacement enregistré" : "Action validée",
       );
+      // C12.1 — refresh complet : router.refresh() seul ne suffit pas
+      // toujours à rafraîchir le rendu côté serveur (compteurs site,
+      // /echeances, etc.). Reload après ~500 ms pour laisser le toast
+      // visible.
       router.refresh();
+      if (typeof window !== "undefined") {
+        window.setTimeout(() => window.location.reload(), 500);
+      }
     } finally {
       setBusy(false);
     }

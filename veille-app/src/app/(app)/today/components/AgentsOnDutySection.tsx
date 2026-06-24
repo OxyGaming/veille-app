@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { Sparkline } from "@/components/charts";
 import type { AgentOnDutyItem, DutyStatus } from "@/lib/today/planning";
+import { AgentQuickActions } from "./AgentQuickActions";
 
 type Props = {
   items: AgentOnDutyItem[];
@@ -130,13 +131,15 @@ function AgentOnDutyCard({ item }: { item: AgentOnDutyItem }) {
           </div>
         )}
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-2 shrink-0 flex-wrap">
         <Link
           href={`/agents/${item.agentId}`}
           className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 min-h-[36px]"
         >
           Fiche agent
         </Link>
+        {/* C11 — Vu + Commentaire rapides depuis la liste Aujourd'hui. */}
+        <AgentQuickActions agentId={item.agentId} agentName={item.agentName} />
         <Link
           href={`/sessions/new?agentId=${item.agentId}`}
           className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 min-h-[36px]"

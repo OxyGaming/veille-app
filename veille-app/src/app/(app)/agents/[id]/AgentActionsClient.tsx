@@ -11,6 +11,9 @@ import { TagChips, TagInput } from "@/components/TagChips";
 import { TAG_OBLIGATOIRE, TAG_VEILLE_LEGALE } from "@/lib/tags";
 import NoteModal from "@/components/NoteModal";
 import SightingModal from "@/components/SightingModal";
+import ResolveEquipmentModal, {
+  type ResolveEquipmentLink,
+} from "@/components/ResolveEquipmentModal";
 
 type Duplicate = {
   id: string;
@@ -70,6 +73,12 @@ export default function AgentActionsClient({
   const [obsoleting, setObsoleting] = useState<Action | null>(null);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
+  /** C12 — lien équipement chargé en background quand on ouvre la validation. */
+  const [equipmentLink, setEquipmentLink] =
+    useState<ResolveEquipmentLink | null>(null);
+  /** C12 — true quand la modal de résolution équipement est affichée
+   *  (à la place de la modal classique). */
+  const [resolvingEquipment, setResolvingEquipment] = useState(false);
   const [obsoleteBusy, setObsoleteBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
@@ -130,22 +139,58 @@ export default function AgentActionsClient({
     });
   }
 
-  function openValidate(a: Action) {
+  async function openValidate(a: Action) {
     setValidating(a);
     setComment("");
+    setEquipmentLink(null);
+    setResolvingEquipment(false);
+    // C12 — récupère le lien équipement de manière non-bloquante. Si
+    // l'action est liée à un équipement périissable, on bascule sur la
+    // modal de résolution (qui demande la nouvelle date de péremption).
+    try {
+      const r = await fetch(`/api/actions/${a.id}/equipment-link`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!r.ok) return;
+      const data = await r.json();
+      if (data?.linked && data?.isPerishable) {
+        setEquipmentLink({
+          equipmentId: data.equipmentId,
+          equipmentLabel: data.equipmentLabel,
+          equipmentCategory: data.equipmentCategory,
+          expectedQuantity: data.expectedQuantity ?? null,
+          discrepancyType: data.discrepancyType ?? null,
+          siteName: data.siteName,
+        });
+        setResolvingEquipment(true);
+      }
+    } catch {
+      // Silencieux : tomber sur la validation classique.
+    }
   }
 
-  async function confirmValidate() {
+  /**
+   * Lance la cascade de validation. Si un `equipmentUpdate` est fourni
+   * (cas équipement périissable), il est transmis à tous les endpoints :
+   * le serveur applique uniquement aux actions effectivement liées
+   * (idempotent en cascade de doublons).
+   */
+  async function runValidationCascade(
+    equipmentUpdate: { expirationDate: string } | null,
+  ) {
     if (!validating) return;
     setBusy(true);
     try {
-      // Validation cascade : valide toutes les actions du groupe de doublons.
       const ids = validating.duplicates.map((d) => d.id);
       for (const aid of ids) {
         const res = await fetch(`/api/actions/${aid}/validate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ comment: comment.trim() || null }),
+          body: JSON.stringify({
+            comment: comment.trim() || null,
+            ...(equipmentUpdate ? { equipmentUpdate } : {}),
+          }),
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
@@ -155,7 +200,11 @@ export default function AgentActionsClient({
       }
       setActions((arr) => arr.filter((x) => x.id !== validating.id));
       setValidating(null);
-      toast.success("Action validée");
+      setEquipmentLink(null);
+      setResolvingEquipment(false);
+      toast.success(
+        equipmentUpdate ? "Remplacement enregistré" : "Action validée",
+      );
       router.refresh();
     } finally {
       setBusy(false);
@@ -522,13 +571,31 @@ export default function AgentActionsClient({
       </>
       )}
 
-      {validating && (
+      {/* C12 — Modal résolution équipement périssable (substitut au
+          ValidateModal quand l'action est liée). */}
+      {validating && resolvingEquipment && equipmentLink && (
+        <ResolveEquipmentModal
+          link={equipmentLink}
+          initialComment={comment}
+          busy={busy}
+          onClose={() => {
+            setValidating(null);
+            setEquipmentLink(null);
+            setResolvingEquipment(false);
+          }}
+          onConfirm={({ expirationDate, comment: c }) => {
+            setComment(c);
+            runValidationCascade({ expirationDate });
+          }}
+        />
+      )}
+      {validating && !resolvingEquipment && (
         <ValidateModal
           action={validating}
           comment={comment}
           setComment={setComment}
           busy={busy}
-          onConfirm={confirmValidate}
+          onConfirm={() => runValidationCascade(null)}
           onClose={() => setValidating(null)}
         />
       )}

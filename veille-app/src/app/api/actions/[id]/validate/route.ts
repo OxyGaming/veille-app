@@ -9,10 +9,24 @@ import {
   recordActivitySafe,
 } from "@/lib/activityFeed";
 import { notifyActionValidated } from "@/lib/notifications-generators";
+import { getEquipmentLinkForAction } from "@/lib/equipment-action-link";
+import { log } from "@/lib/logger";
 
 const schema = z.object({
   comment: z.string().nullable().optional(),
   realizedAt: z.string().datetime().optional(),
+  /**
+   * C12 — Mise à jour optionnelle de l'équipement remplacé.
+   * Présent uniquement si l'action provient d'une NC d'équipement
+   * périssable (vérifié côté serveur via getEquipmentLinkForAction).
+   * Accepte "YYYY-MM-DD" ou ISO datetime.
+   */
+  equipmentUpdate: z
+    .object({
+      expirationDate: z.string().min(8).max(40),
+    })
+    .optional()
+    .nullable(),
 });
 
 export async function POST(
@@ -62,6 +76,37 @@ export async function POST(
   }
   const realizedAt = parsed.data.realizedAt ? new Date(parsed.data.realizedAt) : new Date();
 
+  // C12 — Si l'action est liée à un équipement de visite INVENTORY,
+  // on récupère les infos pour potentiellement remettre à neuf la date
+  // de péremption au catalogue. Tolérant : null si pas lié, le flow
+  // continue avec la validation classique.
+  const equipmentLink = await getEquipmentLinkForAction(action.id);
+  const equipmentUpdate = parsed.data.equipmentUpdate ?? null;
+
+  // Validation cohérence — un equipmentUpdate ne peut être appliqué que
+  // si l'action est effectivement liée à un équipement périssable.
+  // On accepte le payload mais on n'update QUE dans ce cas (idempotent
+  // en cascade de doublons).
+  let parsedExpiration: Date | null = null;
+  const shouldUpdateEquipment = !!(
+    equipmentUpdate &&
+    equipmentLink &&
+    equipmentLink.isPerishable
+  );
+  if (shouldUpdateEquipment && equipmentUpdate) {
+    const raw = equipmentUpdate.expirationDate;
+    // Accepte "YYYY-MM-DD" (input HTML date) et ISO complet.
+    const normalized = raw.length === 10 ? `${raw}T00:00:00.000Z` : raw;
+    const d = new Date(normalized);
+    if (Number.isNaN(d.getTime())) {
+      return NextResponse.json(
+        { error: "Date de péremption invalide" },
+        { status: 400 },
+      );
+    }
+    parsedExpiration = d;
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const validation = await tx.actionValidation.create({
       data: {
@@ -77,8 +122,55 @@ export async function POST(
       where: { id: action.id },
       data: { localStatus: "VALIDATED_LOCAL", realizedAt },
     });
+    if (shouldUpdateEquipment && parsedExpiration && equipmentLink) {
+      await tx.siteEquipment.update({
+        where: { id: equipmentLink.equipmentId },
+        data: { expirationDate: parsedExpiration },
+      });
+    }
     return validation;
   });
+
+  // C12 — Flux d'activité EQUIPMENT_REPLACED quand on a réellement
+  // remis à neuf le catalogue. Push aux membres équipe via C9 + C10.
+  // Hors transaction : la trace n'a pas à bloquer la validation.
+  if (shouldUpdateEquipment && parsedExpiration && equipmentLink) {
+    const eqLabel = `${equipmentLink.equipmentCategory} — ${equipmentLink.equipmentLabel}`;
+    const detailBits: string[] = [];
+    detailBits.push(
+      `Péremption ${parsedExpiration.toISOString().slice(0, 10)}.`,
+    );
+    await recordActivitySafe({
+      teamIds: equipmentLink.teamIds,
+      actorId: u.id,
+      actorName: u.name,
+      type: "EQUIPMENT_REPLACED",
+      entityType: "equipment",
+      entityId: equipmentLink.equipmentId,
+      entityLabel: eqLabel,
+      message: joinActivityParts([
+        defaultMessageFor({
+          type: "EQUIPMENT_REPLACED",
+          actorName: u.name,
+          entityLabel: eqLabel,
+        }),
+        detailBits.join(" ") || null,
+      ]),
+      targetUrl: `/sites/${equipmentLink.siteId}`,
+      metadata: {
+        equipmentId: equipmentLink.equipmentId,
+        siteId: equipmentLink.siteId,
+        actionId: action.id,
+        previousDiscrepancyType: equipmentLink.discrepancyType,
+        newExpirationDate: parsedExpiration.toISOString(),
+      },
+    });
+    log.info("action.validate.equipment-replaced", {
+      actionId: action.id,
+      equipmentId: equipmentLink.equipmentId,
+      userId: u.id,
+    });
+  }
 
   // Flux d'activité — la stratégie multi-team dépend de la cible de l'action :
   //  - agent : duplique sur toutes les équipes de l'agent ;

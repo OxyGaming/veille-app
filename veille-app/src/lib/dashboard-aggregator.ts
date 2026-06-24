@@ -68,6 +68,12 @@ export type DashboardOpenNcItem = {
   detectedAt: string;
   /** Lien direct vers le rapport de visite d'où vient la NC. */
   visitReportUrl: string;
+  /**
+   * C15 — Action ImportedAction liée à la NC (via generatedActionId).
+   * Null si la NC n'a pas généré d'action (cas rare, NC saisie manuellement
+   * avec generateAction=false).
+   */
+  actionId: string | null;
 };
 
 export type DashboardOpenNCs = {
@@ -367,6 +373,8 @@ export async function aggregateDashboard(
         id: true,
         description: true,
         createdAt: true,
+        // C15 — generatedActionId pour activer la validation depuis le dashboard.
+        generatedActionId: true,
         visit: {
           select: {
             id: true,
@@ -454,6 +462,7 @@ export async function aggregateDashboard(
       description: truncateTitle(nc.description, 140),
       detectedAt: nc.createdAt.toISOString(),
       visitReportUrl: `/visits/${nc.visit.id}/report`,
+      actionId: nc.generatedActionId,
     });
   }
   // L'ordre des kinds importe pour le rendu (gauche → droite).

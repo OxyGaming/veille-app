@@ -62,6 +62,24 @@ export type DashboardOpenNCs = {
   byKind: { kind: NcKind; label: string; count: number }[];
 };
 
+/** Une cible (agent ou site) encore en attente sur un groupe d'actions. */
+export type DashboardActionTarget =
+  | {
+      kind: "agent";
+      agentId: string;
+      label: string;
+    }
+  | {
+      kind: "site";
+      siteId: string;
+      label: string;
+    }
+  | {
+      kind: "none";
+      /** Action sans agent ni site (rare — actions importées historiques). */
+      label: string;
+    };
+
 export type DashboardActionGroup = {
   /** Titre métier (keyPoint) — tronqué côté UI si besoin. */
   title: string;
@@ -69,6 +87,13 @@ export type DashboardActionGroup = {
   total: number;
   /** done / total × 100, arrondi entier. 0 si total=0 (cas impossible côté agg). */
   percent: number;
+  /**
+   * C13.1 — Cibles encore ACTIVE dans le groupe (agents non vus, sites
+   * non traités). Triées par nom asc. Caple à 50 pour éviter un payload
+   * géant côté HTML — un compteur `pendingExtra` indique le surplus.
+   */
+  pending: DashboardActionTarget[];
+  pendingExtra: number;
 };
 
 export type DashboardActionsProgress = {
@@ -317,6 +342,7 @@ export async function aggregateDashboard(
     }),
     // C13 — Toutes les actions du périmètre (ACTIVE + VALIDATED_LOCAL)
     // pour calculer les ratios par keyPoint.
+    // C13.1 — Ajout du select agent pour récupérer les cibles en attente.
     prisma.importedAction.findMany({
       where: {
         ...actionScope(user),
@@ -327,6 +353,10 @@ export async function aggregateDashboard(
         localStatus: true,
         siteId: true,
         site: { select: { id: true, name: true } },
+        agentId: true,
+        agent: {
+          select: { id: true, firstName: true, lastName: true },
+        },
       },
       take: 10_000,
     }),
@@ -382,13 +412,40 @@ export async function aggregateDashboard(
   };
 
   // ─── C13 — Actions agrégées par titre ────────────────────────────────────
-  type AggrAction = { done: number; total: number };
+  // C13.1 — Pour chaque groupe, on collecte aussi la liste des cibles
+  // (agent ou site) ACTIVE pour permettre le détail au clic côté UI.
+  const PENDING_CAP = 50;
+  type AggrAction = {
+    done: number;
+    total: number;
+    pending: DashboardActionTarget[];
+  };
   const actionByTitle = new Map<string, AggrAction>();
   for (const a of actionGroupRows) {
     const title = truncateTitle(a.keyPoint);
-    const agg = actionByTitle.get(title) ?? { done: 0, total: 0 };
+    const agg = actionByTitle.get(title) ?? {
+      done: 0,
+      total: 0,
+      pending: [] as DashboardActionTarget[],
+    };
     agg.total++;
-    if (a.localStatus === "VALIDATED_LOCAL") agg.done++;
+    if (a.localStatus === "VALIDATED_LOCAL") {
+      agg.done++;
+    } else {
+      // ACTIVE → on note la cible en attente (dédupliquée plus bas).
+      if (a.agent) {
+        const label = `${a.agent.lastName} ${a.agent.firstName}`.trim();
+        agg.pending.push({ kind: "agent", agentId: a.agent.id, label });
+      } else if (a.site) {
+        agg.pending.push({
+          kind: "site",
+          siteId: a.site.id,
+          label: a.site.name,
+        });
+      } else {
+        agg.pending.push({ kind: "none", label: "(sans cible)" });
+      }
+    }
     actionByTitle.set(title, agg);
   }
   const allGroups: DashboardActionGroup[] = [];
@@ -397,7 +454,33 @@ export async function aggregateDashboard(
     // (sinon le groupe est "fini" et ne mérite pas une barre).
     if (agg.total - agg.done <= 0) continue;
     const percent = Math.round((agg.done / agg.total) * 100);
-    allGroups.push({ title, done: agg.done, total: agg.total, percent });
+    // C13.1 — Déduplique par identité (agentId / siteId) pour éviter
+    // les doublons quand un même agent a 2 actions ACTIVE distinctes
+    // sur le même keyPoint (cas typique des dedupHash).
+    const seen = new Set<string>();
+    const uniquePending = agg.pending.filter((t) => {
+      const key =
+        t.kind === "agent"
+          ? `a:${t.agentId}`
+          : t.kind === "site"
+            ? `s:${t.siteId}`
+            : `n:${t.label}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    // Tri pending par label asc — stable et lisible côté UI.
+    uniquePending.sort((a, b) => a.label.localeCompare(b.label, "fr"));
+    const pendingCapped = uniquePending.slice(0, PENDING_CAP);
+    const pendingExtra = Math.max(0, uniquePending.length - PENDING_CAP);
+    allGroups.push({
+      title,
+      done: agg.done,
+      total: agg.total,
+      percent,
+      pending: pendingCapped,
+      pendingExtra,
+    });
   }
   // Tri : moins avancés (% croissant) puis taille (total décroissant)
   // pour mettre les gros chantiers en haut.

@@ -140,13 +140,12 @@ function ActionGroupRow({ group: g }: { group: DashboardActionGroup }) {
                 ? "Masquer le détail"
                 : `Voir les ${pendingCount} ${noun}${pendingCount > 1 ? "s" : ""} restant${pendingCount > 1 ? "s" : ""}`
             }
-            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+            className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white w-7 h-7 text-slate-600 hover:bg-slate-50"
           >
             <Icon.ChevronDown
               className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`}
               aria-hidden
             />
-            <span className="font-mono">{pendingCount}</span>
           </button>
           {open && (
             <ul className="mt-2 flex flex-wrap gap-1.5">

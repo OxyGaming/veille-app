@@ -15,6 +15,10 @@ const PUBLIC_PATHS = [
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/me",
+  // Sprint Push V1 C8 — routes cron protégées par header x-cron-secret
+  // côté route handler. Le proxy doit les bypasser (pas de cookie session
+  // côté curl). La sécurité réelle est dans le handler.
+  "/api/cron",
 ];
 
 const ADMIN_PATHS = ["/admin", "/api/admin"];

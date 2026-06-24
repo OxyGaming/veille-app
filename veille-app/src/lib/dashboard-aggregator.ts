@@ -94,6 +94,16 @@ export type DashboardActionGroup = {
    */
   pending: DashboardActionTarget[];
   pendingExtra: number;
+  /**
+   * C13.2 — Plan d'origine si TOUTES les actions du groupe partagent
+   * la même valeur (cohérence métier). Sinon `null` (groupe mixte).
+   */
+  planLabel: string | null;
+  /**
+   * C13.2 — Échéance la plus pressante parmi les actions ACTIVE du
+   * groupe (ISO 8601). `null` si aucune action n'a de date.
+   */
+  nextDueAt: string | null;
 };
 
 export type DashboardActionsProgress = {
@@ -343,6 +353,7 @@ export async function aggregateDashboard(
     // C13 — Toutes les actions du périmètre (ACTIVE + VALIDATED_LOCAL)
     // pour calculer les ratios par keyPoint.
     // C13.1 — Ajout du select agent pour récupérer les cibles en attente.
+    // C13.2 — Ajout actionPlan + dueAt pour le sous-titre + chip échéance.
     prisma.importedAction.findMany({
       where: {
         ...actionScope(user),
@@ -357,6 +368,8 @@ export async function aggregateDashboard(
         agent: {
           select: { id: true, firstName: true, lastName: true },
         },
+        actionPlan: true,
+        dueAt: true,
       },
       take: 10_000,
     }),
@@ -414,11 +427,19 @@ export async function aggregateDashboard(
   // ─── C13 — Actions agrégées par titre ────────────────────────────────────
   // C13.1 — Pour chaque groupe, on collecte aussi la liste des cibles
   // (agent ou site) ACTIVE pour permettre le détail au clic côté UI.
+  // C13.2 — On ajoute le plan d'origine partagé + l'échéance la plus
+  //         proche pour donner du contexte de pilotage.
   const PENDING_CAP = 50;
   type AggrAction = {
     done: number;
     total: number;
     pending: DashboardActionTarget[];
+    /** Set des actionPlan rencontrés (null inclus) — pour test unicité. */
+    plans: Set<string | null>;
+    /** Premier plan non-null observé (pour exposer la valeur si unique). */
+    firstPlan: string | null;
+    /** Date la plus proche parmi les actions ACTIVE. */
+    nextDueAt: Date | null;
   };
   const actionByTitle = new Map<string, AggrAction>();
   for (const a of actionGroupRows) {
@@ -427,8 +448,14 @@ export async function aggregateDashboard(
       done: 0,
       total: 0,
       pending: [] as DashboardActionTarget[],
+      plans: new Set<string | null>(),
+      firstPlan: null,
+      nextDueAt: null,
     };
     agg.total++;
+    const planNorm = a.actionPlan?.trim() || null;
+    agg.plans.add(planNorm);
+    if (planNorm && !agg.firstPlan) agg.firstPlan = planNorm;
     if (a.localStatus === "VALIDATED_LOCAL") {
       agg.done++;
     } else {
@@ -444,6 +471,11 @@ export async function aggregateDashboard(
         });
       } else {
         agg.pending.push({ kind: "none", label: "(sans cible)" });
+      }
+      // Échéance la plus proche calculée uniquement sur les ACTIVE
+      // (une action déjà validée n'a plus de pression d'échéance).
+      if (a.dueAt && (!agg.nextDueAt || a.dueAt < agg.nextDueAt)) {
+        agg.nextDueAt = a.dueAt;
       }
     }
     actionByTitle.set(title, agg);
@@ -473,6 +505,10 @@ export async function aggregateDashboard(
     uniquePending.sort((a, b) => a.label.localeCompare(b.label, "fr"));
     const pendingCapped = uniquePending.slice(0, PENDING_CAP);
     const pendingExtra = Math.max(0, uniquePending.length - PENDING_CAP);
+    // C13.2 — Plan exposé uniquement si toutes les actions partagent
+    // la même valeur (un seul élément dans le Set). Sinon on n'affiche
+    // rien plutôt que d'induire en erreur sur l'origine.
+    const planLabel = agg.plans.size === 1 ? agg.firstPlan : null;
     allGroups.push({
       title,
       done: agg.done,
@@ -480,13 +516,19 @@ export async function aggregateDashboard(
       percent,
       pending: pendingCapped,
       pendingExtra,
+      planLabel,
+      nextDueAt: agg.nextDueAt ? agg.nextDueAt.toISOString() : null,
     });
   }
   // Tri : moins avancés (% croissant) puis taille (total décroissant)
   // pour mettre les gros chantiers en haut.
   allGroups.sort((a, b) => a.percent - b.percent || b.total - a.total);
+  // C13.2 — Cap retiré : on affiche tous les groupes pour éviter qu'une
+  // action nouvellement créée disparaisse silencieusement du dashboard.
+  // Le scroll vertical côté UI gère la lisibilité quand la liste devient
+  // longue.
   const actionsProgress: DashboardActionsProgress = {
-    items: allGroups.slice(0, 10),
+    items: allGroups,
     totalGroups: allGroups.length,
   };
 

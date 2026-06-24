@@ -56,22 +56,20 @@ export function AgentQuickActions({ agentId, agentName }: Props) {
         type="button"
         onClick={markSeen}
         disabled={pending}
-        className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 min-h-[36px]"
+        className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 w-9 h-9"
         title={`Marquer ${agentName} comme vu`}
         aria-label={`Marquer ${agentName} comme vu`}
       >
         <Icon.Eye className="w-4 h-4" aria-hidden />
-        <span className="hidden md:inline">Vu</span>
       </button>
       <button
         type="button"
         onClick={() => setNoting(true)}
-        className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 min-h-[36px]"
+        className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 w-9 h-9"
         title={`Ajouter un commentaire à ${agentName}`}
         aria-label={`Ajouter un commentaire à ${agentName}`}
       >
         <Icon.MessageSquare className="w-4 h-4" aria-hidden />
-        <span className="hidden md:inline">Comm.</span>
       </button>
 
       {noting && (

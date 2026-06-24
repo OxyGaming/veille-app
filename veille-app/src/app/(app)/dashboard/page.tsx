@@ -16,6 +16,9 @@ import {
 import { DashboardFiltersBar } from "./components/DashboardFiltersBar";
 import { DashboardKpiGrid } from "./components/DashboardKpiGrid";
 import { DashboardTrends } from "./components/DashboardTrends";
+import { DashboardOpenNCs } from "./components/DashboardOpenNCs";
+import { DashboardActionsProgress } from "./components/DashboardActionsProgress";
+import { DashboardTopSites } from "./components/DashboardTopSites";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +68,9 @@ export default async function DashboardPage({
       </header>
       <DashboardFiltersBar period={payload.filters.period} />
       <DashboardKpiGrid kpis={payload.kpis} />
+      <DashboardOpenNCs data={payload.openNonConformities} />
+      <DashboardActionsProgress data={payload.actionsProgress} />
+      <DashboardTopSites sites={payload.topSites} />
       <DashboardTrends trends={payload.trends} period={payload.filters.period} />
     </div>
   );

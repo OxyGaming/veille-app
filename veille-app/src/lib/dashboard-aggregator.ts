@@ -52,6 +52,41 @@ export type DashboardTrend = {
   series: number[]; // 1 entrée par jour, longueur = period
 };
 
+/** C13 — Catégorisation V1 des NC par template. */
+export type NcKind = "INVENTORY" | "QUARTERLY" | "PLANNED" | "OTHER";
+
+export type DashboardOpenNCs = {
+  /** Total des NC non redressées dans le périmètre. */
+  total: number;
+  /** Détail par catégorie de visite (rendu en barres). */
+  byKind: { kind: NcKind; label: string; count: number }[];
+};
+
+export type DashboardActionGroup = {
+  /** Titre métier (keyPoint) — tronqué côté UI si besoin. */
+  title: string;
+  done: number;
+  total: number;
+  /** done / total × 100, arrondi entier. 0 si total=0 (cas impossible côté agg). */
+  percent: number;
+};
+
+export type DashboardActionsProgress = {
+  /** Groupes ayant au moins 1 action ACTIVE. Tri : moins avancés en premier (priorité visuelle). */
+  items: DashboardActionGroup[];
+  /** Nombre total de groupes distincts avant la limite affichée. */
+  totalGroups: number;
+};
+
+export type DashboardTopSite = {
+  siteId: string;
+  siteName: string;
+  openNCs: number;
+  openActions: number;
+  /** Score composite (NC × 2 + actions). Tri primaire. */
+  score: number;
+};
+
 export type DashboardPayload = {
   filters: DashboardFilters;
   kpis: DashboardKpis;
@@ -61,6 +96,12 @@ export type DashboardPayload = {
     visits: DashboardTrend;
     validations: DashboardTrend;
   };
+  /** C13 — NC non redressées par type de visite. */
+  openNonConformities: DashboardOpenNCs;
+  /** C13 — Actions actives groupées par titre, avec ratio validé/total. */
+  actionsProgress: DashboardActionsProgress;
+  /** C13 — Top 5 sites prioritaires (NC ouvertes + actions actives). */
+  topSites: DashboardTopSite[];
   teamsAvailable: { id: string; name: string }[];
 };
 
@@ -98,6 +139,43 @@ function bucketByDay(
 
 function countItems(items: EcheanceItem[], kind: EcheanceItem["kind"]) {
   return items.filter((i) => i.kind === kind).length;
+}
+
+/**
+ * C13 — Classifie une NC par catégorie de visite à partir du template.
+ *
+ * Convention seed actuelle :
+ *  - INVENTORY (template.kind)    → « Veille de site »
+ *  - CHECKLIST + slug "trimestrielle-*" → « Trimestrielle »
+ *  - CHECKLIST + slug "planifiee-*"     → « Planifiée »
+ *  - autre                              → « Autre » (fallback safe)
+ */
+export function classifyNcKind(template: {
+  kind: string | null | undefined;
+  slug: string | null | undefined;
+}): NcKind {
+  if (template.kind === "INVENTORY") return "INVENTORY";
+  const slug = template.slug ?? "";
+  if (slug.startsWith("trimestrielle")) return "QUARTERLY";
+  if (slug.startsWith("planifiee")) return "PLANNED";
+  return "OTHER";
+}
+
+const NC_KIND_LABEL: Record<NcKind, string> = {
+  INVENTORY: "Veille de site",
+  QUARTERLY: "Trimestrielle",
+  PLANNED: "Planifiée",
+  OTHER: "Autre",
+};
+
+/**
+ * C13 — Tronque le titre métier à `max` chars (ellipse). Pure helper
+ * exporté pour tests. Sert le rendu des barres de progression côté UI.
+ */
+export function truncateTitle(text: string | null | undefined, max = 80): string {
+  const t = (text ?? "").trim();
+  if (!t) return "(sans titre)";
+  return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`;
 }
 
 function countLateKind(items: EcheanceItem[], kind: EcheanceItem["kind"]) {
@@ -181,6 +259,8 @@ export async function aggregateDashboard(
     notifRows,
     visitsRows,
     validationsRows,
+    openNcRows,
+    actionGroupRows,
     teamsAvailable,
   ] = await Promise.all([
     aggregateEcheances(user, now),
@@ -217,6 +297,39 @@ export async function aggregateDashboard(
       select: { createdAt: true },
       take: 10_000,
     }),
+    // C13 — NC non redressées dans le scope (via teamScope sur SiteVisit).
+    prisma.siteVisitNonConformity.findMany({
+      where: {
+        redressedDate: null,
+        visit: teamScope(user),
+      },
+      select: {
+        id: true,
+        visit: {
+          select: {
+            siteId: true,
+            site: { select: { id: true, name: true } },
+            template: { select: { kind: true, slug: true } },
+          },
+        },
+      },
+      take: 10_000,
+    }),
+    // C13 — Toutes les actions du périmètre (ACTIVE + VALIDATED_LOCAL)
+    // pour calculer les ratios par keyPoint.
+    prisma.importedAction.findMany({
+      where: {
+        ...actionScope(user),
+        localStatus: { in: ["ACTIVE", "VALIDATED_LOCAL"] },
+      },
+      select: {
+        keyPoint: true,
+        localStatus: true,
+        siteId: true,
+        site: { select: { id: true, name: true } },
+      },
+      take: 10_000,
+    }),
     getTeamsAvailable(user),
   ]);
 
@@ -245,6 +358,99 @@ export async function aggregateDashboard(
     validations: bucketByDay(validationsRows, "createdAt", period, now),
   };
 
+  // ─── C13 — NC non redressées par catégorie de visite ─────────────────────
+  const ncCountByKind: Record<NcKind, number> = {
+    INVENTORY: 0,
+    QUARTERLY: 0,
+    PLANNED: 0,
+    OTHER: 0,
+  };
+  for (const nc of openNcRows) {
+    const k = classifyNcKind(nc.visit.template);
+    ncCountByKind[k]++;
+  }
+  // L'ordre des kinds importe pour le rendu (gauche → droite).
+  const openNonConformities: DashboardOpenNCs = {
+    total: openNcRows.length,
+    byKind: (["INVENTORY", "QUARTERLY", "PLANNED", "OTHER"] as NcKind[])
+      .filter((k) => ncCountByKind[k] > 0 || k !== "OTHER")
+      .map((k) => ({
+        kind: k,
+        label: NC_KIND_LABEL[k],
+        count: ncCountByKind[k],
+      })),
+  };
+
+  // ─── C13 — Actions agrégées par titre ────────────────────────────────────
+  type AggrAction = { done: number; total: number };
+  const actionByTitle = new Map<string, AggrAction>();
+  for (const a of actionGroupRows) {
+    const title = truncateTitle(a.keyPoint);
+    const agg = actionByTitle.get(title) ?? { done: 0, total: 0 };
+    agg.total++;
+    if (a.localStatus === "VALIDATED_LOCAL") agg.done++;
+    actionByTitle.set(title, agg);
+  }
+  const allGroups: DashboardActionGroup[] = [];
+  for (const [title, agg] of actionByTitle) {
+    // On garde uniquement les groupes ayant encore au moins 1 action ACTIVE
+    // (sinon le groupe est "fini" et ne mérite pas une barre).
+    if (agg.total - agg.done <= 0) continue;
+    const percent = Math.round((agg.done / agg.total) * 100);
+    allGroups.push({ title, done: agg.done, total: agg.total, percent });
+  }
+  // Tri : moins avancés (% croissant) puis taille (total décroissant)
+  // pour mettre les gros chantiers en haut.
+  allGroups.sort((a, b) => a.percent - b.percent || b.total - a.total);
+  const actionsProgress: DashboardActionsProgress = {
+    items: allGroups.slice(0, 10),
+    totalGroups: allGroups.length,
+  };
+
+  // ─── C13 — Top sites prioritaires ────────────────────────────────────────
+  type SiteAccu = { siteName: string; openNCs: number; openActions: number };
+  const siteAccu = new Map<string, SiteAccu>();
+  for (const nc of openNcRows) {
+    if (!nc.visit.site) continue;
+    const sid = nc.visit.site.id;
+    const acc = siteAccu.get(sid) ?? {
+      siteName: nc.visit.site.name,
+      openNCs: 0,
+      openActions: 0,
+    };
+    acc.openNCs++;
+    siteAccu.set(sid, acc);
+  }
+  for (const a of actionGroupRows) {
+    if (a.localStatus !== "ACTIVE") continue;
+    if (!a.site) continue;
+    const sid = a.site.id;
+    const acc = siteAccu.get(sid) ?? {
+      siteName: a.site.name,
+      openNCs: 0,
+      openActions: 0,
+    };
+    acc.openActions++;
+    siteAccu.set(sid, acc);
+  }
+  const topSites: DashboardTopSite[] = [...siteAccu.entries()]
+    .map(([siteId, acc]) => ({
+      siteId,
+      siteName: acc.siteName,
+      openNCs: acc.openNCs,
+      openActions: acc.openActions,
+      // Score composite : NC pèsent double (engagement métier plus lourd
+      // qu'une action ad-hoc).
+      score: acc.openNCs * 2 + acc.openActions,
+    }))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.openNCs - a.openNCs ||
+        b.openActions - a.openActions,
+    )
+    .slice(0, 5);
+
   return {
     // Sprint 6 C6 : teamId neutralisé (le scope ADMIN supplante).
     filters: { period, teamId: null },
@@ -271,6 +477,9 @@ export async function aggregateDashboard(
         series: series.validations,
       },
     },
+    openNonConformities,
+    actionsProgress,
+    topSites,
     teamsAvailable,
   };
 }

@@ -4,13 +4,15 @@
  * Actions rapides Vu + Commentaire sur un agent — utilisé par la
  * section "Agents en service" de la vue Aujourd'hui (C11).
  *
- * - Vu (Icon.Eye)        → POST /api/agents/[id]/sight kind=SIGHT
- *                          en 1 clic, toast de confirmation, refresh.
- * - Commentaire (Icon.MessageSquare) → ouvre NoteModal (kind=NOTE,
- *                          commentaire obligatoire, photos optionnelles).
+ * - Vu (Icon.Eye)         → ouvre SightingModal (kind=SIGHT, commentaire
+ *                           optionnel). Comportement IDENTIQUE à la fiche
+ *                           agent : pas d'action 1-clic, le user doit
+ *                           confirmer pour éviter les faux positifs.
+ * - Commentaire (MessageSquare) → ouvre NoteModal (kind=NOTE, commentaire
+ *                           obligatoire, photos optionnelles).
  *
- * Pas de modal pour Vu : ergonomie liste — un croisement rapide doit
- * être 1 clic. Si l'observateur veut commenter, il utilise l'autre bouton.
+ * Les deux modals sont les composants partagés `@/components/*` —
+ * pas de duplication de logique avec AgentActionsClient.
  */
 
 import { useState, useTransition } from "react";
@@ -18,6 +20,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Icon } from "@/components/icons";
 import NoteModal from "@/components/NoteModal";
+import SightingModal from "@/components/SightingModal";
 
 type Props = {
   agentId: string;
@@ -26,37 +29,16 @@ type Props = {
 
 export function AgentQuickActions({ agentId, agentName }: Props) {
   const router = useRouter();
+  const [sighting, setSighting] = useState(false);
   const [noting, setNoting] = useState(false);
-  const [pending, startTransition] = useTransition();
-
-  async function markSeen() {
-    if (pending) return;
-    try {
-      const r = await fetch(`/api/agents/${agentId}/sight`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ kind: "SIGHT", comment: null }),
-      });
-      if (!r.ok) {
-        const j = (await r.json().catch(() => ({}))) as { error?: string };
-        toast.error(j.error || "Vu non enregistré.");
-        return;
-      }
-      toast.success(`${agentName} marqué comme vu.`);
-      startTransition(() => router.refresh());
-    } catch {
-      toast.error("Vu non enregistré.");
-    }
-  }
+  const [, startTransition] = useTransition();
 
   return (
     <>
       <button
         type="button"
-        onClick={markSeen}
-        disabled={pending}
-        className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 w-9 h-9"
+        onClick={() => setSighting(true)}
+        className="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 w-9 h-9"
         title={`Marquer ${agentName} comme vu`}
         aria-label={`Marquer ${agentName} comme vu`}
       >
@@ -72,6 +54,19 @@ export function AgentQuickActions({ agentId, agentName }: Props) {
         <Icon.MessageSquare className="w-4 h-4" aria-hidden />
       </button>
 
+      {sighting && (
+        <SightingModal
+          targetId={agentId}
+          targetName={agentName}
+          targetKind="agent"
+          onClose={() => setSighting(false)}
+          onCreated={() => {
+            setSighting(false);
+            toast.success(`${agentName} marqué comme vu.`);
+            startTransition(() => router.refresh());
+          }}
+        />
+      )}
       {noting && (
         <NoteModal
           target="agent"

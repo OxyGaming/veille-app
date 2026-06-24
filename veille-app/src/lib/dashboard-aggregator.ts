@@ -368,6 +368,18 @@ export async function aggregateDashboard(
       where: {
         redressedDate: null,
         visit: teamScope(user),
+        // C16 — Masque les NC fantômes : action liée mais déjà validée
+        // (REPLACED / OBSOLETE / VALIDATED_LOCAL). Le dashboard ne montre
+        // que les NC réellement actionnables :
+        //   - NC sans action liée (à redresser manuellement depuis le
+        //     rapport de visite)
+        //   - NC dont l'action est encore ACTIVE
+        // Les fantômes (action déjà VALIDATED_LOCAL sans redressement)
+        // sont nettoyés par scripts/fix-orphan-ncs.mjs.
+        OR: [
+          { generatedActionId: null },
+          { generatedAction: { localStatus: "ACTIVE" } },
+        ],
       },
       select: {
         id: true,

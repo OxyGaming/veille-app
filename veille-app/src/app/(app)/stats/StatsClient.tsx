@@ -119,6 +119,7 @@ const TABS = [
   { v: "activity", label: "Activité" },
   { v: "actions", label: "Actions" },
   { v: "veille-site", label: "Veille de site" },
+  { v: "vehicle-rounds", label: "Tournées VS" },
 ] as const;
 
 type VeilleSite = {
@@ -148,6 +149,34 @@ type VeilleSite = {
   }[];
 };
 
+type VehicleRounds = {
+  frequencyDays: number;
+  dashboard: {
+    vehicleId: string;
+    immatriculation: string;
+    type: string;
+    typeLabel: string;
+    label: string | null;
+    lastRoundId: string | null;
+    lastRoundDate: string | null;
+    total: number;
+    conformes: number;
+    ecarts: number;
+    rate: number | null;
+    openActions: number;
+  }[];
+  aTourner: {
+    vehicleId: string;
+    immatriculation: string;
+    typeLabel: string;
+    label: string | null;
+    lastRoundDate: string | null;
+    dueAt: string | null;
+    status: "NEVER" | "LATE" | "SOON";
+    daysToDue: number | null;
+  }[];
+};
+
 export default function StatsClient() {
   const [tab, setTab] = useState<(typeof TABS)[number]["v"]>("overview");
   const [types, setTypes] = useState<Set<string>>(
@@ -164,6 +193,7 @@ export default function StatsClient() {
   const [activity, setActivity] = useState<Activity | null>(null);
   const [actions, setActions] = useState<Actions | null>(null);
   const [veilleSite, setVeilleSite] = useState<VeilleSite | null>(null);
+  const [vehicleRounds, setVehicleRounds] = useState<VehicleRounds | null>(null);
 
   useEffect(() => {
     fetch("/api/history/filters")
@@ -217,6 +247,14 @@ export default function StatsClient() {
       .then((r) => r.json())
       .then(setVeilleSite);
   }, [tab]);
+  useEffect(() => {
+    if (tab !== "vehicle-rounds") return;
+    // Idem veille-site : instantané (dernière tournée par véhicule,
+    // échéance cadence ≤ 30 j). Pas de filtre date.
+    fetch(`/api/stats/vehicle-rounds`)
+      .then((r) => r.json())
+      .then(setVehicleRounds);
+  }, [tab]);
 
   function toggleType(t: string) {
     setTypes((s) => {
@@ -239,7 +277,8 @@ export default function StatsClient() {
           Statistiques
         </h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          4 onglets — vue d&apos;ensemble, qualité de saisie, activité, actions.
+          6 onglets — vue d&apos;ensemble, qualité, activité, actions, veille
+          de site, tournées VS.
         </p>
       </div>
 
@@ -368,6 +407,7 @@ export default function StatsClient() {
       {tab === "activity" && <ActivityTab data={activity} />}
       {tab === "actions" && <ActionsTab data={actions} />}
       {tab === "veille-site" && <VeilleSiteTab data={veilleSite} />}
+      {tab === "vehicle-rounds" && <VehicleRoundsTab data={vehicleRounds} />}
     </div>
   );
 }
@@ -1020,6 +1060,225 @@ function VeilleSiteTab({ data }: { data: VeilleSite | null }) {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function VehicleRoundsTab({ data }: { data: VehicleRounds | null }) {
+  if (!data)
+    return (
+      <div className="text-sm text-slate-500 py-12 text-center">Chargement…</div>
+    );
+
+  const cadenceLabel = `${data.frequencyDays} j`;
+
+  return (
+    <div className="space-y-4">
+      {/* (a) Conformité par véhicule */}
+      <section className="card p-4">
+        <h2 className="font-bold mb-1 text-sm">Conformité par véhicule</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Dernière tournée terminée par véhicule —{" "}
+          <span className="font-mono">{data.dashboard.length}</span> véhicule(s).
+        </p>
+        {data.dashboard.length === 0 ? (
+          <div className="text-xs text-slate-500 text-center py-4">
+            Aucun véhicule visible.
+          </div>
+        ) : (
+          <div className="overflow-x-auto -mx-4 px-4">
+            <table className="w-full text-xs">
+              <thead className="text-slate-500">
+                <tr className="border-b border-slate-200">
+                  <th className="text-left font-mono font-normal py-1.5">
+                    Véhicule
+                  </th>
+                  <th className="text-left font-mono font-normal py-1.5">
+                    Dernière vérif.
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Total
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Conformes
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Écarts
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Taux
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Actions ouvertes
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.dashboard.map((row) => (
+                  <tr
+                    key={row.vehicleId}
+                    className="border-b border-slate-100 last:border-0"
+                  >
+                    <td className="py-1.5">
+                      <div className="font-medium font-mono">
+                        {row.immatriculation}
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        {row.typeLabel}
+                        {row.label ? ` · ${row.label}` : ""}
+                      </div>
+                    </td>
+                    <td className="py-1.5 font-mono">
+                      {row.lastRoundDate ? (
+                        <a
+                          href={`/vehicle-rounds/${row.lastRoundId}`}
+                          className="text-indigo-600 hover:underline"
+                        >
+                          {format(new Date(row.lastRoundDate), "dd/MM/yyyy", {
+                            locale: fr,
+                          })}
+                        </a>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-right font-mono">
+                      {row.total || "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-mono text-emerald-700">
+                      {row.total ? row.conformes : "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-mono text-rose-700">
+                      {row.total ? row.ecarts : "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-mono font-bold">
+                      {row.rate != null ? (
+                        <span
+                          className={
+                            row.rate >= 95
+                              ? "text-emerald-700"
+                              : row.rate >= 80
+                                ? "text-amber-700"
+                                : "text-rose-700"
+                          }
+                        >
+                          {row.rate.toFixed(1)} %
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-right font-mono">
+                      {row.openActions > 0 ? (
+                        <span className="text-rose-700 font-bold">
+                          {row.openActions}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">0</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* (b) Véhicules à tourner */}
+      <section className="card p-4">
+        <h2 className="font-bold mb-1 text-sm">
+          À tourner (cadence {cadenceLabel}, ≤ 30 jours)
+        </h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Véhicules jamais contrôlés, en retard de cadence ou dont l&apos;échéance
+          arrive dans les 30 jours.
+        </p>
+        {data.aTourner.length === 0 ? (
+          <div className="text-xs text-slate-500 text-center py-4">
+            Tous les véhicules sont à jour.
+          </div>
+        ) : (
+          <div className="overflow-x-auto -mx-4 px-4">
+            <table className="w-full text-xs">
+              <thead className="text-slate-500">
+                <tr className="border-b border-slate-200">
+                  <th className="text-left font-mono font-normal py-1.5">
+                    Véhicule
+                  </th>
+                  <th className="text-left font-mono font-normal py-1.5">
+                    Dernière vérif.
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Échéance
+                  </th>
+                  <th className="text-right font-mono font-normal py-1.5">
+                    Statut
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.aTourner.map((r) => {
+                  const tone =
+                    r.status === "NEVER" || r.status === "LATE"
+                      ? "text-rose-700"
+                      : "text-amber-700";
+                  const statusLabel =
+                    r.status === "NEVER"
+                      ? "Jamais"
+                      : r.status === "LATE"
+                        ? r.daysToDue != null
+                          ? `Retard ${-r.daysToDue} j`
+                          : "En retard"
+                        : r.daysToDue != null
+                          ? `Dans ${r.daysToDue} j`
+                          : "Bientôt";
+                  return (
+                    <tr
+                      key={r.vehicleId}
+                      className="border-b border-slate-100 last:border-0"
+                    >
+                      <td className="py-1.5">
+                        <div className="font-medium font-mono">
+                          {r.immatriculation}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {r.typeLabel}
+                          {r.label ? ` · ${r.label}` : ""}
+                        </div>
+                      </td>
+                      <td className="py-1.5 font-mono">
+                        {r.lastRoundDate ? (
+                          format(new Date(r.lastRoundDate), "dd/MM/yyyy", {
+                            locale: fr,
+                          })
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 text-right font-mono">
+                        {r.dueAt ? (
+                          format(new Date(r.dueAt), "dd/MM/yyyy", { locale: fr })
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className={`py-1.5 text-right font-mono font-bold ${tone}`}>
+                        <a
+                          href={`/vehicle-rounds/new?vehicleId=${r.vehicleId}`}
+                          className="hover:underline"
+                        >
+                          {statusLabel}
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

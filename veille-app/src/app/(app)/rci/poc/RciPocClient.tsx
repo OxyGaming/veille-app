@@ -61,18 +61,32 @@ export default function RciPocClient() {
   async function generate() {
     setBusy(true);
     try {
-      const [{ default: Docxtemplater }, { default: PizZip }, ImageModuleNs, fileSaverNs] =
+      const { unwrapCjsCtor } = await import("@/lib/rci/render");
+      const [DocxtemplaterNs, PizZipNs, ImageModuleNs, fileSaverNs] =
         await Promise.all([
           import("docxtemplater"),
           import("pizzip"),
           import("docxtemplater-image-module-free"),
           import("file-saver"),
         ]);
-      const ImageModule =
-        (ImageModuleNs as { default?: unknown }).default ?? ImageModuleNs;
-      const saveAs =
-        (fileSaverNs as { saveAs?: typeof import("file-saver").saveAs })
-          .saveAs ?? (fileSaverNs as unknown as { default: { saveAs: typeof import("file-saver").saveAs } }).default.saveAs;
+      // Déballage robuste — même fix que renderRci (cf. lib/rci/render.ts).
+      const Docxtemplater = unwrapCjsCtor<
+        new (
+          zip: unknown,
+          opts: Record<string, unknown>,
+        ) => {
+          render: (data: unknown) => void;
+          getZip: () => { generate: (o: unknown) => Blob };
+        }
+      >(DocxtemplaterNs);
+      const PizZip = unwrapCjsCtor<new (data: ArrayBuffer) => unknown>(PizZipNs);
+      const ImageModule = unwrapCjsCtor<new (opts: unknown) => unknown>(
+        ImageModuleNs,
+      );
+      // file-saver expose `module.exports = saveAs` (la fonction = le module).
+      const saveAs = unwrapCjsCtor<typeof import("file-saver").saveAs>(
+        fileSaverNs,
+      );
 
       const res = await fetch("/rci/template-poc.docx");
       if (!res.ok) throw new Error("Template introuvable");
@@ -83,8 +97,7 @@ export default function RciPocClient() {
         getImage: (tagValue: unknown) => b64ToBytes(String(tagValue)),
         getSize: () => [400, 300] as [number, number],
       };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const imageModule = new (ImageModule as any)(imageOpts);
+      const imageModule = new ImageModule(imageOpts);
 
       const doc = new Docxtemplater(zip, {
         modules: [imageModule],

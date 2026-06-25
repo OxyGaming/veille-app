@@ -3,6 +3,33 @@
 import type { ReactNode } from "react";
 import type { Ternary } from "@/lib/rci/fields";
 
+// ─── Helpers de conversion entre formats UI et formats payload Word ──────────
+
+/** "DD/MM/YYYY" → "YYYY-MM-DD" pour `<input type="date">`. */
+export function dateFrToIso(fr: string): string {
+  const m = fr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
+}
+/** "YYYY-MM-DD" → "DD/MM/YYYY" (format Word). */
+export function dateIsoToFr(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+}
+/**
+ * Format heure stocké dans le payload (= format Word) : `HhMM` sans zéro
+ * de tête sur les heures, ex. "7h30". Compatible avec les anciennes saisies
+ * "07h30" (le DossierNumber les pad-startait déjà à 2 chiffres).
+ */
+export function timeFrToIso(fr: string): string {
+  const m = fr.match(/^(\d{1,2})h(\d{2})$/);
+  return m ? `${m[1].padStart(2, "0")}:${m[2]}` : "";
+}
+/** "HH:MM" (input time HTML) → "HhMM" sans zéro de tête (format Word). */
+export function timeIsoToFr(iso: string): string {
+  const m = iso.match(/^(\d{1,2}):(\d{2})$/);
+  return m ? `${parseInt(m[1], 10)}h${m[2]}` : "";
+}
+
 /** Champ texte avec label. */
 export function TextField({
   label,
@@ -129,6 +156,83 @@ export function TernaryField({
         <Btn state={null}>—</Btn>
       </div>
     </div>
+  );
+}
+
+/**
+ * Champ date — UI = `<input type="date">` (YYYY-MM-DD), stockage payload
+ * `JJ/MM/AAAA` (= format imprimé dans le Word, inchangé). Permet aussi une
+ * saisie manuelle texte au format payload pour préserver la compatibilité
+ * avec les anciens RCI / les saisies hors picker (clavier).
+ */
+export function DateField({
+  label,
+  hint,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  const isoValue = dateFrToIso(value);
+  return (
+    <label className="block text-xs">
+      <span className="font-medium text-slate-600">{label}</span>
+      {hint && (
+        <span className="ml-1 text-[10px] font-mono text-slate-400">{hint}</span>
+      )}
+      <div className="mt-1 flex gap-1">
+        <input
+          type="date"
+          value={isoValue}
+          onChange={(e) => onChange(dateIsoToFr(e.target.value))}
+          disabled={disabled}
+          className="input"
+        />
+      </div>
+    </label>
+  );
+}
+
+/**
+ * Champ heure — UI = `<input type="time">` (HH:MM), stockage payload
+ * `HhMM` sans zéro de tête sur l'heure (ex. "7h30"). Le rendu Word
+ * affiche tel quel.
+ */
+export function TimeField({
+  label,
+  hint,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  const isoValue = timeFrToIso(value);
+  return (
+    <label className="block text-xs">
+      <span className="font-medium text-slate-600">{label}</span>
+      {hint && (
+        <span className="ml-1 text-[10px] font-mono text-slate-400">{hint}</span>
+      )}
+      <div className="mt-1">
+        <input
+          type="time"
+          value={isoValue}
+          onChange={(e) => onChange(timeIsoToFr(e.target.value))}
+          disabled={disabled}
+          className="input"
+        />
+      </div>
+    </label>
   );
 }
 

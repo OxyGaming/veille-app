@@ -53,6 +53,28 @@ function parsePayload(s: string): RciPayload {
   }
 }
 
+/** Date du jour au format Word `JJ/MM/AAAA`. */
+function todayFr(): string {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+/**
+ * Pré-remplit les champs « signatures » et « RCI établi par » à partir de
+ * l'utilisateur courant — visible et modifiable dans le wizard. N'altère
+ * que les champs vides : on n'écrase jamais une saisie existante.
+ */
+function applyDefaults(p: RciPayload, authorName: string): RciPayload {
+  const out = { ...p };
+  if (!out.rci_etabli_le) out.rci_etabli_le = todayFr();
+  if (!out.rci_etabli_par) out.rci_etabli_par = authorName;
+  if (!out.sig_eic_nom_fonction) out.sig_eic_nom_fonction = authorName;
+  return out;
+}
+
 export default function RciWizard({
   rciId,
   initialPayload,
@@ -80,7 +102,7 @@ export default function RciWizard({
       p.dossier_numero = initialDossierNumber;
     }
     if (!p.nature && initialTitle) p.nature = initialTitle;
-    return p;
+    return applyDefaults(p, authorName);
   });
   // Photos : non persistées côté serveur dans la v1 (on les garde en mémoire
   // de la session wizard). À déplacer en BDD si besoin de partage offline.
@@ -154,13 +176,19 @@ export default function RciWizard({
   async function generate() {
     setGenerating(true);
     try {
-      // Pré-remplissages auto au moment du rendu (ne pollue pas le payload stocké).
-      const effective = { ...payload };
-      if (!effective.rci_etabli_le)
-        effective.rci_etabli_le = effective.date_evenement;
-      if (!effective.rci_etabli_par) effective.rci_etabli_par = authorName;
-      const blob = await renderRci(effective, photos);
-      const { saveAs } = await import("file-saver");
+      // Les champs "RCI établi le / par" et l'EIC sont désormais pré-remplis
+      // à l'ouverture du wizard et modifiables (cf. applyDefaults). Si
+      // l'utilisateur les vide volontairement, on respecte ce choix.
+      const blob = await renderRci(payload, photos);
+      // `file-saver` exporte sa fonction via `module.exports = saveAs` :
+      // `import()` retourne donc `{ default: saveAs }` côté interop. Le
+      // destructuring `{ saveAs }` donne `undefined` en prod minifié (=>
+      // « n is not a function »). On déballe via le helper partagé.
+      const fileSaverNs = await import("file-saver");
+      const { unwrapCjsCtor } = await import("@/lib/rci/render");
+      const saveAs = unwrapCjsCtor<(blob: Blob, filename: string) => void>(
+        fileSaverNs,
+      );
       const fname = `rci-${payload.dossier_numero || rciId.slice(0, 8)}.docx`;
       saveAs(blob, fname);
       toast.success("Document généré");

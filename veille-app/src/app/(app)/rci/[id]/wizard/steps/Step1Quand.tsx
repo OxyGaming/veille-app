@@ -1,6 +1,6 @@
 "use client";
 
-import { TextField, FieldSet } from "../fields-ui";
+import { DateField, FieldSet, TextField, TimeField } from "../fields-ui";
 import type { StepProps } from "../types";
 
 const JOURS = [
@@ -28,8 +28,12 @@ function buildDossierNumber(dateFr: string, heure: string, lieu: string): string
   if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dateFr)) return "";
   const [d, m, y] = dateFr.split("/");
   const aa = y.slice(2);
-  const hh = (heure.match(/^(\d{2})/) ?? [, "00"])[1];
-  const mm = (heure.match(/h(\d{2})/) ?? [, "00"])[1];
+  // L'heure peut être stockée "7h30" (nouveau format payload) ou "07h30"
+  // (ancien) — on accepte 1 ou 2 chiffres puis on pad-start à 2 pour le
+  // dossier number.
+  const hmMatch = heure.match(/^(\d{1,2})h(\d{2})$/);
+  const hh = (hmMatch?.[1] ?? "00").padStart(2, "0");
+  const mm = hmMatch?.[2] ?? "00";
   const stamp = `${d}${m}${aa}${hh}${mm}`;
   const cleanLieu = (lieu || "").trim();
   return cleanLieu ? `${stamp}-${cleanLieu}` : stamp;
@@ -38,20 +42,21 @@ function buildDossierNumber(dateFr: string, heure: string, lieu: string): string
 export default function Step1Quand({ payload, patch, readOnly }: StepProps) {
   return (
     <div className="space-y-4">
-      <FieldSet title="Quand ?" hint="Date, heure et jour de l'événement">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <TextField
+      <FieldSet
+        title="Quand ?"
+        hint="Date et heure de l'événement (le jour est déterminé automatiquement)"
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <DateField
             label="Date"
             hint="(JJ/MM/AAAA)"
             value={payload.date_evenement}
-            placeholder="08/01/2026"
             disabled={readOnly}
             onChange={(v) => {
               const updates: Parameters<typeof patch>[0] = { date_evenement: v };
               const auto = frenchDayFromIso(v);
-              if (auto && !payload.jour_semaine) updates.jour_semaine = auto;
               if (auto) updates.jour_semaine = auto;
-              // Régénérer dossier_numero si pas figé
+              // Régénérer dossier_numero si pas figé manuellement
               const dossier = buildDossierNumber(v, payload.heure_evenement, "");
               if (!payload.dossier_numero || payload.dossier_numero.startsWith(dossier.split("-")[0].slice(0, 6))) {
                 updates.dossier_numero = buildDossierNumber(
@@ -63,11 +68,10 @@ export default function Step1Quand({ payload, patch, readOnly }: StepProps) {
               patch(updates);
             }}
           />
-          <TextField
+          <TimeField
             label="Heure"
-            hint="(HHhMM)"
+            hint="(7h30 → 7h30 sur le Word)"
             value={payload.heure_evenement}
-            placeholder="07h09"
             disabled={readOnly}
             onChange={(v) => {
               const updates: Parameters<typeof patch>[0] = { heure_evenement: v };
@@ -78,14 +82,6 @@ export default function Step1Quand({ payload, patch, readOnly }: StepProps) {
               );
               patch(updates);
             }}
-          />
-          <TextField
-            label="Jour"
-            hint="(auto, modifiable)"
-            value={payload.jour_semaine}
-            placeholder="Jeudi"
-            disabled={readOnly}
-            onChange={(v) => patch({ jour_semaine: v })}
           />
         </div>
       </FieldSet>

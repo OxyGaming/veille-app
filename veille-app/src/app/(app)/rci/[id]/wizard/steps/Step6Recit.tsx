@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { TextField, TernaryField, FieldSet } from "../fields-ui";
+import { DateField, FieldSet, TernaryField, TextField } from "../fields-ui";
 import type { StepProps } from "../types";
 
 function bufToB64(buf: ArrayBuffer): string {
@@ -111,15 +111,16 @@ export default function Step6Recit({
 
       <FieldSet title="RCI établi par + signatures">
         <div className="grid gap-3 sm:grid-cols-2">
-          <TextField
+          <DateField
             label="RCI établi le"
+            hint="(JJ/MM/AAAA — pré-rempli avec aujourd'hui)"
             value={payload.rci_etabli_le}
-            placeholder={payload.date_evenement}
             disabled={readOnly}
             onChange={(v) => patch({ rci_etabli_le: v })}
           />
           <TextField
             label="Par M / Mme"
+            hint="(pré-rempli — modifiable)"
             value={payload.rci_etabli_par}
             disabled={readOnly}
             onChange={(v) => patch({ rci_etabli_par: v })}

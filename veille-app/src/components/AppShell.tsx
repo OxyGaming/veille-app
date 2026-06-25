@@ -29,11 +29,24 @@ const ECHEANCES_ITEM = {
 };
 
 const BASE_NAV_MOBILE = [
-  { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
   { href: "/visits", label: "Visites", icon: Icon.FileText },
   { href: "/agents", label: "Agents", icon: Icon.Users },
   { href: "/sites", label: "Sites", icon: Icon.Building },
   { href: "/history", label: "Histo.", icon: Icon.Clipboard },
+];
+
+/**
+ * Pages secondaires accessibles depuis le bottom-sheet « Plus » de la
+ * bottom nav mobile. Les entrées sont scrollables si l'écran est court.
+ */
+const MORE_ITEMS = [
+  { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
+  { href: "/sessions", label: "Sessions", icon: Icon.ClipboardCheck },
+  { href: "/stats", label: "Statistiques", icon: Icon.Filter },
+  { href: "/rci", label: "RCI", icon: Icon.AlertTriangle },
+  { href: "/links", label: "Liens utiles", icon: Icon.Link },
+  { href: "/contacts", label: "Contacts", icon: Icon.Phone },
+  { href: "/echeances", label: "Échéances", icon: Icon.Calendar },
 ];
 const BASE_NAV_DESKTOP = [
   { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
@@ -82,11 +95,13 @@ export default function AppShell({
   ];
   const NAV = navMobile;
   const NAV_DESKTOP = navDesktop;
-  // grid-cols varie selon le nombre d'entrées mobile (5 → 7).
+  // +1 pour le bouton « Plus » toujours présent à droite. La grille
+  // gère 5 → 7 colonnes selon le rôle / activation de Today.
+  const totalMobileCells = navMobile.length + 1;
   const mobileGridClass =
-    navMobile.length === 7
+    totalMobileCells === 7
       ? "grid-cols-7"
-      : navMobile.length === 6
+      : totalMobileCells === 6
         ? "grid-cols-6"
         : "grid-cols-5";
 
@@ -94,6 +109,14 @@ export default function AppShell({
   const router = useRouter();
   const [online, setOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  // Ferme le sheet à chaque navigation (clic sur un item ou changement
+  // d'URL externe). Évite qu'il reste ouvert quand l'utilisateur revient
+  // en arrière via le navigateur.
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     setOnline(navigator.onLine);
@@ -323,8 +346,94 @@ export default function AppShell({
                 </Link>
               );
             })}
+            {/*
+              Bouton « Plus » toujours en dernier (= tout à droite). Ouvre
+              un bottom-sheet listant les pages secondaires (Veilles,
+              Sessions, Stats, RCI, etc.) retirées de la nav directe.
+            */}
+            <button
+              type="button"
+              onClick={() => setMoreOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              aria-label="Plus d'options"
+              className={`flex flex-col items-center justify-center py-2.5 text-[10px] font-medium transition-colors ${
+                moreOpen ? "text-indigo-600" : "text-slate-500"
+              }`}
+            >
+              <Icon.Plus className="w-5 h-5 mb-0.5" />
+              Plus
+            </button>
           </div>
         </nav>
+
+        {/*
+          Bottom-sheet « Plus » — overlay opaque + panneau qui glisse depuis
+          le bas. Visible uniquement en mobile (la sidebar desktop reprend
+          déjà ces entrées).
+        */}
+        {moreOpen && (
+          <div className="lg:hidden fixed inset-0 z-40 no-print">
+            <button
+              type="button"
+              onClick={() => setMoreOpen(false)}
+              aria-label="Fermer"
+              className="absolute inset-0 bg-black/40"
+            />
+            <div
+              role="menu"
+              aria-label="Pages secondaires"
+              className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-xl pb-[calc(64px+env(safe-area-inset-bottom))] max-h-[80vh] overflow-y-auto"
+            >
+              <div className="pt-2 pb-1 flex justify-center">
+                <span className="w-10 h-1 bg-slate-300 rounded-full" />
+              </div>
+              <div className="px-4 pt-2 pb-3 text-xs font-mono uppercase tracking-wider text-slate-500">
+                Plus d&apos;options
+              </div>
+              <ul>
+                {MORE_ITEMS.map((m) => {
+                  const active =
+                    pathname === m.href || pathname.startsWith(m.href + "/");
+                  return (
+                    <li key={m.href}>
+                      <Link
+                        href={m.href}
+                        role="menuitem"
+                        onClick={() => setMoreOpen(false)}
+                        className={`flex items-center gap-3 px-5 py-3 text-sm transition-colors ${
+                          active
+                            ? "bg-indigo-50 text-indigo-700 font-semibold"
+                            : "text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        <m.icon className="w-5 h-5 shrink-0" />
+                        {m.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+                {isEditor && (
+                  <li className="border-t border-slate-100 mt-1 pt-1">
+                    <Link
+                      href="/admin"
+                      role="menuitem"
+                      onClick={() => setMoreOpen(false)}
+                      className={`flex items-center gap-3 px-5 py-3 text-sm transition-colors ${
+                        pathname.startsWith("/admin")
+                          ? "bg-indigo-50 text-indigo-700 font-semibold"
+                          : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <Icon.Settings className="w-5 h-5 shrink-0" />
+                      Back-office
+                    </Link>
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -44,6 +44,7 @@ export type DashboardKpis = {
   lateActions: number;
   sitesWithoutQuarterly: number;
   sitesWithoutPlanned: number;
+  vehiclesOverdueRound: number;
   expiredEquipments: number;
 };
 
@@ -54,7 +55,12 @@ export type DashboardTrend = {
 };
 
 /** C13 — Catégorisation V1 des NC par template. */
-export type NcKind = "INVENTORY" | "QUARTERLY" | "PLANNED" | "OTHER";
+export type NcKind =
+  | "INVENTORY"
+  | "QUARTERLY"
+  | "PLANNED"
+  | "VEHICLE_ROUND"
+  | "OTHER";
 
 /** Une non-conformité ouverte affichée dans la liste détaillée du dashboard. */
 export type DashboardOpenNcItem = {
@@ -239,6 +245,7 @@ const NC_KIND_LABEL: Record<NcKind, string> = {
   INVENTORY: "Veille de site",
   QUARTERLY: "Trimestrielle",
   PLANNED: "Planifiée",
+  VEHICLE_ROUND: "Tournée VS",
   OTHER: "Autre",
 };
 
@@ -334,6 +341,7 @@ export async function aggregateDashboard(
     visitsRows,
     validationsRows,
     openNcRows,
+    openVehicleNcRows,
     actionGroupRows,
     teamsAvailable,
   ] = await Promise.all([
@@ -409,6 +417,36 @@ export async function aggregateDashboard(
       orderBy: { createdAt: "desc" },
       take: 10_000,
     }),
+    // NC tournée véhicule — même logique de masquage des fantômes (action
+    // déjà validée) que SiteVisitNonConformity, scope via teamScope sur
+    // VehicleRound. Cf. modèle VehicleRoundNonConformity.
+    prisma.vehicleRoundNonConformity.findMany({
+      where: {
+        redressedDate: null,
+        round: teamScope(user),
+        OR: [
+          { generatedActionId: null },
+          { generatedAction: { localStatus: "ACTIVE" } },
+        ],
+      },
+      select: {
+        id: true,
+        description: true,
+        itemLabel: true,
+        createdAt: true,
+        generatedActionId: true,
+        round: {
+          select: {
+            id: true,
+            immatriculation: true,
+            vehicleType: true,
+            vehicleId: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 10_000,
+    }),
     // C13 — Toutes les actions du périmètre (ACTIVE + VALIDATED_LOCAL)
     // pour calculer les ratios par keyPoint.
     // C13.1 — Ajout du select agent pour récupérer les cibles en attente.
@@ -447,6 +485,7 @@ export async function aggregateDashboard(
     lateActions: lateActionsCount,
     sitesWithoutQuarterly: countItems(lateItems, "VISIT_QUARTERLY"),
     sitesWithoutPlanned: countItems(lateItems, "VISIT_PLANNED"),
+    vehiclesOverdueRound: countItems(lateItems, "VEHICLE_ROUND"),
     expiredEquipments: countLateKind(lateItems, "EQUIPMENT_EXPIRING"),
   };
 
@@ -470,6 +509,7 @@ export async function aggregateDashboard(
     INVENTORY: 0,
     QUARTERLY: 0,
     PLANNED: 0,
+    VEHICLE_ROUND: 0,
     OTHER: 0,
   };
   const ncItemsAll: DashboardOpenNcItem[] = [];
@@ -489,10 +529,31 @@ export async function aggregateDashboard(
       actionId: nc.generatedActionId,
     });
   }
+  // NC tournée véhicule — même structure DashboardOpenNcItem mais
+  // siteName=immatriculation et visitReportUrl=rapport tournée.
+  for (const nc of openVehicleNcRows) {
+    ncCountByKind.VEHICLE_ROUND++;
+    ncItemsAll.push({
+      id: nc.id,
+      kind: "VEHICLE_ROUND",
+      kindLabel: NC_KIND_LABEL.VEHICLE_ROUND,
+      // siteId réutilisé comme identifiant cible (véhicule) — sert juste
+      // de clé éventuelle, pas utilisé pour le rendu.
+      siteId: nc.round.vehicleId,
+      siteName: nc.round.immatriculation,
+      description: truncateTitle(nc.description, 140),
+      detectedAt: nc.createdAt.toISOString(),
+      visitReportUrl: `/vehicle-rounds/${nc.round.id}/report`,
+      actionId: nc.generatedActionId,
+    });
+  }
+  // Re-tri par date desc — les NC tournée et visite sont mélangées.
+  ncItemsAll.sort((a, b) => b.detectedAt.localeCompare(a.detectedAt));
   // L'ordre des kinds importe pour le rendu (gauche → droite).
+  const totalNcCount = openNcRows.length + openVehicleNcRows.length;
   const openNonConformities: DashboardOpenNCs = {
-    total: openNcRows.length,
-    byKind: (["INVENTORY", "QUARTERLY", "PLANNED", "OTHER"] as NcKind[])
+    total: totalNcCount,
+    byKind: (["INVENTORY", "QUARTERLY", "PLANNED", "VEHICLE_ROUND", "OTHER"] as NcKind[])
       // C13.3 — Ne montre que les catégories avec au moins 1 NC ouverte
       // pour réduire le bruit visuel.
       .filter((k) => ncCountByKind[k] > 0)

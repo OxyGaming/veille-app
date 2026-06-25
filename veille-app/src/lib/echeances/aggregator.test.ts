@@ -7,6 +7,7 @@ import type { EcheanceItem } from "./types";
 const getVisitEcheances = vi.fn();
 const getEquipmentEcheances = vi.fn();
 const getActionEcheances = vi.fn();
+const getVehicleRoundEcheances = vi.fn();
 const findManyTeam = vi.fn();
 const findManySite = vi.fn();
 
@@ -21,6 +22,7 @@ vi.mock("./sources", () => ({
   getVisitEcheances: (...a: unknown[]) => getVisitEcheances(...a),
   getEquipmentEcheances: (...a: unknown[]) => getEquipmentEcheances(...a),
   getActionEcheances: (...a: unknown[]) => getActionEcheances(...a),
+  getVehicleRoundEcheances: (...a: unknown[]) => getVehicleRoundEcheances(...a),
 }));
 
 import {
@@ -32,11 +34,14 @@ beforeEach(() => {
   getVisitEcheances.mockReset();
   getEquipmentEcheances.mockReset();
   getActionEcheances.mockReset();
+  getVehicleRoundEcheances.mockReset();
   findManyTeam.mockReset();
   findManySite.mockReset();
   // Par défaut : sites vides, on n'a pas besoin de tester l'enrichissement
   // partout — uniquement dans le test dédié.
   findManySite.mockResolvedValue([]);
+  // Par défaut : pas d'échéances tournée VS — testées spécifiquement ailleurs.
+  getVehicleRoundEcheances.mockResolvedValue([]);
 });
 
 const NOW = new Date("2026-06-14T12:00:00.000Z");

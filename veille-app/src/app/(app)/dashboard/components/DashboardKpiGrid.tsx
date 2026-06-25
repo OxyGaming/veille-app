@@ -35,6 +35,11 @@ const KPI_DEFS: {
     toneFn: (v) => (v > 0 ? "warn" : "neutral"),
   },
   {
+    key: "vehiclesOverdueRound",
+    label: "Véhicules sans tournée",
+    toneFn: (v) => (v > 0 ? "warn" : "neutral"),
+  },
+  {
     key: "expiredEquipments",
     label: "Équipements expirés",
     toneFn: (v) => (v > 0 ? "danger" : "neutral"),

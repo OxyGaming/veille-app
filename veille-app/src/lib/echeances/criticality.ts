@@ -47,7 +47,8 @@ export function isCriticalEcheance(
 
     case "VISIT_QUARTERLY":
     case "VISIT_PLANNED":
-      // « Jamais visité » est critique par convention (cf. memory).
+    case "VEHICLE_ROUND":
+      // « Jamais contrôlé » est critique par convention (cf. memory).
       if (daysToDue === null) return true;
       return daysToDue < -VISIT_CRITICAL_THRESHOLD_DAYS;
 
@@ -85,6 +86,7 @@ export function isKnownEcheanceKind(value: string): value is EcheanceKind {
   return (
     value === "VISIT_QUARTERLY" ||
     value === "VISIT_PLANNED" ||
+    value === "VEHICLE_ROUND" ||
     value === "EQUIPMENT_EXPIRING" ||
     value === "ACTION_OVERDUE"
   );

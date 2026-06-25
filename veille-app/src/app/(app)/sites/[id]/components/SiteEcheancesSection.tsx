@@ -26,10 +26,14 @@ type Props = {
 const KIND_TITLE: Record<EcheanceKind, string> = {
   VISIT_QUARTERLY: "Visite trimestrielle",
   VISIT_PLANNED: "Visite planifiée",
+  // VEHICLE_ROUND est rattaché à un véhicule, pas à un site — pas affiché
+  // ici, mais le label reste défini pour satisfaire `Record<EcheanceKind>`.
+  VEHICLE_ROUND: "Tournée véhicule",
   EQUIPMENT_EXPIRING: "Équipements expirants",
   ACTION_OVERDUE: "Actions ouvertes",
 };
 
+// Ordre des sections rendues — VEHICLE_ROUND volontairement exclu (cf. ci-dessus).
 const KIND_ORDER: EcheanceKind[] = [
   "VISIT_QUARTERLY",
   "VISIT_PLANNED",
@@ -48,6 +52,7 @@ export async function SiteEcheancesSection({
   const byKind: Record<EcheanceKind, EcheanceItem[]> = {
     VISIT_QUARTERLY: [],
     VISIT_PLANNED: [],
+    VEHICLE_ROUND: [],
     EQUIPMENT_EXPIRING: [],
     ACTION_OVERDUE: [],
   };

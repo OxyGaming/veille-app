@@ -26,17 +26,27 @@ type CtaInput = {
   daysToDue: number | null;
   siteId?: string;
   agentId?: string;
+  vehicleId?: string;
 };
 
 /** Calcule le CTA principal d'une échéance — homogène et testé. */
 export function ctaForEcheance(input: CtaInput): EcheanceCta {
-  const { kind, sourceId, daysToDue, siteId, agentId } = input;
+  const { kind, sourceId, daysToDue, siteId, agentId, vehicleId } = input;
 
   switch (kind) {
     case "VISIT_QUARTERLY":
     case "VISIT_PLANNED": {
       const href = siteId ? `/sites/${siteId}` : "/today";
       return { label: "Ouvrir le site", href };
+    }
+    case "VEHICLE_ROUND": {
+      // Pas de page de fiche véhicule en V1 — on envoie sur le wizard de
+      // démarrage de tournée (pré-rempli quand vehicleId est connu).
+      const href = vehicleId
+        ? `/vehicle-rounds/new?vehicleId=${vehicleId}`
+        : "/vehicle-rounds/new";
+      void sourceId;
+      return { label: "Démarrer la tournée", href };
     }
     case "EQUIPMENT_EXPIRING": {
       const href = siteId ? `/sites/${siteId}` : "/today";

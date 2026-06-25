@@ -37,7 +37,7 @@ const BASE_NAV_MOBILE = [
 ];
 const BASE_NAV_DESKTOP = [
   { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
-  { href: "/visits", label: "Visites", icon: Icon.FileText },
+  { href: "/visits", label: "Visites & Tournées", icon: Icon.FileText },
   { href: "/sessions", label: "Sessions", icon: Icon.ClipboardCheck },
   { href: "/agents", label: "Agents", icon: Icon.Users },
   { href: "/sites", label: "Sites", icon: Icon.Building },

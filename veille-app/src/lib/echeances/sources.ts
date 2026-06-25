@@ -12,7 +12,7 @@
  *  - Pas de N+1 : 1 seul `findMany` par source, agrégations en JS.
  */
 
-import { actionScope, siteScope, type SessionUser } from "@/lib/auth";
+import { actionScope, siteScope, teamScope, type SessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   classifyVisitTemplateSlug,
@@ -23,6 +23,7 @@ import { isCriticalEcheance } from "./criticality";
 import { ctaForEcheance } from "./cta";
 import { classifyEcheanceUrgency } from "./urgency";
 import type { EcheanceItem } from "./types";
+import { vehicleTypeLabel } from "@/lib/vehicle-types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -34,6 +35,10 @@ const VISIT_SITES_MAX = 500;
 const VISIT_PER_SITE_HISTORY = 20;
 const EQUIPMENT_MAX = 200;
 const ACTION_MAX = 500;
+/** Fréquence par défaut des tournées VS (slug `tournee-vs`, 180 j). */
+const VEHICLE_ROUND_DEFAULT_FREQ = 180;
+const VEHICLE_MAX = 500;
+const VEHICLE_PER_HISTORY = 5;
 
 // ─── Helpers purs internes ───────────────────────────────────────────────────
 
@@ -358,6 +363,112 @@ export async function getActionEcheances(
   return rows
     .filter((r): r is typeof r & { dueAt: Date } => !!r.dueAt)
     .map((r) => buildActionEcheance(r, now));
+}
+
+function buildVehicleRoundEcheance(
+  vehicle: {
+    id: string;
+    immatriculation: string;
+    type: string;
+    label: string | null;
+    teamId: string | null;
+  },
+  lastRoundDate: Date | null,
+  frequencyDays: number,
+  now: Date,
+): EcheanceItem {
+  const dueAt = lastRoundDate
+    ? new Date(lastRoundDate.getTime() + frequencyDays * DAY_MS)
+    : null;
+  const daysToDue = dueAt ? diffDaysFloor(dueAt, now) : null;
+  const urgency = classifyEcheanceUrgency(daysToDue);
+  const subtitleBits = [vehicleTypeLabel(vehicle.type)];
+  if (vehicle.label) subtitleBits.push(vehicle.label);
+  return {
+    id: `VEHICLE_ROUND:${vehicle.id}`,
+    kind: "VEHICLE_ROUND",
+    title: `Tournée VS · ${vehicle.immatriculation}`,
+    subtitle: subtitleBits.join(" · "),
+    dueAt,
+    daysToDue,
+    urgency,
+    isCritical: isCriticalEcheance({ kind: "VEHICLE_ROUND", daysToDue }),
+    context: {
+      vehicleId: vehicle.id,
+      vehicleImmat: vehicle.immatriculation,
+      teamIds: vehicle.teamId ? [vehicle.teamId] : [],
+    },
+    cta: ctaForEcheance({
+      kind: "VEHICLE_ROUND",
+      sourceId: vehicle.id,
+      daysToDue,
+      vehicleId: vehicle.id,
+    }),
+  };
+}
+
+/**
+ * Pour chaque véhicule actif du périmètre, produit 1 `EcheanceItem` reflétant
+ * la dernière tournée terminée et la cadence attendue
+ * (`VehicleRoundTemplate.expectedFrequencyDays`, défaut 180 j).
+ *
+ * Véhicule jamais contrôlé → item avec `dueAt = null`, urgency `late`,
+ * `isCritical = true`. Scope équipe : filtre via `teamScope(user)` sur
+ * `Vehicle.teamId` — identique au filtrage de la liste tournées.
+ */
+export async function getVehicleRoundEcheances(
+  user: SessionUser,
+  now: Date,
+): Promise<EcheanceItem[]> {
+  const [vehicles, templates] = await Promise.all([
+    prisma.vehicle.findMany({
+      where: { isActive: true, ...teamScope(user) },
+      select: {
+        id: true,
+        immatriculation: true,
+        type: true,
+        label: true,
+        teamId: true,
+        rounds: {
+          where: { status: "completed", finishedAt: { not: null } },
+          orderBy: { finishedAt: "desc" },
+          take: VEHICLE_PER_HISTORY,
+          select: { finishedAt: true },
+        },
+      },
+      take: VEHICLE_MAX,
+    }),
+    prisma.vehicleRoundTemplate.findMany({
+      where: { isActive: true },
+      select: { expectedFrequencyDays: true },
+      take: 10,
+    }),
+  ]);
+  if (vehicles.length === VEHICLE_MAX) {
+    log.warn("echeances.vehicles.truncated", { limit: VEHICLE_MAX });
+  }
+  // Cadence applicable : on prend la plus courte parmi les templates actifs
+  // (cas V1 — un seul template à 180 j).
+  const frequency =
+    templates
+      .map((t) => t.expectedFrequencyDays)
+      .filter((d): d is number => typeof d === "number" && d > 0)
+      .sort((a, b) => a - b)[0] ?? VEHICLE_ROUND_DEFAULT_FREQ;
+  return vehicles.map((v) => {
+    const last = v.rounds[0]?.finishedAt ?? null;
+    return buildVehicleRoundEcheance(
+      {
+        id: v.id,
+        immatriculation: v.immatriculation,
+        type: v.type,
+        label: v.label,
+        teamId: v.teamId,
+      },
+      last,
+      frequency,
+      now,
+    );
+  });
 }
 
 /**

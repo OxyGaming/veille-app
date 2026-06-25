@@ -21,6 +21,8 @@ const SECTIONS: Section[] = [
   { href: "/admin/users", label: "Utilisateurs", icon: Icon.Users },
   { href: "/admin/agents", label: "Agents", icon: Icon.User },
   { href: "/admin/sites", label: "Sites", icon: Icon.Building },
+  { href: "/admin/vehicles", label: "Véhicules", icon: Icon.Truck },
+  { href: "/admin/vehicle-round-templates", label: "Grille tournée VS", icon: Icon.FileEdit },
   { href: "/admin/visit-templates", label: "Modèles de visite", icon: Icon.FileText },
   { href: "/admin/links", label: "Liens utiles", icon: Icon.Link },
   { href: "/admin/contacts", label: "Contacts", icon: Icon.Phone },

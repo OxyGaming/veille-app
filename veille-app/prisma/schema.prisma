@@ -63,6 +63,8 @@ model User {
   /// Préférences de notification (push + futurs canaux). 0 ou 1 row par user.
   /// Créée lazy à la 1ʳᵉ visite de "Mon compte → Notifications".
   notificationPreference NotificationPreference?
+  /// Tournées véhicule réalisées (en tant qu'observateur).
+  vehicleRounds          VehicleRound[]          @relation("VehicleRoundObserver")
 
   @@index([teamId])
   @@index([isActive])
@@ -151,6 +153,8 @@ model Team {
   siteSightings    SiteSighting[]
   activities       TeamActivity[]
   rcis             Rci[]
+  vehicles         Vehicle[]
+  vehicleRounds    VehicleRound[]
 }
 
 // ─── Référentiel métier (commun à toutes les équipes) ─────────────────────────
@@ -906,10 +910,12 @@ model ImportedAction {
   id              String    @id @default(cuid())
   externalId      String
   teamId          String
-  /// Cible : un agent OU un site (ou aucun pour les vieux imports).
-  /// Une NC remontée d'une visite renseigne `siteId`.
+  /// Cible : un agent, un site ou un véhicule (ou aucun pour les vieux imports).
+  /// Une NC remontée d'une visite renseigne `siteId`. Une NC remontée d'une
+  /// tournée véhicule renseigne `vehicleId`.
   agentId         String?
   siteId          String?
+  vehicleId       String?
   procedureId     String?
   /// Statut local : ACTIVE | REPLACED | OBSOLETE | VALIDATED_LOCAL
   /// (le statut d'origine est conservé dans `originalStatus`)
@@ -953,19 +959,22 @@ model ImportedAction {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  team          Team                    @relation(fields: [teamId], references: [id])
-  agent         Agent?                  @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  site          Site?                   @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  procedure     Procedure?              @relation(fields: [procedureId], references: [id], onDelete: SetNull)
-  import        ActionImport?           @relation(fields: [importId], references: [id], onDelete: SetNull)
-  validations   ActionValidation[]
-  nonConformity SiteVisitNonConformity? @relation("NCAction")
+  team                 Team                       @relation(fields: [teamId], references: [id])
+  agent                Agent?                     @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  site                 Site?                      @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  vehicle              Vehicle?                   @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  procedure            Procedure?                 @relation(fields: [procedureId], references: [id], onDelete: SetNull)
+  import               ActionImport?              @relation(fields: [importId], references: [id], onDelete: SetNull)
+  validations          ActionValidation[]
+  nonConformity        SiteVisitNonConformity?    @relation("NCAction")
+  vehicleNonConformity VehicleRoundNonConformity? @relation("VehicleNCAction")
 
   @@unique([externalId, agentId])
   @@index([externalId])
   @@index([teamId])
   @@index([agentId])
   @@index([siteId])
+  @@index([vehicleId])
   @@index([localStatus])
   @@index([dueAt])
   @@index([agentId, dedupHash])
@@ -1330,4 +1339,212 @@ model NotificationPreference {
   updatedAt    DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Tournées Véhicules de Service (TT VS) ───────────────────────────────────
+
+/// Véhicule de Service — entité du parc auto.
+///
+/// L'immatriculation est la clé métier. Le `type` détermine la grille d'items
+/// à vérifier lors d'une tournée (cf. VehicleRoundItem.applicableTypes).
+/// Types reconnus (cf. src/lib/vehicle-types.ts) :
+///  - VS_BASIQUE                : véhicule de service basique
+///  - VS_TRAVAIL_EIS            : véhicule de travail EIS (modul-system, kits anti-pollution…)
+///  - VS_DPX_ADPX_ASTREINTE     : véhicule DPx/ADPx/Astreinte (feu à éclat)
+///
+/// Soft-delete via `isActive` : on garde les véhicules retirés du parc pour
+/// préserver l'historique des tournées passées.
+model Vehicle {
+  id              String   @id @default(cuid())
+  /// Immatriculation (clé métier).
+  immatriculation String   @unique
+  /// Type de VS — détermine la grille d'inspection applicable.
+  type            String
+  /// Libellé libre (marque, modèle, affectation, etc.).
+  label           String?
+  /// Équipe propriétaire — sert au scope de visibilité.
+  teamId          String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  team            Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  rounds          VehicleRound[]
+  importedActions ImportedAction[]
+
+  @@index([teamId])
+  @@index([type])
+  @@index([isActive])
+}
+
+/// Template de tournée véhicule — grille (sections + items).
+/// V1 : un seul template "tournee-vs" seedé, éditable depuis le back-office.
+model VehicleRoundTemplate {
+  id                    String   @id @default(cuid())
+  slug                  String   @unique
+  name                  String
+  description           String?
+  /// Périodicité attendue en jours (null = libre). 180 = semestrielle.
+  expectedFrequencyDays Int?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  sections VehicleRoundSection[]
+  rounds   VehicleRound[]
+}
+
+/// Une section regroupe des items à observer.
+/// V1 : 1 seule section "Inspection générale" — le modèle reste extensible
+/// (ex : « Sécurité », « Équipement EIS », « Documents » plus tard).
+model VehicleRoundSection {
+  id         String  @id @default(cuid())
+  templateId String
+  title      String
+  icon       String?
+  sortOrder  Int     @default(0)
+  isActive   Boolean @default(true)
+
+  template     VehicleRoundTemplate       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  items        VehicleRoundItem[]
+  observations VehicleRoundObservation[]
+
+  @@index([templateId, sortOrder])
+}
+
+/// Un item de la grille — point à vérifier.
+///
+/// `applicableTypes` est un JSON array de types VS pour lesquels l'item
+/// s'applique (ex : `["VS_TRAVAIL_EIS"]`). Si le tableau est vide ou contient
+/// tous les types, l'item est applicable à tous.
+///
+/// `responseFormat` détermine les libellés affichés à la saisie. Le statut
+/// stocké reste OUI/NON/SANS_OBJET — c'est juste un mapping d'affichage :
+///  - BON_MAUVAIS            : bon (OUI) / mauvais (NON)
+///  - PRESENT_ABSENT         : présent (OUI) / absent (NON)
+///  - PRESENT_ABSENT_OR_NA   : présent (OUI) / absent (NON) / absence conducteur (SANS_OBJET)
+model VehicleRoundItem {
+  id              String  @id @default(cuid())
+  sectionId       String
+  label           String
+  /// JSON array : ["VS_BASIQUE", "VS_TRAVAIL_EIS", "VS_DPX_ADPX_ASTREINTE"].
+  applicableTypes String  @default("[]")
+  responseFormat  String  @default("PRESENT_ABSENT")
+  sortOrder       Int     @default(0)
+  isActive        Boolean @default(true)
+
+  section      VehicleRoundSection       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  observations VehicleRoundObservation[]
+
+  @@index([sectionId, sortOrder])
+}
+
+/// Une tournée réalisée — instance d'un template, sur un véhicule.
+model VehicleRound {
+  id             String    @id @default(cuid())
+  templateId     String
+  vehicleId      String
+  teamId         String
+  observerId     String
+  roundDate      DateTime  @default(now())
+  /// Statut workflow : active | completed | archived
+  status         String    @default("active")
+  finishedAt     DateTime?
+  generalComment String?
+  /// Snapshot du type véhicule au moment de la tournée (sécurité historique
+  /// si le type du véhicule est modifié après coup).
+  vehicleType    String
+  /// Snapshot de l'immat au moment de la tournée (idem).
+  immatriculation String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  template     VehicleRoundTemplate      @relation(fields: [templateId], references: [id])
+  vehicle      Vehicle                   @relation(fields: [vehicleId], references: [id])
+  team         Team                      @relation(fields: [teamId], references: [id])
+  observer     User                      @relation("VehicleRoundObserver", fields: [observerId], references: [id])
+  observations    VehicleRoundObservation[]
+  reports         VehicleRoundReport[]
+  nonConformities VehicleRoundNonConformity[]
+
+  @@index([vehicleId])
+  @@index([teamId])
+  @@index([observerId])
+  @@index([status])
+  @@index([roundDate])
+  @@index([status, finishedAt])
+}
+
+/// Observation au niveau item.
+/// Statut : OUI (conforme) | NON (non conforme) | SANS_OBJET | PENDING (non saisi).
+model VehicleRoundObservation {
+  id           String   @id @default(cuid())
+  roundId      String
+  sectionId    String
+  itemId       String
+  status       String   @default("PENDING")
+  comment      String?
+  recordedAt   DateTime @default(now())
+  recordedById String?
+
+  round         VehicleRound               @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  section       VehicleRoundSection        @relation(fields: [sectionId], references: [id])
+  item          VehicleRoundItem           @relation(fields: [itemId], references: [id])
+  nonConformity VehicleRoundNonConformity?
+
+  @@unique([roundId, itemId])
+  @@index([roundId])
+  @@index([status])
+}
+
+/// PDF / DOCX généré (cf. SiteVisitReport). Trace les exports.
+model VehicleRoundReport {
+  id          String   @id @default(cuid())
+  roundId     String
+  format      String   @default("PDF")
+  storagePath String?
+  payload     String   @default("{}")
+  createdAt   DateTime @default(now())
+
+  round VehicleRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@index([roundId])
+}
+
+/// Non-conformité d'une tournée véhicule.
+///
+/// Générée automatiquement à la fermeture d'une tournée : chaque
+/// observation au statut `NON` produit une row ici, accompagnée d'une
+/// `ImportedAction` corrective liée via `generatedActionId`.
+///
+/// Le pendant `SiteVisitNonConformity` couvre les visites de site ; le
+/// dashboard agrège les deux modèles côté pilotage. La validation de
+/// l'action corrective ferme automatiquement la NC (cf. `/api/actions/[id]/validate`).
+model VehicleRoundNonConformity {
+  id                String    @id @default(cuid())
+  roundId           String
+  /// Lien vers l'observation NON d'origine (1 NC = 1 observation).
+  observationId     String?   @unique
+  /// Snapshot du libellé de l'item au moment de la fermeture.
+  itemLabel         String
+  /// Description complète (item + commentaire utilisateur si présent).
+  description       String
+  /// Date prévue de redressement (souvent null en V1 — laissé à
+  /// l'utilisateur pour évolution future).
+  plannedDate       DateTime?
+  /// Posée automatiquement à la validation de l'action corrective.
+  redressedDate     DateTime?
+  closedDate        DateTime?
+  /// `ImportedAction` corrective (cible = vehicle). Lien faible : si
+  /// l'action est supprimée, la NC reste mais sans lien.
+  generatedActionId String?   @unique
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  round           VehicleRound             @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  observation     VehicleRoundObservation? @relation(fields: [observationId], references: [id], onDelete: SetNull)
+  generatedAction ImportedAction?          @relation("VehicleNCAction", fields: [generatedActionId], references: [id], onDelete: SetNull)
+
+  @@index([roundId])
+  @@index([redressedDate])
 }

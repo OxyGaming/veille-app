@@ -28,8 +28,14 @@ export async function GET(req: Request) {
   const scope = teamScope(u);
   const dateOn = (field: string) => ({ [field]: { gte: from, lte: to } });
 
-  const [visits, sessions, validations, agentSightings, siteSightings] =
-    await Promise.all([
+  const [
+    visits,
+    sessions,
+    validations,
+    agentSightings,
+    siteSightings,
+    vehicleRounds,
+  ] = await Promise.all([
       prisma.siteVisit.findMany({
         where: { ...scope, ...dateOn("visitDate") },
         select: {
@@ -71,6 +77,13 @@ export async function GET(req: Request) {
           observer: { select: { name: true } },
         },
       }),
+      prisma.vehicleRound.findMany({
+        where: { ...scope, ...dateOn("roundDate") },
+        select: {
+          roundDate: true,
+          observer: { select: { name: true } },
+        },
+      }),
     ]);
 
   // 1. Heatmap 7×24 (lundi=0…dimanche=6, heures 0..23).
@@ -86,6 +99,7 @@ export async function GET(req: Request) {
   for (const v of validations) push(v.realizedAt);
   for (const s of agentSightings) push(s.sightedAt);
   for (const s of siteSightings) push(s.sightedAt);
+  for (const r of vehicleRounds) push(r.roundDate);
 
   // 2. Charge par utilisateur.
   type Slot = { visit: number; session: number; validation: number; sighting: number; note: number };
@@ -103,6 +117,9 @@ export async function GET(req: Request) {
     userMap.set(name, s);
   };
   for (const v of visits) add(v.observer.name, "visit");
+  // Les tournées VS comptent comme des "visits" (cohérent avec l'onglet
+  // fusionné Visites & Tournées).
+  for (const r of vehicleRounds) add(r.observer.name, "visit");
   for (const s of sessions) add(s.observer.name, "session");
   for (const v of validations) add(v.validatedBy.name, "validation");
   for (const s of agentSightings)

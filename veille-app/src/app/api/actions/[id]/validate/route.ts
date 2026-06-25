@@ -141,7 +141,16 @@ export async function POST(
       where: { generatedActionId: action.id, redressedDate: null },
       data: { redressedDate: realizedAt },
     });
-    return { validation, ncRedressedCount: ncUpdate.count };
+    // Idem pour les NC de tournée véhicule (cf. VehicleRoundNonConformity).
+    // Mêmes garanties d'idempotence : updateMany no-op silencieux si pas de NC.
+    const vehicleNcUpdate = await tx.vehicleRoundNonConformity.updateMany({
+      where: { generatedActionId: action.id, redressedDate: null },
+      data: { redressedDate: realizedAt },
+    });
+    return {
+      validation,
+      ncRedressedCount: ncUpdate.count + vehicleNcUpdate.count,
+    };
   });
 
   // C12 — Flux d'activité EQUIPMENT_REPLACED quand on a réellement

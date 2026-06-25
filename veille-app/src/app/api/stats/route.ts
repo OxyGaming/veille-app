@@ -49,8 +49,14 @@ export async function GET(req: Request) {
   const scope = teamScope(u);
   const dateOn = (field: string) => ({ [field]: { gte: from, lte: to } });
 
-  const [visits, sessions, validations, sightings, siteSightings] =
-    await Promise.all([
+  const [
+    visits,
+    sessions,
+    validations,
+    sightings,
+    siteSightings,
+    vehicleRounds,
+  ] = await Promise.all([
       types.has("visit") && !agentId
         ? prisma.siteVisit.findMany({
             where: {
@@ -145,6 +151,23 @@ export async function GET(req: Request) {
             },
           })
         : Promise.resolve([]),
+      // Tournées VS — comptées comme `visit`. Exclues si le filtre restreint
+      // à un site ou à un agent (les tournées n'ont ni l'un ni l'autre).
+      types.has("visit") && !siteId && !agentId
+        ? prisma.vehicleRound.findMany({
+            where: {
+              ...scope,
+              ...(observerId ? { observerId } : {}),
+              ...dateOn("roundDate"),
+            },
+            select: {
+              id: true,
+              roundDate: true,
+              immatriculation: true,
+              observer: { select: { name: true } },
+            },
+          })
+        : Promise.resolve([]),
     ]);
 
   // Type interne pour normaliser les agrégats.
@@ -196,6 +219,14 @@ export async function GET(req: Request) {
       at: sg.sightedAt,
       creator: sg.observer.name,
       subject: sg.site.name,
+    });
+  }
+  for (const r of vehicleRounds) {
+    events.push({
+      type: "visit",
+      at: r.roundDate,
+      creator: r.observer.name,
+      subject: r.immatriculation,
     });
   }
 

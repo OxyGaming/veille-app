@@ -16,6 +16,7 @@ const POSTPONABLE_KINDS: ReadonlySet<EcheanceKind> = new Set([
 const KIND_LABEL: Record<EcheanceKind, string> = {
   VISIT_QUARTERLY: "Trimestrielle",
   VISIT_PLANNED: "Planifiée",
+  VEHICLE_ROUND: "Tournée VS",
   EQUIPMENT_EXPIRING: "Équipement",
   ACTION_OVERDUE: "Action",
 };
@@ -23,6 +24,7 @@ const KIND_LABEL: Record<EcheanceKind, string> = {
 const KIND_ICON: Record<EcheanceKind, typeof Icon.Calendar> = {
   VISIT_QUARTERLY: Icon.Calendar,
   VISIT_PLANNED: Icon.Calendar,
+  VEHICLE_ROUND: Icon.Truck,
   EQUIPMENT_EXPIRING: Icon.AlertTriangle,
   ACTION_OVERDUE: Icon.Clipboard,
 };

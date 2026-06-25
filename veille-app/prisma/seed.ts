@@ -13,6 +13,7 @@ import { prisma } from "../src/lib/prisma";
 import { hashPassword } from "../src/lib/auth";
 import { SEED_PROCEDURES } from "./seed-procedures";
 import { SEED_VISIT_TEMPLATES } from "./seed-visit-templates";
+import { SEED_VEHICLE_ROUND_TEMPLATES } from "./seed-vehicle-round-template";
 
 async function main() {
   const team = await prisma.team.upsert({
@@ -143,6 +144,61 @@ async function main() {
       });
     }
     console.log(`Template ${t.slug} créé (${t.sections.length} sections).`);
+  }
+
+  // Templates de tournée véhicule (idempotent : upsert par slug, on (re)crée
+  // les sections seulement si pas déjà présentes — préserve les éditions admin).
+  for (const t of SEED_VEHICLE_ROUND_TEMPLATES) {
+    const existing = await prisma.vehicleRoundTemplate.findUnique({
+      where: { slug: t.slug },
+      include: { sections: { include: { items: true } } },
+    });
+    if (existing && existing.sections.length > 0) {
+      console.log(
+        `Template VS ${t.slug} déjà présent (${existing.sections.length} sections) — on ne réécrase pas.`
+      );
+      continue;
+    }
+    const tpl = existing
+      ? await prisma.vehicleRoundTemplate.update({
+          where: { slug: t.slug },
+          data: {
+            name: t.name,
+            description: t.description,
+            expectedFrequencyDays: t.expectedFrequencyDays,
+          },
+        })
+      : await prisma.vehicleRoundTemplate.create({
+          data: {
+            slug: t.slug,
+            name: t.name,
+            description: t.description,
+            expectedFrequencyDays: t.expectedFrequencyDays,
+          },
+        });
+    for (let i = 0; i < t.sections.length; i++) {
+      const s = t.sections[i];
+      const section = await prisma.vehicleRoundSection.create({
+        data: {
+          templateId: tpl.id,
+          title: s.title,
+          icon: s.icon ?? null,
+          sortOrder: i,
+        },
+      });
+      await prisma.vehicleRoundItem.createMany({
+        data: s.items.map((it, j) => ({
+          sectionId: section.id,
+          label: it.label,
+          applicableTypes: JSON.stringify(it.applicableTypes),
+          responseFormat: it.responseFormat,
+          sortOrder: j,
+        })),
+      });
+    }
+    console.log(
+      `Template VS ${t.slug} créé (${t.sections.length} sections, ${t.sections.reduce((n, s) => n + s.items.length, 0)} items).`
+    );
   }
 
   console.log("Seed terminé.");

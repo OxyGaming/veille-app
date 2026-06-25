@@ -259,6 +259,8 @@ function shortTitleFor(kind: EcheanceItem["kind"]): string {
       return "Visite trimestrielle critique";
     case "VISIT_PLANNED":
       return "Visite planifiée critique";
+    case "VEHICLE_ROUND":
+      return "Tournée VS critique";
     case "EQUIPMENT_EXPIRING":
       return "Équipement périmé";
     case "ACTION_OVERDUE":

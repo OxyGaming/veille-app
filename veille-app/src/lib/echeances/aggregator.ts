@@ -13,6 +13,7 @@ import { countCriticalEcheances, filterCriticalEcheances } from "./criticality";
 import {
   getActionEcheances,
   getEquipmentEcheances,
+  getVehicleRoundEcheances,
   getVisitEcheances,
 } from "./sources";
 import type {
@@ -32,12 +33,15 @@ export async function getCriticalEcheancesItems(
   user: SessionUser,
   now: Date,
 ): Promise<EcheanceItem[]> {
-  const [visits, equipments, actions] = await Promise.all([
+  const [visits, equipments, actions, vehicleRounds] = await Promise.all([
     getVisitEcheances(user, now),
     getEquipmentEcheances(user, now),
     getActionEcheances(user, now),
+    getVehicleRoundEcheances(user, now),
   ]);
-  return [...visits, ...equipments, ...actions].filter((i) => i.isCritical);
+  return [...visits, ...equipments, ...actions, ...vehicleRounds].filter(
+    (i) => i.isCritical
+  );
 }
 
 /** Liste les équipes accessibles à l'utilisateur — peuple le filtre D5. */
@@ -162,16 +166,29 @@ export async function aggregateEcheances(
   now: Date,
   filters: EcheanceFilters = {},
 ): Promise<EcheancesPayload> {
-  const [visits, equipments, actions, teamsAvailable, sitesAvailable] =
-    await Promise.all([
-      getVisitEcheances(user, now, filters.siteId),
-      getEquipmentEcheances(user, now, filters.siteId),
-      getActionEcheances(user, now, filters.siteId),
-      getTeamsAvailable(user),
-      getSitesAvailable(user),
-    ]);
+  const [
+    visits,
+    equipments,
+    actions,
+    vehicleRounds,
+    teamsAvailable,
+    sitesAvailable,
+  ] = await Promise.all([
+    getVisitEcheances(user, now, filters.siteId),
+    getEquipmentEcheances(user, now, filters.siteId),
+    getActionEcheances(user, now, filters.siteId),
+    // Filtre `siteId` exclut les tournées VS (échéance par véhicule).
+    filters.siteId ? Promise.resolve([]) : getVehicleRoundEcheances(user, now),
+    getTeamsAvailable(user),
+    getSitesAvailable(user),
+  ]);
 
-  const allItems = dedupById([...visits, ...equipments, ...actions]);
+  const allItems = dedupById([
+    ...visits,
+    ...equipments,
+    ...actions,
+    ...vehicleRounds,
+  ]);
   const filtered = applyFilters(allItems, filters);
 
   const groupsRaw = groupByUrgency(filtered);

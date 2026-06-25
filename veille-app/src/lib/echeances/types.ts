@@ -16,6 +16,7 @@
 export type EcheanceKind =
   | "VISIT_QUARTERLY"
   | "VISIT_PLANNED"
+  | "VEHICLE_ROUND"
   | "EQUIPMENT_EXPIRING"
   | "ACTION_OVERDUE";
 
@@ -37,6 +38,9 @@ export type EcheanceContext = {
   siteIsOccupied?: boolean;
   agentId?: string;
   agentName?: string;
+  /** Véhicule cible — pour les échéances de tournée VS. */
+  vehicleId?: string;
+  vehicleImmat?: string;
   /** Équipe(s) propriétaires — utilisé par filtre D5 et scope check. */
   teamIds: string[];
 };

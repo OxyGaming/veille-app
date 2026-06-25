@@ -26,7 +26,14 @@ export async function GET(req: Request) {
 
   const scope = teamScope(u);
 
-  const [obs, visits, agentSightings, siteSightings] = await Promise.all([
+  const [
+    obs,
+    visits,
+    agentSightings,
+    siteSightings,
+    vehicleObs,
+    vehicleRounds,
+  ] = await Promise.all([
     // Observations dans la fenêtre, avec section + template.
     prisma.siteVisitObservation.findMany({
       where: {
@@ -62,6 +69,23 @@ export async function GET(req: Request) {
         _count: { select: { photos: true } },
       },
     }),
+    // Observations tournée VS dans la fenêtre — pour le taux de conformité
+    // global (section synthétique "Tournée VS").
+    prisma.vehicleRoundObservation.findMany({
+      where: {
+        round: { ...scope, roundDate: { gte: from, lte: to } },
+      },
+      select: { status: true },
+    }),
+    // Tournées VS + NC count — pour ncPerTemplate.
+    prisma.vehicleRound.findMany({
+      where: { ...scope, roundDate: { gte: from, lte: to } },
+      select: {
+        immatriculation: true,
+        template: { select: { name: true } },
+        nonConformities: { select: { id: true, description: true } },
+      },
+    }),
   ]);
 
   // 1. Taux de conformité par section.
@@ -86,6 +110,21 @@ export async function GET(req: Request) {
     else if (o.status === "SANS_OBJET") row.sansObjet++;
     bySectionMap.set(title, row);
   }
+  // Section synthétique "Tournée VS" — agrège toutes les observations véhicule
+  // pour donner un taux de conformité comparable aux sections visites.
+  if (vehicleObs.length > 0) {
+    const row = bySectionMap.get("Tournée VS") ?? {
+      conform: 0,
+      nonConform: 0,
+      sansObjet: 0,
+    };
+    for (const o of vehicleObs) {
+      if (o.status === "OUI") row.conform++;
+      else if (o.status === "NON") row.nonConform++;
+      else if (o.status === "SANS_OBJET") row.sansObjet++;
+    }
+    bySectionMap.set("Tournée VS", row);
+  }
   const conformityRate = [...bySectionMap.entries()]
     .map(([title, c]) => {
       const total = c.conform + c.nonConform + c.sansObjet;
@@ -101,13 +140,20 @@ export async function GET(req: Request) {
     .sort((a, b) => b.total - a.total)
     .slice(0, 20);
 
-  // 2. NC par template.
+  // 2. NC par template (visites de site + tournées VS).
   const byTpl = new Map<string, { visits: number; nc: number }>();
   for (const v of visits) {
     const k = v.template.name;
     const row = byTpl.get(k) ?? { visits: 0, nc: 0 };
     row.visits++;
     row.nc += v.nonConformities.length;
+    byTpl.set(k, row);
+  }
+  for (const r of vehicleRounds) {
+    const k = r.template.name;
+    const row = byTpl.get(k) ?? { visits: 0, nc: 0 };
+    row.visits++;
+    row.nc += r.nonConformities.length;
     byTpl.set(k, row);
   }
   const ncPerTemplate = [...byTpl.entries()].map(([name, r]) => ({

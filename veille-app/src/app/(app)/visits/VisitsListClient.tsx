@@ -10,22 +10,27 @@ import SearchInput, { matchesQuery } from "@/components/SearchInput";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/icons";
 
-type Visit = {
+type Item = {
+  kind: "visit" | "vehicle-round";
   id: string;
-  visitDate: string;
+  date: string;
   status: string;
   templateName: string;
   templateSlug: string;
-  siteName: string;
-  siteCode: string | null;
+  targetLabel: string;
+  targetSubtitle: string | null;
   observerName: string;
-  ncCount: number;
+  /** NC encore ouvertes (`redressedDate IS NULL`). */
+  ncOpen: number;
+  /** NC déjà redressées (action validée → `redressedDate` posée). */
+  ncRedressed: number;
+  href: string;
+  reportUrl: string;
 };
 
 /**
- * Code couleur par type de visite — sert à la barre latérale de la carte et
- * au pill à côté du nom du modèle. Reproduit la sémantique "incendie =
- * orange/rose", "planifiée = indigo".
+ * Code couleur par type de visite/tournée — sert à la barre latérale de la
+ * carte et au pill à côté du nom du modèle.
  */
 const TEMPLATE_THEME: Record<
   string,
@@ -41,6 +46,11 @@ const TEMPLATE_THEME: Record<
     pill: "bg-indigo-50 text-indigo-700 border-indigo-200",
     short: "Planifiée",
   },
+  "tournee-vs": {
+    bar: "bg-sky-500",
+    pill: "bg-sky-50 text-sky-700 border-sky-200",
+    short: "Tournée VS",
+  },
 };
 const DEFAULT_THEME = {
   bar: "bg-slate-300",
@@ -49,56 +59,73 @@ const DEFAULT_THEME = {
 };
 
 export default function VisitsListClient({
-  visits,
+  items,
   userRole = "USER",
 }: {
-  visits: Visit[];
+  items: Item[];
   userRole?: "USER" | "EDITOR" | "ADMIN";
 }) {
   const router = useRouter();
   const { dialog, ask } = useConfirmDialog();
   const canReopen = userRole === "ADMIN" || userRole === "EDITOR";
   const [q, setQ] = useState("");
-  const [list, setList] = useState(visits);
+  const [list, setList] = useState(items);
   const filteredLive = useMemo(
     () =>
-      list.filter((v) =>
+      list.filter((it) =>
         matchesQuery(
           q,
-          `${v.siteName} ${v.siteCode ?? ""} ${v.templateName} ${v.observerName} ${v.status}`
+          `${it.targetLabel} ${it.targetSubtitle ?? ""} ${it.templateName} ${it.observerName} ${it.status}`
         )
       ),
     [list, q]
   );
 
-  async function archive(v: Visit) {
+  function deleteEndpoint(it: Item, mode: "soft" | "hard"): string {
+    return it.kind === "visit"
+      ? `/api/visits/${it.id}?mode=${mode}`
+      : `/api/vehicle-rounds/${it.id}`;
+  }
+  function patchEndpoint(it: Item): string {
+    return it.kind === "visit"
+      ? `/api/visits/${it.id}`
+      : `/api/vehicle-rounds/${it.id}`;
+  }
+
+  async function archive(it: Item) {
+    if (it.kind === "vehicle-round") {
+      toast.error("Archivage non disponible pour les tournées VS.");
+      return;
+    }
     const ok = await ask({
-      title: `Archiver la visite « ${v.siteName} » ?`,
+      title: `Archiver la visite « ${it.targetLabel} » ?`,
       description:
         "Elle restera consultable depuis l'historique mais n'apparaîtra plus dans la liste courante.",
       confirmLabel: "Archiver",
     });
     if (!ok) return;
-    const res = await fetch(`/api/visits/${v.id}?mode=soft`, {
-      method: "DELETE",
-    });
+    const res = await fetch(deleteEndpoint(it, "soft"), { method: "DELETE" });
     if (res.ok) {
-      setList((arr) => arr.filter((x) => x.id !== v.id));
+      setList((arr) => arr.filter((x) => x.id !== it.id));
       toast.success("Visite archivée");
     } else {
       toast.error("Impossible d'archiver la visite");
     }
   }
 
-  async function reopen(v: Visit) {
+  async function reopen(it: Item) {
+    const label =
+      it.kind === "visit"
+        ? `la visite « ${it.targetLabel} »`
+        : `la tournée VS « ${it.targetLabel} »`;
     const ok = await ask({
-      title: `Rouvrir la visite « ${v.siteName} » ?`,
+      title: `Rouvrir ${label} ?`,
       description:
-        "La visite repassera en ACTIVE et redeviendra éditable. Le rapport ne sera plus accessible tant qu'elle n'est pas re-fermée. L'opération est tracée dans le journal d'audit.",
+        "L'état repassera en ACTIVE et l'édition redeviendra possible. L'opération est tracée dans le journal d'audit.",
       confirmLabel: "Rouvrir et éditer",
     });
     if (!ok) return;
-    const res = await fetch(`/api/visits/${v.id}`, {
+    const res = await fetch(patchEndpoint(it), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "active" }),
@@ -108,25 +135,31 @@ export default function VisitsListClient({
       toast.error(j.error || "Réouverture refusée");
       return;
     }
-    toast.success("Visite rouverte");
-    router.push(`/visits/${v.id}`);
+    toast.success(it.kind === "visit" ? "Visite rouverte" : "Tournée rouverte");
+    router.push(it.href);
   }
 
-  async function hardDelete(v: Visit) {
+  async function hardDelete(it: Item) {
+    const label =
+      it.kind === "visit"
+        ? `la visite « ${it.targetLabel} »`
+        : `la tournée VS « ${it.targetLabel} »`;
     const ok = await ask({
-      title: `Supprimer définitivement la visite « ${v.siteName} » ?`,
+      title: `Supprimer définitivement ${label} ?`,
       description:
-        "Observations, NCs et participants seront supprimés en cascade.\nLes actions générées par les NCs seront marquées OBSOLETE.",
+        it.kind === "visit"
+          ? "Observations, NCs et participants seront supprimés en cascade.\nLes actions générées par les NCs seront marquées OBSOLETE."
+          : "Observations et NCs liées seront supprimées en cascade.",
       confirmLabel: "Supprimer",
       tone: "danger",
     });
     if (!ok) return;
-    const res = await fetch(`/api/visits/${v.id}?mode=hard`, {
-      method: "DELETE",
-    });
+    const res = await fetch(deleteEndpoint(it, "hard"), { method: "DELETE" });
     if (res.ok) {
-      setList((arr) => arr.filter((x) => x.id !== v.id));
-      toast.success("Visite supprimée");
+      setList((arr) => arr.filter((x) => x.id !== it.id));
+      toast.success(
+        it.kind === "visit" ? "Visite supprimée" : "Tournée supprimée"
+      );
     } else {
       const j = await res.json().catch(() => ({}));
       toast.error(j.error || "Suppression refusée");
@@ -146,12 +179,13 @@ export default function VisitsListClient({
         />
       </div>
       <ul className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        {filteredLive.map((v) => {
-          const theme = TEMPLATE_THEME[v.templateSlug] ?? DEFAULT_THEME;
+        {filteredLive.map((it) => {
+          const theme = TEMPLATE_THEME[it.templateSlug] ?? DEFAULT_THEME;
+          const canArchive = it.kind === "visit";
           return (
-            <li key={v.id}>
+            <li key={`${it.kind}-${it.id}`}>
               <Link
-                href={`/visits/${v.id}`}
+                href={it.href}
                 className="card flex items-stretch hover:border-indigo-300 hover:shadow-md transition-all overflow-hidden"
               >
                 <span
@@ -162,50 +196,68 @@ export default function VisitsListClient({
                   <div className="flex items-center gap-2 flex-wrap">
                     <span
                       className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded ${
-                        v.status === "completed"
+                        it.status === "completed"
                           ? "bg-emerald-50 text-emerald-700"
-                          : v.status === "active"
-                          ? "bg-indigo-50 text-indigo-700"
-                          : "bg-slate-100 text-slate-600"
+                          : it.status === "active"
+                            ? "bg-indigo-50 text-indigo-700"
+                            : "bg-slate-100 text-slate-600"
                       }`}
                     >
-                      {v.status.toUpperCase()}
+                      {it.status.toUpperCase()}
                     </span>
                     <span
                       className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${theme.pill}`}
-                      title={v.templateName}
+                      title={it.templateName}
                     >
                       {theme.short}
                     </span>
                     <span className="text-xs text-slate-500 font-mono">
-                      {format(new Date(v.visitDate), "P", { locale: fr })}
+                      {format(new Date(it.date), "P", { locale: fr })}
                     </span>
-                    {v.ncCount > 0 && (
-                      <span className="text-[10px] font-mono text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded">
-                        {v.ncCount} NC
+                    {it.ncOpen > 0 && (
+                      <span
+                        className="text-[10px] font-mono text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded"
+                        title={`${it.ncOpen} non-conformité${it.ncOpen > 1 ? "s" : ""} à redresser`}
+                      >
+                        {it.ncOpen} NC
+                      </span>
+                    )}
+                    {it.ncRedressed > 0 && (
+                      <span
+                        className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+                        title={`${it.ncRedressed} non-conformité${it.ncRedressed > 1 ? "s" : ""} redressée${it.ncRedressed > 1 ? "s" : ""}`}
+                      >
+                        <Icon.Check className="w-3 h-3" />
+                        {it.ncRedressed} redressée{it.ncRedressed > 1 ? "s" : ""}
                       </span>
                     )}
                   </div>
-                  <div className="text-sm font-bold mt-1.5">{v.siteName}</div>
-                  {v.siteCode && (
-                    <div className="text-[11px] font-mono text-slate-500">
-                      {v.siteCode}
+                  <div
+                    className={`text-sm font-bold mt-1.5 ${it.kind === "vehicle-round" ? "font-mono" : ""}`}
+                  >
+                    {it.targetLabel}
+                  </div>
+                  {it.targetSubtitle && (
+                    <div
+                      className={`text-[11px] text-slate-500 ${it.kind === "vehicle-round" ? "" : "font-mono"}`}
+                    >
+                      {it.targetSubtitle}
                     </div>
                   )}
                   <div className="text-[11px] text-slate-500 mt-1">
-                    {v.templateName}
+                    {it.templateName}
                   </div>
                   <div className="text-[10px] text-slate-400 mt-1.5">
-                    Observateur : {v.observerName}
+                    Observateur : {it.observerName}
                   </div>
-                  {v.status === "completed" && (
+                  {it.status === "completed" && (
                     <div className="mt-2 flex gap-1.5">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          router.push(`/visits/${v.id}/report`);
+                          router.push(it.reportUrl);
                         }}
                         className="flex-1 text-xs font-semibold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-100 bg-indigo-50 border border-indigo-100 rounded-md px-3 py-2 flex items-center justify-center gap-1.5"
                       >
@@ -218,10 +270,14 @@ export default function VisitsListClient({
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            reopen(v);
+                            reopen(it);
                           }}
-                          title="Rouvrir la visite pour la rééditer"
-                          aria-label="Rouvrir la visite"
+                          title={
+                            it.kind === "visit"
+                              ? "Rouvrir la visite pour la rééditer"
+                              : "Rouvrir la tournée pour la rééditer"
+                          }
+                          aria-label="Rouvrir"
                           className="text-xs font-semibold text-amber-700 hover:text-amber-900 hover:bg-amber-100 bg-amber-50 border border-amber-100 rounded-md px-3 py-2 inline-flex items-center justify-center gap-1.5"
                         >
                           <Icon.FileEdit className="w-3.5 h-3.5" />
@@ -232,27 +288,29 @@ export default function VisitsListClient({
                   )}
                 </div>
                 <div className="flex flex-col items-center justify-center gap-1 pr-2">
+                  {canArchive && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        archive(it);
+                      }}
+                      className="text-[10px] text-slate-400 hover:text-slate-700 hover:bg-slate-100 px-1.5 py-0.5 rounded"
+                      title="Archiver (consultable plus tard)"
+                    >
+                      Archiver
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      archive(v);
-                    }}
-                    className="text-[10px] text-slate-400 hover:text-slate-700 hover:bg-slate-100 px-1.5 py-0.5 rounded"
-                    title="Archiver (consultable plus tard)"
-                  >
-                    Archiver
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      hardDelete(v);
+                      hardDelete(it);
                     }}
                     className="text-rose-400 hover:text-rose-700 hover:bg-rose-50 p-1 rounded"
-                    title="Supprimer définitivement (cascade observations, NCs, photos)"
+                    title="Supprimer définitivement (cascade observations, NCs)"
                   >
                     <Icon.Trash className="w-3.5 h-3.5" />
                   </button>
@@ -264,9 +322,9 @@ export default function VisitsListClient({
         {filteredLive.length === 0 && (
           <li className="col-span-full text-center py-16 text-slate-500">
             <Icon.ClipboardCheck className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-            {visits.length === 0
-              ? "Aucune visite — cliquez « Nouvelle visite »."
-              : "Aucune visite ne correspond à votre recherche."}
+            {list.length === 0
+              ? "Aucune visite ni tournée — utilisez les boutons en haut pour démarrer."
+              : "Aucun résultat ne correspond à votre recherche."}
           </li>
         )}
       </ul>

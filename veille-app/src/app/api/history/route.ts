@@ -109,8 +109,25 @@ export async function GET(req: Request) {
         ],
       }
     : {};
+  // Recherche tournée VS — immatriculation + libellé véhicule.
+  const qVehicleRoundWhere = q
+    ? {
+        OR: [
+          { immatriculation: { contains: q } },
+          { vehicle: { label: { contains: q } } },
+          { template: { name: { contains: q } } },
+        ],
+      }
+    : {};
 
-  const [visits, sessions, validations, sightings, siteSightings] = await Promise.all([
+  const [
+    visits,
+    sessions,
+    validations,
+    sightings,
+    siteSightings,
+    vehicleRounds,
+  ] = await Promise.all([
     types.has("visit") && !agentId
       ? prisma.siteVisit.findMany({
           where: {
@@ -216,6 +233,26 @@ export async function GET(req: Request) {
           },
         })
       : Promise.resolve([]),
+    // Tournées VS — couvertes par le filtre `visit`. Exclues si le filtre
+    // restreint à un site ou à un agent (les tournées n'ont ni l'un ni l'autre).
+    types.has("visit") && !siteId && !agentId
+      ? prisma.vehicleRound.findMany({
+          where: {
+            ...scope,
+            ...(observerId ? { observerId } : {}),
+            ...dateWhere("roundDate"),
+            ...qVehicleRoundWhere,
+          },
+          orderBy: { roundDate: "desc" },
+          take,
+          include: {
+            template: { select: { name: true, slug: true } },
+            vehicle: { select: { label: true } },
+            observer: { select: { name: true } },
+            _count: { select: { nonConformities: true } },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   type Entry = {
@@ -276,6 +313,25 @@ export async function GET(req: Request) {
           : []),
       ],
       accent: v._count.nonConformities > 0 ? "warn" : "info",
+    });
+  }
+  for (const r of vehicleRounds) {
+    entries.push({
+      type: "visit",
+      id: r.id,
+      at: r.roundDate.toISOString(),
+      observerName: r.observer.name,
+      title: `${r.template.name} · ${r.immatriculation}`,
+      subtitle: r.vehicle.label,
+      href: `/vehicle-rounds/${r.id}`,
+      badges: [
+        r.status.toUpperCase(),
+        "TOURNÉE VS",
+        ...(r._count.nonConformities > 0
+          ? [`${r._count.nonConformities} NC`]
+          : []),
+      ],
+      accent: r._count.nonConformities > 0 ? "warn" : "info",
     });
   }
   for (const s of sessions) {

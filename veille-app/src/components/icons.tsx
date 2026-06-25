@@ -270,6 +270,15 @@ export const Icon = {
       <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
     </svg>
   ),
+  Truck: (p: IconProps) => (
+    <svg {...base} {...p}>
+      <path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11" />
+      <path d="M14 9h4l4 4v4c0 .6-.4 1-1 1h-2" />
+      <circle cx="7" cy="18" r="2" />
+      <path d="M15 18H9" />
+      <circle cx="17" cy="18" r="2" />
+    </svg>
+  ),
   Train: (p: IconProps) => (
     <svg {...base} {...p}>
       <rect x="4" y="3" width="16" height="16" rx="2" />

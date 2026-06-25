@@ -1,6 +1,6 @@
 "use client";
 
-import { TextField, TernaryField, FieldSet } from "../fields-ui";
+import { FieldSet, TernaryField, TextField, TimeField } from "../fields-ui";
 import type { StepProps } from "../types";
 import type { RciPayload } from "@/lib/rci/fields";
 
@@ -72,10 +72,9 @@ export default function Step5Acteurs({ payload, patch, readOnly }: StepProps) {
           const mesKey = `mc_l${i}_mesures` as K;
           return (
             <div key={i} className="grid gap-2 sm:grid-cols-[100px_180px_1fr]">
-              <TextField
+              <TimeField
                 label={`Heure ${i}`}
                 value={payload[heureKey] as string}
-                placeholder="07h09"
                 disabled={readOnly}
                 onChange={(v) => patch({ [heureKey]: v } as Partial<RciPayload>)}
               />
@@ -95,7 +94,7 @@ export default function Step5Acteurs({ payload, patch, readOnly }: StepProps) {
           );
         })}
         <div className="grid gap-3 sm:grid-cols-3">
-          <TextField
+          <TimeField
             label="Notification heure"
             value={payload.mc_notification_heure}
             disabled={readOnly}

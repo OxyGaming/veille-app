@@ -1,6 +1,11 @@
 "use client";
 
-import { TextField, TernaryField, FieldSet } from "../fields-ui";
+import {
+  FieldSet,
+  TernaryField,
+  timeFrToIso,
+  timeIsoToFr,
+} from "../fields-ui";
 import type { StepProps } from "../types";
 import type { RciPayload, Ternary } from "@/lib/rci/fields";
 
@@ -86,13 +91,15 @@ export default function Step6Presents({ payload, patch, readOnly }: StepProps) {
                     )}
                   </div>
                   <input
-                    type="text"
-                    value={payload[heureAvisKey] as string}
+                    type="time"
+                    value={timeFrToIso(payload[heureAvisKey] as string)}
                     onChange={(e) =>
-                      patch({ [heureAvisKey]: e.target.value } as Partial<RciPayload>)
+                      patch({
+                        [heureAvisKey]: timeIsoToFr(e.target.value),
+                      } as Partial<RciPayload>)
                     }
                     disabled={readOnly}
-                    placeholder="HHhMM"
+                    aria-label={`${r.label} — heure d'avis`}
                     className="input text-xs"
                   />
                   <TernaryField
@@ -104,15 +111,15 @@ export default function Step6Presents({ payload, patch, readOnly }: StepProps) {
                     disabled={readOnly}
                   />
                   <input
-                    type="text"
-                    value={payload[heureArriveeKey] as string}
+                    type="time"
+                    value={timeFrToIso(payload[heureArriveeKey] as string)}
                     onChange={(e) =>
                       patch({
-                        [heureArriveeKey]: e.target.value,
+                        [heureArriveeKey]: timeIsoToFr(e.target.value),
                       } as Partial<RciPayload>)
                     }
                     disabled={readOnly}
-                    placeholder="HHhMM"
+                    aria-label={`${r.label} — heure d'arrivée`}
                     className="input text-xs"
                   />
                 </div>

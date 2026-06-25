@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findManyAction = vi.fn();
 const findManyObs = vi.fn();
+const findManyProcedureObs = vi.fn();
 const findUniqueSession = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
@@ -11,6 +12,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     observationItem: {
       findMany: (...a: unknown[]) => findManyObs(...a),
+    },
+    procedureObservation: {
+      findMany: (...a: unknown[]) => findManyProcedureObs(...a),
     },
     veilleSession: {
       findUnique: (...a: unknown[]) => findUniqueSession(...a),
@@ -28,7 +32,11 @@ import {
 beforeEach(() => {
   findManyAction.mockReset();
   findManyObs.mockReset();
+  findManyProcedureObs.mockReset();
   findUniqueSession.mockReset();
+  // Par défaut : aucun titre de procédure — les tests qui veulent vérifier
+  // ce cas le surchargent explicitement.
+  findManyProcedureObs.mockResolvedValue([]);
 });
 
 // ─── matchActionsByKeyPoint — logique pure ────────────────────────────────
@@ -182,6 +190,7 @@ describe("getObservedKeyPointsForSession", () => {
   it("retourne [] si sessionId vide", async () => {
     await expect(getObservedKeyPointsForSession("")).resolves.toEqual([]);
     expect(findManyObs).not.toHaveBeenCalled();
+    expect(findManyProcedureObs).not.toHaveBeenCalled();
   });
 
   it("dédup + trim des libellés observés", async () => {
@@ -196,6 +205,34 @@ describe("getObservedKeyPointsForSession", () => {
     expect(r.sort()).toEqual([
       "Annonces",
       "Circuits de voie peu empruntés",
+    ]);
+  });
+
+  it("inclut le titre de procédure observée (cas keyPoint=titre)", async () => {
+    findManyProcedureObs.mockResolvedValue([
+      { procedure: { title: "Circulations de catégorie A, B, C" } },
+      { procedure: { title: " Circulations de catégorie A, B, C " } },
+      { procedure: { title: "" } },
+      { procedure: { title: null } },
+    ]);
+    findManyObs.mockResolvedValue([]);
+    const r = await getObservedKeyPointsForSession("s1");
+    expect(r).toEqual(["Circulations de catégorie A, B, C"]);
+  });
+
+  it("fusionne titres de procédure + libellés d'items, dédupliqués", async () => {
+    findManyProcedureObs.mockResolvedValue([
+      { procedure: { title: "Circulations de catégorie A, B, C" } },
+    ]);
+    findManyObs.mockResolvedValue([
+      { checklistItem: { label: "Signaux fixes" } },
+      // Même chaîne que le titre — doit être collapsée par le Set.
+      { checklistItem: { label: "Circulations de catégorie A, B, C" } },
+    ]);
+    const r = await getObservedKeyPointsForSession("s1");
+    expect(r.sort()).toEqual([
+      "Circulations de catégorie A, B, C",
+      "Signaux fixes",
     ]);
   });
 });
@@ -240,5 +277,38 @@ describe("findAutoValidableActionsForSession", () => {
     ]);
     const r = await findAutoValidableActionsForSession("s1");
     expect(r.map((x) => x.id)).toEqual(["a1"]);
+  });
+
+  it("matche les actions dont le keyPoint commence par le titre de la procédure observée", async () => {
+    findUniqueSession.mockResolvedValue({ agentId: "ag1" });
+    findManyProcedureObs.mockResolvedValue([
+      { procedure: { title: "Circulations de catégorie A, B, C" } },
+    ]);
+    findManyObs.mockResolvedValue([]);
+    findManyAction.mockResolvedValue([
+      {
+        id: "a1",
+        externalId: "x1",
+        keyPoint: "Circulations de catégorie A, B, C sud",
+        comment: null,
+        dueAt: null,
+      },
+      {
+        id: "a2",
+        externalId: "x2",
+        keyPoint: "Circulations de catégorie A, B, C ca c est le test",
+        comment: null,
+        dueAt: null,
+      },
+      {
+        id: "a3",
+        externalId: "x3",
+        keyPoint: "Autre sujet",
+        comment: null,
+        dueAt: null,
+      },
+    ]);
+    const r = await findAutoValidableActionsForSession("s1");
+    expect(r.map((x) => x.id).sort()).toEqual(["a1", "a2"]);
   });
 });

@@ -84,8 +84,15 @@ export function matchActionsByKeyPoint<A extends MatchableAction>(
 }
 
 /**
- * Récupère les libellés (`ChecklistItem.label`) des points clés observés
- * dans une session de veille, dédupliqués.
+ * Récupère les « points clés » observés dans une session de veille,
+ * dédupliqués. Couvre deux niveaux pour matcher au plus large :
+ *
+ *  - le **titre de chaque procédure observée** (`Procedure.title`) — c'est
+ *    le cas standard métier : les `keyPoint` des actions importées
+ *    correspondent presque toujours à un titre de procédure (cf. format
+ *    Excel d'import) ;
+ *  - les **libellés des items de checklist** (`ChecklistItem.label`) — pour
+ *    couvrir le cas où une action vise un sous-point précis.
  *
  * Aucun filtre de statut : on inclut tous les items des
  * `ProcedureObservation` de la session (cf. spec § « Point clé répété
@@ -96,12 +103,22 @@ export async function getObservedKeyPointsForSession(
   sessionId: string,
 ): Promise<string[]> {
   if (!sessionId) return [];
-  const rows = await prisma.observationItem.findMany({
-    where: { procedureObservation: { sessionId } },
-    select: { checklistItem: { select: { label: true } } },
-  });
+  const [procedureRows, itemRows] = await Promise.all([
+    prisma.procedureObservation.findMany({
+      where: { sessionId },
+      select: { procedure: { select: { title: true } } },
+    }),
+    prisma.observationItem.findMany({
+      where: { procedureObservation: { sessionId } },
+      select: { checklistItem: { select: { label: true } } },
+    }),
+  ]);
   const set = new Set<string>();
-  for (const r of rows) {
+  for (const r of procedureRows) {
+    const t = r.procedure?.title?.trim();
+    if (t) set.add(t);
+  }
+  for (const r of itemRows) {
     const lbl = r.checklistItem?.label?.trim();
     if (lbl) set.add(lbl);
   }

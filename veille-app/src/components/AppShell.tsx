@@ -361,8 +361,7 @@ export default function AppShell({
                 moreOpen ? "text-indigo-600" : "text-slate-500"
               }`}
             >
-              <Icon.Plus className="w-5 h-5 mb-0.5" />
-              Plus
+              <Icon.MoreVertical className="w-5 h-5" />
             </button>
           </div>
         </nav>

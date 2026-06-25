@@ -7,6 +7,10 @@ import { Icon } from "@/components/icons";
 import AgentAutocomplete from "@/components/AgentAutocomplete";
 import HelpBadge from "@/components/HelpBadge";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
+import {
+  AutoValidateActionsDialog,
+  type AutoValidateCandidate,
+} from "./AutoValidateActionsDialog";
 
 type ChecklistItem = {
   id: string;
@@ -75,6 +79,12 @@ export default function SessionClient({
   const [session, setSession] = useState<Session>(initial);
   const [saving, setSaving] = useState<string | null>(null);
   const [generalOpen, setGeneralOpen] = useState(false);
+  // État de la modale d'auto-validation des actions à la clôture.
+  // null = pas affichée. busy = validation en cours.
+  const [autoValidate, setAutoValidate] = useState<{
+    candidates: AutoValidateCandidate[];
+    busy: boolean;
+  } | null>(null);
 
   const { done, total, ko } = useMemo(() => {
     let done = 0,
@@ -173,14 +183,8 @@ export default function SessionClient({
     });
   }
 
-  async function finishSession() {
-    const ok = await ask({
-      title: "Clôturer la session ?",
-      description:
-        "Les saisies seront verrouillées après clôture.\nVous pourrez toujours consulter le rapport généré.",
-      confirmLabel: "Clôturer",
-    });
-    if (!ok) return;
+  /** Étape finale de clôture — appelée après l'éventuelle auto-validation. */
+  async function closeSessionRequest(): Promise<void> {
     const res = await fetch(`/api/sessions/${session.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -194,9 +198,99 @@ export default function SessionClient({
     }
   }
 
+  async function finishSession() {
+    // 1) Confirmation utilisateur sur la clôture elle-même.
+    const ok = await ask({
+      title: "Clôturer la session ?",
+      description:
+        "Les saisies seront verrouillées après clôture.\nVous pourrez toujours consulter le rapport généré.",
+      confirmLabel: "Clôturer",
+    });
+    if (!ok) return;
+
+    // 2) Recherche des actions auto-validables (helper centralisé serveur).
+    // Si l'appel échoue ou que la liste est vide → comportement actuel
+    // inchangé : on clôture directement.
+    let candidates: AutoValidateCandidate[] = [];
+    try {
+      const res = await fetch(
+        `/api/sessions/${session.id}/auto-validate-candidates`,
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { items: AutoValidateCandidate[] };
+        candidates = data.items ?? [];
+      }
+    } catch {
+      // Erreur réseau / serveur — on dégrade vers la clôture directe pour
+      // ne pas bloquer l'utilisateur.
+    }
+
+    if (candidates.length === 0) {
+      await closeSessionRequest();
+      return;
+    }
+
+    // 3) Modale d'auto-validation — le flux continue dans
+    // onConfirm/onCancel (cf. plus bas dans le JSX).
+    setAutoValidate({ candidates, busy: false });
+  }
+
+  /**
+   * Valide les actions cochées via la route existante
+   * `POST /api/actions/[id]/validate` puis clôture la session.
+   * En cas d'échec partiel : on poursuit la clôture mais on prévient.
+   */
+  async function handleAutoValidateConfirm(selectedIds: string[]) {
+    if (!autoValidate) return;
+    setAutoValidate({ ...autoValidate, busy: true });
+    let okCount = 0;
+    let failCount = 0;
+    for (const id of selectedIds) {
+      try {
+        const res = await fetch(`/api/actions/${id}/validate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            comment: `Validation automatique à la clôture de la veille ${session.id.slice(0, 8)}.`,
+          }),
+        });
+        if (res.ok) okCount++;
+        else failCount++;
+      } catch {
+        failCount++;
+      }
+    }
+    if (okCount > 0) {
+      toast.success(
+        `${okCount} action${okCount > 1 ? "s" : ""} validée${okCount > 1 ? "s" : ""}`,
+      );
+    }
+    if (failCount > 0) {
+      toast.error(
+        `${failCount} action${failCount > 1 ? "s" : ""} non validée${failCount > 1 ? "s" : ""} (réessayez côté agent).`,
+      );
+    }
+    setAutoValidate(null);
+    await closeSessionRequest();
+  }
+
+  /** L'utilisateur a refusé l'auto-validation → clôture sans rien valider. */
+  async function handleAutoValidateCancel() {
+    setAutoValidate(null);
+    await closeSessionRequest();
+  }
+
   return (
     <div className="pb-32">
       {dialog}
+      {autoValidate && (
+        <AutoValidateActionsDialog
+          candidates={autoValidate.candidates}
+          busy={autoValidate.busy}
+          onConfirm={handleAutoValidateConfirm}
+          onCancel={handleAutoValidateCancel}
+        />
+      )}
       {/* Header session */}
       <header className="sticky top-0 lg:top-0 z-20 bg-white border-b border-slate-200 no-print">
         <div className="px-4 lg:px-8 py-3 flex items-center gap-3">

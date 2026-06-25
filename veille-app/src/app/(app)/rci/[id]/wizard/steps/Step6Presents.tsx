@@ -63,6 +63,12 @@ export default function Step6Presents({ payload, patch, readOnly }: StepProps) {
     <div className="space-y-3">
       {SECTIONS.map((s) => (
         <FieldSet key={s.title} title={s.title}>
+          <div className="grid gap-2 sm:grid-cols-[1fr_110px_180px_110px] text-[10px] text-slate-400 font-mono uppercase mb-1">
+            <span>Rôle</span>
+            <span>Heure d&apos;avis</span>
+            <span>Présent ?</span>
+            <span>Heure d&apos;arrivée</span>
+          </div>
           <div className="grid gap-1">
             {s.rows.map((r) => {
               const heureAvisKey = `po_${r.key}_heure_avis` as K;
@@ -125,12 +131,6 @@ export default function Step6Presents({ payload, patch, readOnly }: StepProps) {
                 </div>
               );
             })}
-          </div>
-          <div className="grid gap-2 sm:grid-cols-[1fr_110px_180px_110px] text-[10px] text-slate-400 font-mono uppercase mt-1">
-            <span>Rôle</span>
-            <span>Heure d'avis</span>
-            <span>Présent ?</span>
-            <span>Heure d'arrivée</span>
           </div>
         </FieldSet>
       ))}

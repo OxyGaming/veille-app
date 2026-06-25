@@ -339,6 +339,7 @@ export async function aggregateDashboard(
     activityRows,
     notifRows,
     visitsRows,
+    vehicleRoundsRows,
     validationsRows,
     openNcRows,
     openVehicleNcRows,
@@ -363,6 +364,17 @@ export async function aggregateDashboard(
     }),
     getNotificationCounts(user, windowStart),
     prisma.siteVisit.findMany({
+      where: {
+        ...teamScope(user),
+        status: "completed",
+        finishedAt: { gte: windowStart, lte: now },
+      },
+      select: { finishedAt: true },
+      take: 10_000,
+    }),
+    // Tournées VS clôturées dans la fenêtre — alimentent la même trend
+    // « visites » (cf. fusion UI Visites & Tournées).
+    prisma.vehicleRound.findMany({
       where: {
         ...teamScope(user),
         status: "completed",
@@ -493,7 +505,10 @@ export async function aggregateDashboard(
     activity: bucketByDay(activityRows, "createdAt", period, now),
     notifications: bucketByDay(notifRows, "createdAt", period, now),
     visits: bucketByDay(
-      visitsRows.map((v) => ({ finishedAt: v.finishedAt })),
+      [
+        ...visitsRows.map((v) => ({ finishedAt: v.finishedAt })),
+        ...vehicleRoundsRows.map((r) => ({ finishedAt: r.finishedAt })),
+      ],
       "finishedAt",
       period,
       now,

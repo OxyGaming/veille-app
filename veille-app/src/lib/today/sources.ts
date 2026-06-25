@@ -535,8 +535,17 @@ export async function getEditorWeekCounters(
   now: Date,
 ): Promise<EditorWeekCounters> {
   const weekStart = startOfWeekParis(now);
-  const [visits, sessions, closedActions] = await Promise.all([
+  // Les tournées VS clôturées comptent comme des visites au sens UX
+  // (cohérent avec la fusion de l'onglet « Visites & Tournées »).
+  const [siteVisits, vehicleRounds, sessions, closedActions] = await Promise.all([
     prisma.siteVisit.count({
+      where: {
+        ...teamScope(user),
+        status: "completed",
+        finishedAt: { gte: weekStart, lte: now },
+      },
+    }),
+    prisma.vehicleRound.count({
       where: {
         ...teamScope(user),
         status: "completed",
@@ -557,7 +566,7 @@ export async function getEditorWeekCounters(
       },
     }),
   ]);
-  return { visits, sessions, closedActions };
+  return { visits: siteVisits + vehicleRounds, sessions, closedActions };
 }
 
 /**

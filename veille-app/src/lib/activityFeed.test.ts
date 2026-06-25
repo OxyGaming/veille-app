@@ -14,10 +14,11 @@ import {
  */
 
 describe("ACTIVITY_TYPES", () => {
-  it("contient les 9 types MVP attendus (6 base + 3 équipement)", () => {
+  it("contient les 10 types attendus (6 base + 3 équipement + tournée VS)", () => {
     expect(ACTIVITY_TYPES).toEqual([
       "SESSION_FINISHED",
       "VISIT_FINISHED",
+      "VEHICLE_ROUND_FINISHED",
       "AGENT_NOTE",
       "AGENT_SIGHTED",
       "ACTION_CREATED",
@@ -30,10 +31,11 @@ describe("ACTIVITY_TYPES", () => {
 });
 
 describe("ACTIVITY_ENTITY_TYPES", () => {
-  it("contient les 6 types d'entité cible attendus", () => {
+  it("contient les 7 types d'entité cible attendus", () => {
     expect(ACTIVITY_ENTITY_TYPES).toEqual([
       "session",
       "visit",
+      "vehicle-round",
       "agent",
       "action",
       "equipment",

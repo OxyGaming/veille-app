@@ -19,6 +19,7 @@ import { notifyTeamHistoryAdded } from "@/lib/notifications-generators";
 export const ACTIVITY_TYPES = [
   "SESSION_FINISHED",
   "VISIT_FINISHED",
+  "VEHICLE_ROUND_FINISHED",
   "AGENT_NOTE",
   "AGENT_SIGHTED",
   "ACTION_CREATED",
@@ -33,6 +34,7 @@ export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 export const ACTIVITY_ENTITY_TYPES = [
   "session",
   "visit",
+  "vehicle-round",
   "agent",
   "action",
   "equipment",
@@ -190,6 +192,8 @@ export function defaultMessageFor(input: {
       return `${actor} a terminé une veille — ${label}.`;
     case "VISIT_FINISHED":
       return `${actor} a terminé une visite — ${label}.`;
+    case "VEHICLE_ROUND_FINISHED":
+      return `${actor} a terminé une tournée VS — ${label}.`;
     case "AGENT_NOTE":
       return `${actor} a commenté ${label}.`;
     case "AGENT_SIGHTED":
@@ -222,6 +226,8 @@ export function defaultTargetUrlFor(input: {
       return `/sessions/${input.entityId}`;
     case "visit":
       return `/visits/${input.entityId}/report`;
+    case "vehicle-round":
+      return `/vehicle-rounds/${input.entityId}/report`;
     case "agent":
       return `/agents/${input.entityId}`;
     case "site":

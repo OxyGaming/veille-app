@@ -11,6 +11,11 @@ import {
   TAG_VEILLE_LEGALE,
 } from "@/lib/tags";
 import { vehicleTypeLabel } from "@/lib/vehicle-types";
+import {
+  defaultMessageFor,
+  joinActivityParts,
+  recordActivitySafe,
+} from "@/lib/activityFeed";
 
 export async function GET(
   _req: Request,
@@ -101,6 +106,42 @@ export async function PATCH(
   // (cas de réouverture/refermeture).
   if (goingToCompleted) {
     await generateVehicleRoundNCs(id);
+    // Flux d'activité équipe — VEHICLE_ROUND_FINISHED.
+    // Vehicle.teamId est scalaire (mono-équipe en V1), donc pas de
+    // duplication multi-team comme pour les sites. Le label porte
+    // l'immatriculation + le nombre de NC pour donner du contexte.
+    const ncCount = await prisma.vehicleRoundNonConformity.count({
+      where: { roundId: id },
+    });
+    const label = `${round.immatriculation} (${vehicleTypeLabel(round.vehicleType)})`;
+    const detail =
+      ncCount > 0
+        ? `${ncCount} non-conformité${ncCount > 1 ? "s" : ""} générée${ncCount > 1 ? "s" : ""}.`
+        : "Aucune non-conformité.";
+    await recordActivitySafe({
+      teamIds: [round.teamId],
+      actorId: u.id,
+      actorName: u.name,
+      type: "VEHICLE_ROUND_FINISHED",
+      entityType: "vehicle-round",
+      entityId: id,
+      entityLabel: label,
+      message: joinActivityParts([
+        defaultMessageFor({
+          type: "VEHICLE_ROUND_FINISHED",
+          actorName: u.name,
+          entityLabel: label,
+        }),
+        detail,
+      ]),
+      targetUrl: `/vehicle-rounds/${id}/report`,
+      metadata: {
+        vehicleId: round.vehicleId,
+        vehicleType: round.vehicleType,
+        immatriculation: round.immatriculation,
+        ncCount,
+      },
+    });
   }
   return NextResponse.json({ ok: true });
 }

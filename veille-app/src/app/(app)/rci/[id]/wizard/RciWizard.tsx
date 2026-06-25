@@ -9,7 +9,6 @@ import {
   type RciPayload,
   type RciPhotos,
 } from "@/lib/rci/fields";
-import { renderRci } from "@/lib/rci/render";
 import Step1Quand from "./steps/Step1Quand";
 import Step2Nature from "./steps/Step2Nature";
 import Step3Ou from "./steps/Step3Ou";
@@ -72,6 +71,7 @@ function applyDefaults(p: RciPayload, authorName: string): RciPayload {
   if (!out.rci_etabli_le) out.rci_etabli_le = todayFr();
   if (!out.rci_etabli_par) out.rci_etabli_par = authorName;
   if (!out.sig_eic_nom_fonction) out.sig_eic_nom_fonction = authorName;
+  if (!out.sig_eic_etablissement) out.sig_eic_etablissement = "EIC RAL";
   return out;
 }
 
@@ -176,21 +176,22 @@ export default function RciWizard({
   async function generate() {
     setGenerating(true);
     try {
-      // Les champs "RCI établi le / par" et l'EIC sont désormais pré-remplis
-      // à l'ouverture du wizard et modifiables (cf. applyDefaults). Si
-      // l'utilisateur les vide volontairement, on respecte ce choix.
-      const blob = await renderRci(payload, photos);
-      // `file-saver` exporte sa fonction via `module.exports = saveAs` :
-      // `import()` retourne donc `{ default: saveAs }` côté interop. Le
-      // destructuring `{ saveAs }` donne `undefined` en prod minifié (=>
-      // « n is not a function »). On déballe via le helper partagé.
-      const fileSaverNs = await import("file-saver");
-      const { unwrapCjsCtor } = await import("@/lib/rci/render");
-      const saveAs = unwrapCjsCtor<(blob: Blob, filename: string) => void>(
-        fileSaverNs,
-      );
-      const fname = `rci-${payload.dossier_numero || rciId.slice(0, 8)}.docx`;
-      saveAs(blob, fname);
+      const res = await fetch(`/api/rci/${rciId}/docx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload, photos }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error ?? res.statusText);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rci-${payload.dossier_numero || rciId.slice(0, 8)}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
       toast.success("Document généré");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erreur inconnue";

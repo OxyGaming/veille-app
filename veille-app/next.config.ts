@@ -46,7 +46,12 @@ const nextConfig: NextConfig = {
   // Standalone n'est utile que pour Docker. Symptôme en cas de régression :
   // page servie sans CSS + erreur webpack "Cannot read properties of
   // undefined" + warning "next start does not work with output: standalone".
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: [
+    "better-sqlite3",
+    "docxtemplater",
+    "pizzip",
+    "docxtemplater-image-module-free",
+  ],
   turbopack: {},
 
   experimental: {

@@ -8,13 +8,18 @@
  *  - cases à cocher : booléens → caractères Unicode ☒ / ☐
  *  - photos inline via docxtemplater-image-module-free (tagValue base64)
  *
- * Lazy-loaded à l'usage — les dépendances (~150 KB) ne tombent dans le bundle
- * qu'au premier rendu effectif, pas au chargement du wizard.
+ * Docxtemplater et PizZip sont chargés via require() à l'intérieur de
+ * renderRci : on obtient directement module.exports sans l'encapsulation
+ * namespace ESM que webpack crée pour les CJS, évitant ainsi l'erreur
+ * "Cannot call a class as a function" (_classCallCheck instanceof).
+ * ImageModule reste en import() dynamique avec dégradation gracieuse.
  */
 
 import {
+  ABSENT_KEYS,
   CHECK_BOOL_KEYS,
   CHECK_TERNARY_KEYS,
+  PHOTO_KEYS,
   type RciPayload,
   type RciPhotos,
 } from "./fields";
@@ -22,8 +27,15 @@ import {
 const CHECKED = "☒"; // ☒
 const UNCHECKED = "☐"; // ☐
 
+// PNG 1×1 blanc — utilisé comme image de substitution quand une signature est absente,
+// pour éviter que l'ImageModule plante sur un tag {%photo_*} sans valeur.
+const BLANK_PNG_1X1 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=";
+
 const BOOL_SET = new Set<string>(CHECK_BOOL_KEYS as readonly string[]);
 const TERNARY_SET = new Set<string>(CHECK_TERNARY_KEYS as readonly string[]);
+const PHOTO_SET = new Set<string>(PHOTO_KEYS as readonly string[]);
+const ABSENT_SET = new Set<string>(ABSENT_KEYS as readonly string[]);
 
 /**
  * Construit le dictionnaire passé à docxtemplater.render().
@@ -32,19 +44,32 @@ const TERNARY_SET = new Set<string>(CHECK_TERNARY_KEYS as readonly string[]);
  *  - clé payload `xxx: string`           → tag `txt_xxx`
  *  - clé payload `xxx: boolean`          → tag `check_xxx`            (☒/☐)
  *  - clé payload `xxx: boolean | null`   → tags `check_xxx_oui` + `check_xxx_non`
+ *  - clé payload `xxx_absent: boolean`   → booléen brut `xxx_absent` (section)
  *  - clé photos  `yyy: string` (base64)  → tag `photo_yyy`
  */
 export function buildTemplateData(
   payload: RciPayload,
   photos: RciPhotos,
-): Record<string, string> {
-  const out: Record<string, string> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Record<string, any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const out: Record<string, any> = {};
   for (const [key, value] of Object.entries(payload)) {
     if (TERNARY_SET.has(key)) {
       out[`check_${key}_oui`] = value === true ? CHECKED : UNCHECKED;
       out[`check_${key}_non`] = value === false ? CHECKED : UNCHECKED;
     } else if (BOOL_SET.has(key)) {
       out[`check_${key}`] = value === true ? CHECKED : UNCHECKED;
+    } else if (ABSENT_SET.has(key)) {
+      // « Non présent sur place » : booléen brut (sans préfixe) pilotant la
+      // section conditionnelle de la cellule signature dans le template.
+      out[key] = value === true;
+    } else if (PHOTO_SET.has(key)) {
+      // Signatures : base64 brut → photo_{key} pour l'ImageModule.
+      // Fallback PNG 1×1 blanc si absent — évite que le module image plante
+      // sur un tag {%photo_*} sans valeur dans le template.
+      out[`photo_${key}`] =
+        typeof value === "string" && value.length > 0 ? value : BLANK_PNG_1X1;
     } else {
       // String (ou nullable). Null → "".
       out[`txt_${key}`] = value == null ? "" : String(value);
@@ -106,76 +131,64 @@ export async function renderRci(
   payload: RciPayload,
   photos: RciPhotos,
   opts: {
+    /** Buffer pré-chargé du template — Buffer Node.js ou ArrayBuffer (prioritaire sur templateUrl). */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    templateBuffer?: any;
     /** Override du chemin du template (défaut : /rci/template.docx). */
     templateUrl?: string;
     /** Dimensions de chaque photo inline en pixels (défaut : 400×300). */
     photoSize?: [number, number];
   } = {},
 ): Promise<Blob> {
-  const [DocxtemplaterNs, PizZipNs, ImageModuleNs] = await Promise.all([
-    import("docxtemplater"),
-    import("pizzip"),
-    import("docxtemplater-image-module-free"),
-  ]);
-  // Déballage robuste — couvre les variantes d'interop CJS/ESM produites par
-  // Next.js en prod minifié (sinon `n is not a function` au `new`).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let Docxtemplater: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let PizZip: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let ImageModule: any;
+  // require() retourne directement module.exports (la classe réelle) sans
+  // l'encapsulation namespace ESM/Turbopack — évite _classCallCheck instanceof.
+  // Cette fonction tourne désormais côté serveur (API route), où ces 3 packages
+  // sont déclarés dans serverExternalPackages : require() les charge nativement.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+  const PizZip: any = require("pizzip");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+  const Docxtemplater: any = require("docxtemplater");
+
+  // ImageModule : require() natif aussi, avec dégradation gracieuse.
+  // Si le module échoue, on génère le docx sans images plutôt que de tout bloquer.
+  const modules: unknown[] = [];
   try {
-    Docxtemplater = unwrapCjsCtor(DocxtemplaterNs);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+    const ImageModuleCtor: any = require("docxtemplater-image-module-free");
+    const imageModule = new ImageModuleCtor({
+      centered: false,
+      getImage: (tagValue: unknown) => b64ToBytes(String(tagValue)),
+      // getSize(img, tagValue, tagName) : les signatures sont petites (cellule
+      // étroite ~1,5"), le schéma succinct prend la taille par défaut plus grande.
+      getSize: (_img: unknown, _val: unknown, tagName: unknown) => {
+        if (typeof tagName === "string" && tagName.startsWith("photo_sig_")) {
+          return [150, 50] as [number, number];
+        }
+        return (opts.photoSize ?? [400, 300]) as [number, number];
+      },
+    });
+    modules.push(imageModule);
   } catch (e) {
-    throw new Error(
-      "module 'docxtemplater' indisponible : " +
-        (e instanceof Error ? e.message : String(e)),
-    );
-  }
-  try {
-    PizZip = unwrapCjsCtor(PizZipNs);
-  } catch (e) {
-    throw new Error(
-      "module 'pizzip' indisponible : " +
-        (e instanceof Error ? e.message : String(e)),
-    );
-  }
-  try {
-    ImageModule = unwrapCjsCtor(ImageModuleNs);
-  } catch (e) {
-    throw new Error(
-      "module 'docxtemplater-image-module-free' indisponible : " +
-        (e instanceof Error ? e.message : String(e)),
-    );
+    console.error("[renderRci] ImageModule indisponible :", e);
   }
 
-  const url = opts.templateUrl ?? "/rci/template.docx";
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Template introuvable (${res.status}) : ${url}`);
+  let arrayBuf: ArrayBuffer;
+  if (opts.templateBuffer) {
+    arrayBuf = opts.templateBuffer;
+  } else {
+    const url = opts.templateUrl ?? "/rci/template.docx";
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Template introuvable (${res.status}) : ${url}`);
+    }
+    arrayBuf = await res.arrayBuffer();
   }
   let zip: unknown;
   try {
-    zip = new PizZip(await res.arrayBuffer());
+    zip = new PizZip(arrayBuf);
   } catch (e) {
     throw new Error(
       "PizZip(buffer) a échoué : " +
-        (e instanceof Error ? e.message : String(e)),
-    );
-  }
-
-  const imageOpts = {
-    centered: false,
-    getImage: (tagValue: unknown) => b64ToBytes(String(tagValue)),
-    getSize: () => (opts.photoSize ?? [400, 300]) as [number, number],
-  };
-  let imageModule: unknown;
-  try {
-    imageModule = new ImageModule(imageOpts);
-  } catch (e) {
-    throw new Error(
-      "new ImageModule(opts) a échoué : " +
         (e instanceof Error ? e.message : String(e)),
     );
   }
@@ -184,11 +197,9 @@ export async function renderRci(
   let doc: any;
   try {
     doc = new Docxtemplater(zip, {
-      modules: [imageModule],
+      ...(modules.length > 0 ? { modules } : {}),
       paragraphLoop: true,
       linebreaks: true,
-      // Tag manquant ou null → vide plutôt que d'échouer (utile pendant le
-      // wizard où le payload est incomplet).
       nullGetter: () => "",
     });
   } catch (e) {

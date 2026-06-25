@@ -265,14 +265,44 @@ export type RciPayload = {
   // ── Footer (T6 R6 + T7) ────────────────────────────────────────────────
   rci_etabli_le: string;
   rci_etabli_par: string;
+
+  // ── Signatures (T7) ────────────────────────────────────────────────────
+  // Chaque intervenant : établissement, nom/fonction, téléphone, signature
+  // (image base64) ou « Non présent sur place » (flag `_absent`).
+  // SNCF Réseau : EIC (rôle figé) + 2 représentants supplémentaires libres
+  // (sous-rôle saisi, ex. « Maintenance & Travaux »).
+  sig_eic_etablissement: string; // pré-rempli « EIC RAL »
   sig_eic_nom_fonction: string;
   sig_eic_tel: string;
+  sig_eic_data: string;
+  sig_eic_absent: boolean;
+  sig_sncf2_sous_role: string; // ex. « Maintenance & Travaux »
+  sig_sncf2_etablissement: string;
+  sig_sncf2_nom_fonction: string;
+  sig_sncf2_tel: string;
+  sig_sncf2_data: string;
+  sig_sncf2_absent: boolean;
+  sig_sncf3_sous_role: string;
+  sig_sncf3_etablissement: string;
+  sig_sncf3_nom_fonction: string;
+  sig_sncf3_tel: string;
+  sig_sncf3_data: string;
+  sig_sncf3_absent: boolean;
+  sig_autres_gi_etablissement: string;
   sig_autres_gi_nom_fonction: string;
   sig_autres_gi_tel: string;
+  sig_autres_gi_data: string;
+  sig_autres_gi_absent: boolean;
+  sig_ef1_etablissement: string;
   sig_ef1_nom_fonction: string;
   sig_ef1_tel: string;
+  sig_ef1_data: string;
+  sig_ef1_absent: boolean;
+  sig_ef2_etablissement: string;
   sig_ef2_nom_fonction: string;
   sig_ef2_tel: string;
+  sig_ef2_data: string;
+  sig_ef2_absent: boolean;
 };
 
 /** Photos inline supportées — tagValue = base64. */
@@ -481,14 +511,38 @@ export function emptyPayload(): RciPayload {
     photos_titres_habilitation: null,
     rci_etabli_le: "",
     rci_etabli_par: "",
+    sig_eic_etablissement: "",
     sig_eic_nom_fonction: "",
     sig_eic_tel: "",
+    sig_eic_data: "",
+    sig_eic_absent: false,
+    sig_sncf2_sous_role: "",
+    sig_sncf2_etablissement: "",
+    sig_sncf2_nom_fonction: "",
+    sig_sncf2_tel: "",
+    sig_sncf2_data: "",
+    sig_sncf2_absent: false,
+    sig_sncf3_sous_role: "",
+    sig_sncf3_etablissement: "",
+    sig_sncf3_nom_fonction: "",
+    sig_sncf3_tel: "",
+    sig_sncf3_data: "",
+    sig_sncf3_absent: false,
+    sig_autres_gi_etablissement: "",
     sig_autres_gi_nom_fonction: "",
     sig_autres_gi_tel: "",
+    sig_autres_gi_data: "",
+    sig_autres_gi_absent: false,
+    sig_ef1_etablissement: "",
     sig_ef1_nom_fonction: "",
     sig_ef1_tel: "",
+    sig_ef1_data: "",
+    sig_ef1_absent: false,
+    sig_ef2_etablissement: "",
     sig_ef2_nom_fonction: "",
     sig_ef2_tel: "",
+    sig_ef2_data: "",
+    sig_ef2_absent: false,
   };
 }
 
@@ -551,6 +605,28 @@ export const CHECK_BOOL_KEYS: ReadonlyArray<keyof RciPayload> = [
   "ef2_sous_traitant",
   "mc_notification_dpx",
   "mc_notification_cogc",
+];
+
+/** Clés image (base64 PNG brut). Rendues comme `{%photo_<key>}` dans le template. */
+export const PHOTO_KEYS: ReadonlyArray<keyof RciPayload> = [
+  "sig_eic_data",
+  "sig_sncf2_data",
+  "sig_sncf3_data",
+  "sig_autres_gi_data",
+  "sig_ef1_data",
+  "sig_ef2_data",
+];
+
+/** Clés « non présent sur place » — pilotent la section conditionnelle de la
+ *  cellule signature dans le template (`{#<key>}Non présent…{/}{^<key>}{%photo}{/}`).
+ *  Passées au payload docxtemplater comme booléen brut (sans préfixe). */
+export const ABSENT_KEYS: ReadonlyArray<keyof RciPayload> = [
+  "sig_eic_absent",
+  "sig_sncf2_absent",
+  "sig_sncf3_absent",
+  "sig_autres_gi_absent",
+  "sig_ef1_absent",
+  "sig_ef2_absent",
 ];
 
 /** Clés ternaires (true / false / null). Rendues comme 2 placeholders

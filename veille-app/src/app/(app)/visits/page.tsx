@@ -110,7 +110,7 @@ export default async function VisitsPage() {
             href="/vehicle-rounds/new"
             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50"
           >
-            <Icon.Truck className="w-4 h-4" /> Nouvelle tournée VS
+            <Icon.Truck className="w-4 h-4" /> Nouvelle tournée
           </Link>
           <Link href="/visits/new" className="btn btn-primary">
             <Icon.Plus className="w-4 h-4" /> Nouvelle visite

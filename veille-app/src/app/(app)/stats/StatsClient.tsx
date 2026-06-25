@@ -119,7 +119,7 @@ const TABS = [
   { v: "activity", label: "Activité" },
   { v: "actions", label: "Actions" },
   { v: "veille-site", label: "Veille de site" },
-  { v: "vehicle-rounds", label: "Tournées VS" },
+  { v: "vehicle-rounds", label: "Tournées" },
 ] as const;
 
 type VeilleSite = {
@@ -278,7 +278,7 @@ export default function StatsClient() {
         </h1>
         <p className="text-sm text-slate-500 mt-0.5">
           6 onglets — vue d&apos;ensemble, qualité, activité, actions, veille
-          de site, tournées VS.
+          de site, tournées.
         </p>
       </div>
 

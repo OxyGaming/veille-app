@@ -16,16 +16,33 @@ type ImportResult = {
   warnings?: string[];
 };
 
-export default function ImportClient() {
+export default function ImportClient({
+  teams = [],
+  defaultTeamId = null,
+}: {
+  teams?: { id: string; name: string }[];
+  defaultTeamId?: string | null;
+}) {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  // Équipe cible de l'import. Toutes les lignes du fichier seront rattachées à
+  // CETTE équipe (cf. cloisonnement). Défaut = équipe principale si disponible.
+  const [teamId, setTeamId] = useState<string>(
+    defaultTeamId && teams.some((t) => t.id === defaultTeamId)
+      ? defaultTeamId
+      : teams[0]?.id ?? ""
+  );
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
+    if (!teamId) {
+      setError("Sélectionnez une équipe cible avant l'import.");
+      return;
+    }
     setBusy(true);
     setError(null);
     setResult(null);
@@ -34,6 +51,7 @@ export default function ImportClient() {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("teamId", teamId);
 
       // Suivi de progression via XHR (fetch n'a pas d'upload progress).
       const data = await new Promise<ImportResult>((resolve, reject) => {
@@ -67,6 +85,33 @@ export default function ImportClient() {
   return (
     <div className="card p-5">
       <form onSubmit={submit} className="flex flex-col gap-4">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">
+            Équipe cible <span className="text-rose-600">*</span>
+            <span className="ml-1 text-[10px] font-normal text-slate-400">
+              (toutes les lignes du fichier seront rattachées à cette équipe)
+            </span>
+          </label>
+          {teams.length === 0 ? (
+            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+              Aucune équipe disponible — rattachez-vous à une équipe pour
+              importer.
+            </div>
+          ) : (
+            <select
+              value={teamId}
+              onChange={(e) => setTeamId(e.target.value)}
+              className="input"
+              required
+            >
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1.5">
             Fichier Excel (.xlsx)

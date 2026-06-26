@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { addMonths, format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
@@ -32,9 +32,11 @@ type Result = {
 export default function QuickActionForm({
   agents,
   teams,
+  defaultTeamId = null,
 }: {
   agents: Agent[];
   teams: Team[];
+  defaultTeamId?: string | null;
 }) {
   const defaultDue = format(addMonths(new Date(), 7), "yyyy-MM-dd");
   const [title, setTitle] = useState("");
@@ -42,13 +44,38 @@ export default function QuickActionForm({
   const [tags, setTags] = useState<string[]>(["veille légale", "obligatoire"]);
   const [showOptions, setShowOptions] = useState(false);
   const [agentIds, setAgentIds] = useState<string[]>([]);
+  // Équipe cible : l'action est créée DANS cette équipe, pour des agents qui
+  // en sont membres. Évite d'assigner un teamId à des agents d'une autre équipe
+  // (action invisible côté fiche, cf. cloisonnement).
+  const [teamId, setTeamId] = useState<string>(
+    defaultTeamId && teams.some((t) => t.id === defaultTeamId)
+      ? defaultTeamId
+      : teams[0]?.id ?? ""
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
 
+  // Agents proposables = ceux rattachés à l'équipe cible uniquement.
+  const teamAgents = useMemo(
+    () => (teamId ? agents.filter((a) => a.teamIds.includes(teamId)) : []),
+    [agents, teamId]
+  );
+
+  function changeTeam(next: string) {
+    setTeamId(next);
+    // Le vivier d'agents change → on repart d'une sélection vide pour ne pas
+    // conserver des agents hors de la nouvelle équipe.
+    setAgentIds([]);
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
+    if (!teamId) {
+      setError("Sélectionnez une équipe cible.");
+      return;
+    }
     if (!agentIds.length) {
       setError("Sélectionnez au moins un agent dans « Plus d'options ».");
       setShowOptions(true);
@@ -66,6 +93,7 @@ export default function QuickActionForm({
           dueAt: new Date(dueAt + "T00:00:00").toISOString(),
           tags,
           agentIds,
+          teamId,
         }),
       });
       const j = await res.json();
@@ -116,6 +144,30 @@ export default function QuickActionForm({
 
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">
+            Équipe cible <span className="text-rose-600">*</span>
+          </label>
+          {teams.length === 0 ? (
+            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+              Aucune équipe disponible.
+            </div>
+          ) : (
+            <select
+              value={teamId}
+              onChange={(e) => changeTeam(e.target.value)}
+              className="input"
+              required
+            >
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">
             Tags
           </label>
           <TagInput
@@ -161,8 +213,8 @@ export default function QuickActionForm({
                 Agents impactés
               </label>
               <AgentMultiPicker
-                agents={agents}
-                teams={teams}
+                agents={teamAgents}
+                teams={teams.filter((t) => t.id === teamId)}
                 value={agentIds}
                 onChange={setAgentIds}
                 initialMode="all"
@@ -180,8 +232,8 @@ export default function QuickActionForm({
             <Icon.Plus className="w-4 h-4" />
             {busy
               ? "Création…"
-              : `Créer pour ${agentIds.length || agents.length} agent${
-                  (agentIds.length || agents.length) > 1 ? "s" : ""
+              : `Créer pour ${agentIds.length || teamAgents.length} agent${
+                  (agentIds.length || teamAgents.length) > 1 ? "s" : ""
                 }`}
           </button>
           {!showOptions && (

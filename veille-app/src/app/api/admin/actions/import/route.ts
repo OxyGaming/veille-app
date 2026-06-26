@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { effectiveTeamIds, requireRole } from "@/lib/auth";
 import { parseRow, readWorkbook, type ParsedActionRow } from "@/lib/actionImport";
 
 /**
@@ -46,20 +46,33 @@ export async function POST(req: Request) {
   } catch (r) {
     return r as Response;
   }
-  if (!u.teamId) {
-    return NextResponse.json(
-      { error: "Sélectionnez une équipe avant l'import." },
-      { status: 400 }
-    );
-  }
   const form = await req.formData();
   const file = form.get("file");
   if (!(file instanceof Blob)) {
     return NextResponse.json({ error: "Fichier manquant" }, { status: 400 });
   }
 
+  // Équipe cible explicite (sélecteur UI) ; à défaut, équipe principale de
+  // l'utilisateur. Doit appartenir à son périmètre agissable — le batch entier
+  // est rattaché à cette équipe (cloisonnement).
+  const requestedTeamId = form.get("teamId");
+  const teamId =
+    (typeof requestedTeamId === "string" && requestedTeamId) || u.teamId;
+  if (!teamId) {
+    return NextResponse.json(
+      { error: "Sélectionnez une équipe cible avant l'import." },
+      { status: 400 }
+    );
+  }
+  const eff = effectiveTeamIds(u);
+  if (eff !== null && !eff.includes(teamId)) {
+    return NextResponse.json(
+      { error: "Équipe non autorisée pour cet import." },
+      { status: 403 }
+    );
+  }
+
   const t0 = Date.now();
-  const teamId = u.teamId;
   const buffer = Buffer.from(await file.arrayBuffer());
   const rows = readWorkbook(buffer);
   const parsed = rows

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { agentScope, getSessionUser } from "@/lib/auth";
+import { agentScope, effectiveTeamIds, getSessionUser } from "@/lib/auth";
 import ImportClient from "./ImportClient";
 import PointagesImport from "./PointagesImport";
 import QuickActionForm from "./QuickActionForm";
@@ -10,6 +10,10 @@ export const dynamic = "force-dynamic";
 
 export default async function ImportsPage() {
   const u = await getSessionUser();
+  // Équipes pour lesquelles l'utilisateur peut importer/créer = ses équipes
+  // agissables (null = global → toutes). Aligné sur la validation serveur des
+  // routes import/quick pour que le sélecteur ne propose que des choix valides.
+  const eff = u ? effectiveTeamIds(u) : [];
   const [recent, agents, teams] = await Promise.all([
     prisma.actionImport.findMany({
       orderBy: { createdAt: "desc" },
@@ -23,14 +27,14 @@ export default async function ImportsPage() {
           include: { memberships: { select: { teamId: true } } },
         })
       : Promise.resolve([]),
-    u?.role === "ADMIN" || u?.viewAllTeams
+    !u
+      ? Promise.resolve([])
+      : eff === null
       ? prisma.team.findMany({ orderBy: { name: "asc" } })
-      : u
-      ? prisma.team.findMany({
-          where: { id: { in: u.teamIds } },
+      : prisma.team.findMany({
+          where: { id: { in: eff } },
           orderBy: { name: "asc" },
-        })
-      : Promise.resolve([]),
+        }),
   ]);
 
   const agentsForPicker = agents.map((a) => ({
@@ -38,7 +42,14 @@ export default async function ImportsPage() {
     matricule: a.matricule,
     firstName: a.firstName,
     lastName: a.lastName,
-    teamIds: a.memberships.map((m) => m.teamId),
+    // Équipes de l'agent = primaire (legacy) ∪ memberships, pour que le filtre
+    // par équipe cible de la création rapide couvre aussi les agents legacy.
+    teamIds: [
+      ...new Set([
+        ...(a.teamId ? [a.teamId] : []),
+        ...a.memberships.map((m) => m.teamId),
+      ]),
+    ],
   }));
   const teamsForPicker = teams.map((t) => ({ id: t.id, name: t.name }));
   return (
@@ -52,8 +63,12 @@ export default async function ImportsPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2 mb-6">
-        <QuickActionForm agents={agentsForPicker} teams={teamsForPicker} />
-        <ImportClient />
+        <QuickActionForm
+          agents={agentsForPicker}
+          teams={teamsForPicker}
+          defaultTeamId={u?.teamId ?? null}
+        />
+        <ImportClient teams={teamsForPicker} defaultTeamId={u?.teamId ?? null} />
       </div>
 
       <div className="mb-6">

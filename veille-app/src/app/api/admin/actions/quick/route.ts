@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createHash, randomUUID } from "crypto";
 import { addMonths } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { agentScope, requireRole } from "@/lib/auth";
+import { effectiveTeamIds, requireRole } from "@/lib/auth";
 import { encodeTags, normalizeTag } from "@/lib/tags";
 
 /**
@@ -21,7 +21,9 @@ const schema = z.object({
   dueAt: z.string().datetime().optional(),
   tags: z.array(z.string().trim().min(1).max(40)).max(12).default([]),
   agentIds: z.array(z.string()).optional(),
-  teamIds: z.array(z.string()).optional(),
+  /** Équipe propriétaire — obligatoire : l'action est créée dans CETTE équipe
+   *  et seuls ses agents membres sont ciblés (cloisonnement). */
+  teamId: z.string().min(1),
 });
 
 export async function POST(req: Request) {
@@ -47,37 +49,35 @@ export async function POST(req: Request) {
   const data = parsed.data;
   const title = data.title;
   const dueAt = data.dueAt ? new Date(data.dueAt) : addMonths(new Date(), 7);
+  const teamId = data.teamId;
 
-  // Résolution des agents cibles.
-  let agents: { id: string; teamId: string | null }[] = [];
-  const scope = agentScope(u);
-  if (data.agentIds?.length) {
-    agents = await prisma.agent.findMany({
-      where: { id: { in: data.agentIds }, isActive: true, ...scope },
-      select: { id: true, teamId: true },
-    });
-  } else {
-    const teamFilter = data.teamIds?.length
-      ? { memberships: { some: { teamId: { in: data.teamIds } } } }
-      : scope;
-    agents = await prisma.agent.findMany({
-      where: { isActive: true, isVisible: true, ...teamFilter },
-      select: { id: true, teamId: true },
-    });
-  }
-  if (!agents.length) {
+  // L'équipe cible doit être dans le périmètre agissable de l'utilisateur.
+  const eff = effectiveTeamIds(u);
+  if (eff !== null && !eff.includes(teamId)) {
     return NextResponse.json(
-      { error: "Aucun agent cible — vérifiez la sélection ou les équipes." },
-      { status: 400 }
+      { error: "Équipe non autorisée." },
+      { status: 403 }
     );
   }
 
-  // Choix du teamId scalaire pour l'enregistrement (équipe principale de
-  // l'utilisateur, sinon première équipe trouvée).
-  const teamId = u.teamId ?? agents[0]?.teamId ?? u.teamIds[0];
-  if (!teamId) {
+  // Agents cibles, TOUJOURS contraints à l'équipe propriétaire (primaire ou
+  // membership) : impossible d'assigner l'action à un agent hors de l'équipe,
+  // ce qui la rendrait invisible côté fiche.
+  const inTeam = {
+    OR: [{ teamId }, { memberships: { some: { teamId } } }],
+  };
+  const agents = data.agentIds?.length
+    ? await prisma.agent.findMany({
+        where: { id: { in: data.agentIds }, isActive: true, ...inTeam },
+        select: { id: true },
+      })
+    : await prisma.agent.findMany({
+        where: { isActive: true, isVisible: true, ...inTeam },
+        select: { id: true },
+      });
+  if (!agents.length) {
     return NextResponse.json(
-      { error: "Impossible de déterminer l'équipe propriétaire de l'action." },
+      { error: "Aucun agent cible rattaché à cette équipe." },
       { status: 400 }
     );
   }

@@ -372,6 +372,24 @@ export default function SitesAdminClient({
                 </td>
                 <td className="px-4 py-2.5 text-center">
                   <button
+                    onClick={() => toggleOccupied(s)}
+                    title="Occupé → visite planifiée tous les 180 j. Inoccupé → tous les 365 j. Cadence trimestrielle (90 j) inchangée."
+                    className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
+                      s.isOccupied
+                        ? "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                        : "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        s.isOccupied ? "bg-indigo-500" : "bg-amber-500"
+                      }`}
+                    />
+                    {s.isOccupied ? "Occupé" : "Inoccupé"}
+                  </button>
+                </td>
+                <td className="px-4 py-2.5 text-center">
+                  <button
                     onClick={() => toggleVisibility(s)}
                     className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
                       s.isVisible
@@ -413,7 +431,7 @@ export default function SitesAdminClient({
             ))}
             {!sites.length && (
               <tr>
-                <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
                   Aucun site.
                 </td>
               </tr>

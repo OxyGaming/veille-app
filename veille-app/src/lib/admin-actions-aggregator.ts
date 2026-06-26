@@ -8,6 +8,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { teamScope, type SessionUser } from "@/lib/auth";
+import { parseTags } from "@/lib/tags";
 
 export type AdminActionStatus =
   | "ACTIVE"
@@ -38,6 +39,7 @@ export type AdminActionRow = {
   agentName: string | null;
   siteId: string | null;
   siteName: string | null;
+  tags: string[];
   updatedAt: string;
 };
 
@@ -163,6 +165,7 @@ export async function aggregateAdminActions(
         teamId: true,
         agentId: true,
         siteId: true,
+        tags: true,
         updatedAt: true,
         team: { select: { name: true } },
         agent: { select: { firstName: true, lastName: true } },
@@ -192,6 +195,7 @@ export async function aggregateAdminActions(
       : null,
     siteId: r.siteId,
     siteName: r.site?.name ?? null,
+    tags: parseTags(r.tags),
     updatedAt: r.updatedAt.toISOString(),
   }));
 

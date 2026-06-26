@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { TagInput } from "@/components/TagChips";
+import { TagChips, TagInput } from "@/components/TagChips";
 import type {
   AdminActionRow,
   AdminActionsFilters,
@@ -333,8 +333,9 @@ export function AdminActionsTable({
               <th className="text-left px-3 py-2 w-10"></th>
               <th className="text-left px-3 py-2">Action</th>
               <th className="text-left px-3 py-2 w-28">Statut</th>
-              <th className="text-left px-3 py-2 w-44">Équipe</th>
-              <th className="text-left px-3 py-2 w-48">Agent / Site</th>
+              <th className="text-left px-3 py-2 w-40">Équipe</th>
+              <th className="text-left px-3 py-2 w-44">Agent / Site</th>
+              <th className="text-left px-3 py-2 w-52">Tags</th>
               <th className="text-left px-3 py-2 w-28">Échéance</th>
             </tr>
           </thead>
@@ -397,6 +398,13 @@ export function AdminActionsTable({
                       <span className="text-slate-400">—</span>
                     )}
                   </td>
+                  <td className="px-3 py-2 align-top">
+                    {a.tags.length ? (
+                      <TagChips tags={a.tags} size="xs" />
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 align-top text-xs">
                     {due ? (
                       <span className={late ? "text-rose-700 font-medium" : ""}>
@@ -413,7 +421,7 @@ export function AdminActionsTable({
             {items.length === 0 && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="text-center text-sm text-slate-500 py-8"
                 >
                   Aucune action.
@@ -472,6 +480,11 @@ export function AdminActionsTable({
                       className={`text-[11px] font-mono mt-0.5 ${late ? "text-rose-700" : "text-slate-500"}`}
                     >
                       Échéance {format(due, "P", { locale: fr })}
+                    </div>
+                  )}
+                  {a.tags.length > 0 && (
+                    <div className="mt-1.5">
+                      <TagChips tags={a.tags} size="xs" />
                     </div>
                   )}
                 </div>

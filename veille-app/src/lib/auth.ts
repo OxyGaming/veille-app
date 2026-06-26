@@ -162,6 +162,20 @@ function adminScopedTeamIds(u: SessionUser): string[] | null {
 }
 
 /**
+ * Liste effective des équipes « agissables » par l'utilisateur, ou `null` s'il
+ * est GLOBAL (ADMIN non scopé / viewAllTeams → aucune restriction). Même logique
+ * que teamScope/agentScope, mais renvoie le tableau brut pour les cas où on doit
+ * raisonner dessus (ex. déterminer l'équipe propriétaire d'une action à créer
+ * pour un utilisateur multi-équipes).
+ */
+export function effectiveTeamIds(u: SessionUser): string[] | null {
+  const adminIds = adminScopedTeamIds(u);
+  if (adminIds) return adminIds;
+  if (u.role === "ADMIN" || u.viewAllTeams) return null;
+  return u.teamIds;
+}
+
+/**
  * Filtre Prisma sur le champ scalaire `teamId` (legacy — sessions, imports,
  * actions où teamId est une colonne directe).
  * ADMIN GLOBAL ou viewAllTeams → pas de filtre.

@@ -1,7 +1,12 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { agentScope, getSessionUser } from "@/lib/auth";
+import {
+  agentScope,
+  effectiveTeamIds,
+  getSessionUser,
+  teamScope,
+} from "@/lib/auth";
 import AgentActionsClient from "./AgentActionsClient";
 import RecentValidations, {
   type ValidationEntry,
@@ -31,9 +36,38 @@ export default async function AgentPage({
   });
   if (!agent) notFound();
 
+  // Équipes dans lesquelles l'utilisateur courant peut créer une action pour
+  // cet agent = intersection équipes(agent) ∩ équipes-agissables(user).
+  // Sert au sélecteur d'équipe de la modale « Ajouter une action » (affiché
+  // seulement si >1 choix). Un global (ADMIN/viewAllTeams) voit toutes les
+  // équipes de l'agent.
+  const agentTeams = [
+    ...new Map(
+      [
+        ...(agent.team ? [agent.team] : []),
+        ...agent.memberships.map((m) => m.team),
+      ].map((t) => [t.id, { id: t.id, name: t.name }])
+    ).values(),
+  ];
+  const effIds = effectiveTeamIds(u);
+  const creatableTeams = (
+    effIds === null
+      ? agentTeams
+      : agentTeams.filter((t) => effIds.includes(t.id))
+  ).sort((a, b) =>
+    // L'équipe principale de l'utilisateur d'abord, pour un défaut naturel.
+    a.id === u.teamId ? -1 : b.id === u.teamId ? 1 : 0
+  );
+
+  // Actions CLOISONNÉES par équipe : sur un agent multi-équipes, chaque
+  // utilisateur ne voit que les actions de SES équipes. Un même libellé peut
+  // exister en double (une obligation distincte par équipe) — elles ne doivent
+  // ni fusionner ni se valider en cascade entre équipes. teamScope filtre sur
+  // ImportedAction.teamId (vide = ADMIN / viewAllTeams → toutes les équipes).
   const activeActionsRaw = await prisma.importedAction.findMany({
-    where: { agentId: id, localStatus: "ACTIVE" },
+    where: { agentId: id, localStatus: "ACTIVE", ...teamScope(u) },
     orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
+    include: { team: { select: { name: true } } },
   });
   // Parse tags JSON pour passer un tableau au client.
   const parseTagsField = (s: string | null | undefined): string[] => {
@@ -54,9 +88,13 @@ export default async function AgentPage({
   const noHash: Action[] = [];
   for (const a of activeActionsRaw) {
     if (a.dedupHash) {
-      const arr = byHash.get(a.dedupHash) ?? [];
+      // Clé de regroupement préfixée par l'équipe : deux actions au contenu
+      // identique mais rattachées à deux équipes différentes restent DEUX
+      // cartes distinctes (et donc deux cascades de validation séparées).
+      const key = `${a.teamId}:${a.dedupHash}`;
+      const arr = byHash.get(key) ?? [];
       arr.push(a);
-      byHash.set(a.dedupHash, arr);
+      byHash.set(key, arr);
     } else {
       noHash.push(a);
     }
@@ -103,13 +141,22 @@ export default async function AgentPage({
     return da - db;
   });
 
+  // Validations CLOISONNÉES comme les actions : une validation est la clôture
+  // d'une action d'une équipe donnée ; la montrer hors de l'équipe rouvrirait
+  // la confusion « l'autre équipe a validé l'action A ».
   const validated = await prisma.actionValidation.findMany({
-    where: { agentId: id },
+    where: { agentId: id, ...teamScope(u) },
     orderBy: { realizedAt: "desc" },
     take: 30,
-    include: { action: true, validatedBy: { select: { name: true } } },
+    include: {
+      action: true,
+      validatedBy: { select: { name: true } },
+      team: { select: { name: true } },
+    },
   });
 
+  // « Vu » / commentaires : TRANSVERSAUX (partagés entre équipes). On charge le
+  // nom de l'équipe uniquement pour afficher un badge d'origine.
   const sightings = await prisma.agentSighting.findMany({
     where: { agentId: id },
     orderBy: { sightedAt: "desc" },
@@ -117,15 +164,18 @@ export default async function AgentPage({
     include: {
       observer: { select: { name: true } },
       photos: { select: { id: true, storagePath: true, legend: true } },
+      team: { select: { name: true } },
     },
   });
 
+  // Sessions de veille : TRANSVERSALES (partagées). Badge d'équipe informatif.
   const sessions = await prisma.veilleSession.findMany({
     where: { agentId: id },
     orderBy: { startedAt: "desc" },
     take: 20,
     include: {
       procedures: { include: { procedure: { select: { title: true } } } },
+      team: { select: { name: true } },
     },
   });
 
@@ -205,6 +255,7 @@ export default async function AgentPage({
           agentId={id}
           agentName={`${agent.firstName} ${agent.lastName}`}
           userRole={u.role}
+          teams={creatableTeams}
           actions={activeActions.map((a) => ({
             id: a.id,
             externalId: a.externalId,
@@ -219,6 +270,7 @@ export default async function AgentPage({
             duplicateCount: a.duplicateCount,
             duplicates: a.duplicates,
             tags: parseTagsField(a.tags),
+            teamName: a.team?.name ?? null,
           }))}
         />
       </section>
@@ -233,8 +285,11 @@ export default async function AgentPage({
             {sessions.map((s) => (
               <li key={s.id} className="card px-3.5 py-2.5">
                 <Link href={`/sessions/${s.id}`} className="block">
-                  <div className="text-[11px] font-mono text-slate-500">
-                    {format(s.startedAt, "PPp", { locale: fr })}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-mono text-slate-500">
+                      {format(s.startedAt, "PPp", { locale: fr })}
+                    </span>
+                    <TeamBadge name={s.team?.name} />
                   </div>
                   <div className="text-sm font-semibold mt-0.5">
                     {s.procedures.map((p) => p.procedure.title).join(", ")}
@@ -265,6 +320,7 @@ export default async function AgentPage({
               validatedByName: v.validatedBy.name,
               comment: v.comment,
               actionLabel: v.action.keyPoint ?? v.action.externalId,
+              teamName: v.team?.name ?? null,
             }))}
             currentUserId={u.id}
             currentUserRole={u.role}
@@ -296,6 +352,7 @@ export default async function AgentPage({
                     {format(s.sightedAt, "PPp", { locale: fr })} ·{" "}
                     {s.observer.name}
                   </span>
+                  <TeamBadge name={s.team?.name} />
                 </div>
                 {s.comment && (
                   <div className="text-sm text-slate-800 mt-1.5 whitespace-pre-wrap">
@@ -333,6 +390,19 @@ export default async function AgentPage({
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * Petit badge d'équipe — affiché sur chaque élément de la fiche agent pour
+ * lever l'ambiguïté d'origine quand l'agent est rattaché à plusieurs équipes.
+ */
+function TeamBadge({ name }: { name: string | null | undefined }) {
+  if (!name) return null;
+  return (
+    <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+      {name}
+    </span>
   );
 }
 

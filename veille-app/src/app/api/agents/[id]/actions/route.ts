@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createHash, randomUUID } from "crypto";
 import { addMonths } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { agentScope, requireUser } from "@/lib/auth";
+import { agentScope, effectiveTeamIds, requireUser } from "@/lib/auth";
 import { encodeTags, normalizeTag } from "@/lib/tags";
 import {
   defaultMessageFor,
@@ -24,6 +24,9 @@ const schema = z.object({
   title: z.string().trim().min(1).max(300),
   dueAt: z.string().datetime().optional(),
   extraTags: z.array(z.string().trim().min(1).max(40)).max(10).default([]),
+  /** Équipe propriétaire choisie côté UI (agent multi-équipes). Optionnel :
+   *  si une seule équipe est éligible, le serveur la déduit. */
+  teamId: z.string().min(1).optional(),
 });
 
 export async function POST(
@@ -68,12 +71,42 @@ export async function POST(
   // Tags tels que renvoyés par le client (dédup via normalize côté encode).
   const tags = parsed.data.extraTags ?? [];
 
-  // teamId scalaire : équipe principale de l'agent, sinon une de ses équipes.
-  const teamId =
-    agent.teamId ?? agent.memberships[0]?.teamId ?? u.teamId ?? u.teamIds[0];
-  if (!teamId) {
+  // Équipe propriétaire de l'action. Cloisonnement oblige : elle DOIT être une
+  // équipe partagée entre l'utilisateur et l'agent, sinon le créateur ne verrait
+  // pas sa propre action (cf. teamScope sur la fiche). On calcule l'intersection
+  // équipes(agent) ∩ équipes-agissables(user) ; un global (ADMIN/viewAllTeams)
+  // peut viser n'importe quelle équipe de l'agent.
+  const agentTeamIds = [
+    ...new Set([
+      ...(agent.teamId ? [agent.teamId] : []),
+      ...agent.memberships.map((m) => m.teamId),
+    ]),
+  ];
+  const eff = effectiveTeamIds(u);
+  const eligible =
+    eff === null ? agentTeamIds : agentTeamIds.filter((t) => eff.includes(t));
+
+  let teamId: string;
+  if (parsed.data.teamId) {
+    // Choix explicite : doit appartenir au périmètre autorisé.
+    if (!eligible.includes(parsed.data.teamId)) {
+      return NextResponse.json(
+        { error: "Équipe non autorisée pour cet agent." },
+        { status: 403 }
+      );
+    }
+    teamId = parsed.data.teamId;
+  } else if (eligible.length === 1) {
+    teamId = eligible[0];
+  } else if (eligible.length === 0) {
     return NextResponse.json(
-      { error: "Aucune équipe rattachée à cet agent." },
+      { error: "Aucune équipe commune avec cet agent." },
+      { status: 400 }
+    );
+  } else {
+    // Plusieurs équipes possibles mais aucune fournie → l'UI doit demander.
+    return NextResponse.json(
+      { error: "Précisez l'équipe propriétaire de l'action.", code: "TEAM_REQUIRED" },
       { status: 400 }
     );
   }

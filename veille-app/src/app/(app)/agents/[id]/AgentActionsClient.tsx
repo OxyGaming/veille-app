@@ -38,6 +38,9 @@ type Action = {
   /** Détail de TOUTES les occurrences du groupe (la première est la principale). */
   duplicates: Duplicate[];
   tags: string[];
+  /** Équipe propriétaire de l'action — badge d'origine (agent multi-équipes).
+   *  Optionnel : non fourni sur la fiche site, qui réutilise ce composant. */
+  teamName?: string | null;
 };
 
 export default function AgentActionsClient({
@@ -46,6 +49,7 @@ export default function AgentActionsClient({
   actions: initial,
   targetKind = "agent",
   userRole = "USER",
+  teams = [],
 }: {
   agentId: string;
   agentName: string;
@@ -57,6 +61,11 @@ export default function AgentActionsClient({
    * du bouton « Retirer » (EDITOR / ADMIN uniquement, jamais USER).
    */
   userRole?: "USER" | "EDITOR" | "ADMIN";
+  /**
+   * Équipes dans lesquelles l'action peut être créée (intersection
+   * user ∩ agent). Vide sur la fiche site (pas de sélecteur d'équipe).
+   */
+  teams?: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const [actions, setActions] = useState(initial);
@@ -322,6 +331,7 @@ export default function AgentActionsClient({
           targetId={agentId}
           targetName={agentName}
           targetKind={targetKind}
+          teams={teams}
           onClose={() => setAdding(false)}
           onCreated={() => {
             setAdding(false);
@@ -438,6 +448,11 @@ export default function AgentActionsClient({
                 </button>
               )}
               <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                {a.teamName && (
+                  <span className="text-[10px] font-mono font-semibold bg-slate-100 text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded">
+                    {a.teamName}
+                  </span>
+                )}
                 {a.type && (
                   <span className="text-[10px] font-mono bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
                     {a.type}
@@ -806,12 +821,14 @@ function ManualActionModal({
   targetId,
   targetName,
   targetKind,
+  teams = [],
   onClose,
   onCreated,
 }: {
   targetId: string;
   targetName: string;
   targetKind: "agent" | "site";
+  teams?: { id: string; name: string }[];
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -822,6 +839,10 @@ function ManualActionModal({
     TAG_VEILLE_LEGALE,
     TAG_OBLIGATOIRE,
   ]);
+  // Sélecteur d'équipe affiché uniquement en cas d'ambiguïté (>1 équipe
+  // partagée user∩agent). Sinon l'équipe unique est envoyée telle quelle.
+  const showTeamPicker = teams.length > 1;
+  const [teamId, setTeamId] = useState<string>(teams[0]?.id ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -842,6 +863,8 @@ function ManualActionModal({
           title: title.trim(),
           dueAt: new Date(dueAt + "T00:00:00").toISOString(),
           extraTags: tags,
+          // teamId seulement pertinent côté agent ; ignoré par la route site.
+          ...(teamId ? { teamId } : {}),
         }),
       });
       if (!res.ok) {
@@ -885,6 +908,28 @@ function ManualActionModal({
           </button>
         </header>
         <form onSubmit={submit} className="p-4 space-y-3">
+          {showTeamPicker && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Équipe <span className="text-rose-600">*</span>
+                <span className="ml-1 text-[10px] font-normal text-slate-400">
+                  (agent partagé — choisissez l'équipe propriétaire)
+                </span>
+              </label>
+              <select
+                value={teamId}
+                onChange={(e) => setTeamId(e.target.value)}
+                className="input"
+                required
+              >
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
               Titre <span className="text-rose-600">*</span>

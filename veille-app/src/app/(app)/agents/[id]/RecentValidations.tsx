@@ -33,6 +33,8 @@ export type ValidationEntry = {
   validatedByName: string;
   comment: string | null;
   actionLabel: string;
+  /** Équipe propriétaire de l'action validée — badge d'origine. */
+  teamName: string | null;
 };
 
 type Props = {
@@ -121,9 +123,16 @@ export default function RecentValidations({
               className="card px-3.5 py-2.5 flex items-start gap-2"
             >
               <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-mono text-slate-500">
-                  {format(new Date(v.realizedAt), "PPp", { locale: fr })} ·{" "}
-                  {v.validatedByName}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-mono text-slate-500">
+                    {format(new Date(v.realizedAt), "PPp", { locale: fr })} ·{" "}
+                    {v.validatedByName}
+                  </span>
+                  {v.teamName && (
+                    <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                      {v.teamName}
+                    </span>
+                  )}
                 </div>
                 <div className="text-sm font-semibold mt-0.5">
                   {v.actionLabel}

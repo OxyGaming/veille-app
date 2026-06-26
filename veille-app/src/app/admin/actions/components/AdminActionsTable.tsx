@@ -324,15 +324,18 @@ export function AdminActionsTable({
 
       {/* Desktop : tableau dense */}
       <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="w-full text-sm">
+        {/* table-fixed + largeurs explicites : sans ça la colonne Action
+            (texte en nowrap via `truncate`) prenait sa largeur max-content et
+            poussait les autres colonnes hors écran. */}
+        <table className="w-full text-sm table-fixed">
           <thead className="bg-slate-50 text-[11px] font-mono uppercase tracking-wider text-slate-500">
             <tr>
               <th className="text-left px-3 py-2 w-10"></th>
               <th className="text-left px-3 py-2">Action</th>
-              <th className="text-left px-3 py-2">Statut</th>
-              <th className="text-left px-3 py-2">Équipe</th>
-              <th className="text-left px-3 py-2">Cible</th>
-              <th className="text-left px-3 py-2">Échéance</th>
+              <th className="text-left px-3 py-2 w-28">Statut</th>
+              <th className="text-left px-3 py-2 w-44">Équipe</th>
+              <th className="text-left px-3 py-2 w-48">Agent / Site</th>
+              <th className="text-left px-3 py-2 w-28">Échéance</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -369,20 +372,24 @@ export function AdminActionsTable({
                     <StatusBadge status={a.localStatus} />
                   </td>
                   <td className="px-3 py-2 align-top text-xs text-slate-700">
-                    {a.teamName}
+                    <span className="block truncate" title={a.teamName}>
+                      {a.teamName}
+                    </span>
                   </td>
                   <td className="px-3 py-2 align-top text-xs">
                     {a.agentId && a.agentName ? (
                       <Link
                         href={`/agents/${a.agentId}`}
-                        className="text-indigo-600 hover:underline"
+                        className="block truncate text-indigo-600 hover:underline"
+                        title={a.agentName}
                       >
                         {a.agentName}
                       </Link>
                     ) : a.siteId && a.siteName ? (
                       <Link
                         href={`/sites/${a.siteId}`}
-                        className="text-indigo-600 hover:underline"
+                        className="block truncate text-indigo-600 hover:underline"
+                        title={a.siteName}
                       >
                         {a.siteName}
                       </Link>

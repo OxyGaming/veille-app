@@ -43,12 +43,12 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-// `actionScope` est appelé dans le helper — on l'observe pour vérifier
-// que c'est bien lui qui scope la lecture.
-const actionScopeMock = vi.fn((_u: unknown) => ({ __scope: true }));
+// `teamScope` est appelé dans le helper (scope STRICT par teamId) — on
+// l'observe pour vérifier que c'est bien lui qui scope la lecture.
+const teamScopeMock = vi.fn((_u: unknown) => ({ __scope: true }));
 vi.mock("@/lib/auth", async () => {
   const real = await vi.importActual<typeof import("@/lib/auth")>("@/lib/auth");
-  return { ...real, actionScope: (u: unknown) => actionScopeMock(u) };
+  return { ...real, teamScope: (u: unknown) => teamScopeMock(u) };
 });
 
 import type { SessionUser } from "@/lib/auth";
@@ -100,7 +100,7 @@ beforeEach(() => {
     if (typeof arg === "function") return arg(txClient);
     return arg;
   });
-  actionScopeMock.mockClear();
+  teamScopeMock.mockClear();
 });
 
 describe("obsoleteAction — accès et scope", () => {
@@ -108,8 +108,8 @@ describe("obsoleteAction — accès et scope", () => {
     findFirst.mockResolvedValue(null);
     const out = await obsoleteAction(EDITOR, "act_unknown");
     expect(out).toEqual({ kind: "not_found", actionId: "act_unknown" });
-    // Doit avoir appliqué le scope EDITOR via actionScope().
-    expect(actionScopeMock).toHaveBeenCalledWith(EDITOR);
+    // Doit avoir appliqué le scope EDITOR via teamScope().
+    expect(teamScopeMock).toHaveBeenCalledWith(EDITOR);
     expect(findFirst.mock.calls[0][0].where).toMatchObject({
       id: "act_unknown",
       __scope: true,
@@ -124,10 +124,10 @@ describe("obsoleteAction — accès et scope", () => {
     expect(createAudit).not.toHaveBeenCalled();
   });
 
-  it("ADMIN scope appliqué (actionScope appelé avec le user ADMIN)", async () => {
+  it("ADMIN scope appliqué (teamScope appelé avec le user ADMIN)", async () => {
     findFirst.mockResolvedValue(null);
     await obsoleteAction(ADMIN, "act_y");
-    expect(actionScopeMock).toHaveBeenCalledWith(ADMIN);
+    expect(teamScopeMock).toHaveBeenCalledWith(ADMIN);
   });
 });
 
@@ -306,10 +306,10 @@ describe("batchObsoleteActions — répartition des statuts", () => {
     expect(out.requested.sort()).toEqual(["a1", "a2", "a3", "a4", "a5"]);
   });
 
-  it("scope appliqué (actionScope appelé)", async () => {
+  it("scope appliqué (teamScope appelé)", async () => {
     findMany.mockResolvedValue([]);
     await batchObsoleteActions(ADMIN, ["x"]);
-    expect(actionScopeMock).toHaveBeenCalledWith(ADMIN);
+    expect(teamScopeMock).toHaveBeenCalledWith(ADMIN);
     expect(findMany.mock.calls[0][0].where).toMatchObject({
       id: { in: ["x"] },
       __scope: true,

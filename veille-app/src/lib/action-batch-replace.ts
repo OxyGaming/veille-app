@@ -12,7 +12,7 @@
  * Sécurité : ADMIN+EDITOR via la route. Audit log unique tracé.
  */
 
-import { actionScope, type SessionUser } from "@/lib/auth";
+import { teamScope, type SessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { encodeTags } from "@/lib/tags";
 import { randomUUID } from "node:crypto";
@@ -64,8 +64,9 @@ export async function batchReplaceActions(
     };
   }
 
+  // Scope STRICT par teamId (aligné cloisonnement fiche agent).
   const accessible = await prisma.importedAction.findMany({
-    where: { id: { in: requested }, ...actionScope(user) },
+    where: { id: { in: requested }, ...teamScope(user) },
     select: {
       id: true,
       teamId: true,

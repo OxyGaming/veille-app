@@ -2,12 +2,12 @@
  * Agrégateur de la page `/admin/actions` (Sprint 7 C3).
  *
  * Lecture seule sur `ImportedAction` avec filtres simples + pagination
- * cursor (cohérente avec `/admin/audit`). Scope ADMIN Sprint 6 hérité
- * via `actionScope(user)`.
+ * cursor (cohérente avec `/admin/audit`). Scope STRICT par teamId via
+ * `teamScope(user)` (aligné cloisonnement fiche agent).
  */
 
 import { prisma } from "@/lib/prisma";
-import { actionScope, type SessionUser } from "@/lib/auth";
+import { teamScope, type SessionUser } from "@/lib/auth";
 
 export type AdminActionStatus =
   | "ACTIVE"
@@ -71,9 +71,26 @@ function buildWhere(
   filters: AdminActionsFilters,
   now: Date,
 ): Record<string, unknown> {
-  const where: Record<string, unknown> = { ...actionScope(user) };
+  // Scope STRICT par teamId (aligné sur le cloisonnement de la fiche agent) :
+  // un admin restreint ne voit que les actions de SES équipes, même pour un
+  // agent/site partagé. null = admin global (aucune restriction).
+  const scope = teamScope(user);
+  const scopeTeamIds =
+    "teamId" in scope && typeof scope.teamId === "object" && scope.teamId
+      ? (scope.teamId as { in: string[] }).in
+      : null;
+
+  const where: Record<string, unknown> = {};
+  // Filtre équipe de l'UI borné au périmètre (ne peut pas l'élargir).
+  if (filters.teamId) {
+    where.teamId =
+      scopeTeamIds && !scopeTeamIds.includes(filters.teamId)
+        ? "__none__"
+        : filters.teamId;
+  } else if (scopeTeamIds) {
+    where.teamId = { in: scopeTeamIds };
+  }
   if (filters.status !== "all") where.localStatus = filters.status;
-  if (filters.teamId) where.teamId = filters.teamId;
   if (filters.agentId) where.agentId = filters.agentId;
   if (filters.siteId) where.siteId = filters.siteId;
   if (filters.late) where.dueAt = { not: null, lt: now };

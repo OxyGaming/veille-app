@@ -12,10 +12,10 @@
  *  - `OBSOLETE`           → idempotent (no-op, pas d'AuditLog)
  *  - `VALIDATED_LOCAL`    → refus métier (409)
  *
- * Scope ADMIN Sprint 6 hérité automatiquement via `actionScope(u)`.
+ * Scope STRICT par teamId via `teamScope(u)` (aligné cloisonnement fiche).
  */
 
-import { actionScope, type SessionUser } from "@/lib/auth";
+import { teamScope, type SessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export type ObsoleteOutcome =
@@ -56,10 +56,10 @@ export async function obsoleteAction(
   user: SessionUser,
   actionId: string,
 ): Promise<ObsoleteOutcome> {
-  // Lecture scopée — `actionScope` applique le scope EDITOR/ADMIN Sprint 6.
+  // Lecture scopée STRICT par teamId (aligné fiche agent / cloisonnement).
   // Si l'action n'existe pas OU est hors scope : kind = not_found (404).
   const action = await prisma.importedAction.findFirst({
-    where: { id: actionId, ...actionScope(user) },
+    where: { id: actionId, ...teamScope(user) },
     select: {
       id: true,
       localStatus: true,
@@ -153,7 +153,7 @@ export type BatchObsoleteOutcome = {
 /**
  * Marque un lot d'actions comme OBSOLETE en une transaction Prisma.
  *
- * Lecture scopée via `actionScope(user)` — les IDs hors scope sont
+ * Lecture scopée via `teamScope(user)` — les IDs hors scope sont
  * comptés dans `forbidden` sans fuite d'existence.
  *
  * Statuts (cohérents avec `obsoleteAction`) :
@@ -182,8 +182,10 @@ export async function batchObsoleteActions(
     };
   }
 
+  // Scope STRICT par teamId : on ne peut passer OBSOLETE que des actions de
+  // ses propres équipes (cohérent avec le cloisonnement de la fiche agent).
   const accessible = await prisma.importedAction.findMany({
-    where: { id: { in: requested }, ...actionScope(user) },
+    where: { id: { in: requested }, ...teamScope(user) },
     select: {
       id: true,
       localStatus: true,

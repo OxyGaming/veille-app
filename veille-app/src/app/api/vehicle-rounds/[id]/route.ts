@@ -53,6 +53,11 @@ export async function GET(
 const patchSchema = z.object({
   status: z.enum(["active", "completed", "archived"]).optional(),
   generalComment: z.string().optional().nullable(),
+  // Correction a posteriori de la date de tournée (cf. /api/visits/[id]).
+  roundDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Date attendue au format AAAA-MM-JJ")
+    .optional(),
 });
 
 export async function PATCH(
@@ -84,8 +89,33 @@ export async function PATCH(
   if (!assertTeamAccess(u, round.teamId))
     return NextResponse.json({ error: "Interdit" }, { status: 403 });
 
+  // Corriger la date de tournée est sensible (rapport potentiellement clôturé)
+  // → réservé aux ADMIN/EDITOR, aligné sur la réouverture des visites.
+  const changingDate = parsed.data.roundDate !== undefined;
+  if (changingDate && u.role !== "ADMIN" && u.role !== "EDITOR") {
+    return NextResponse.json(
+      { error: "Modification de la date réservée aux administrateurs et éditeurs." },
+      { status: 403 },
+    );
+  }
+  const roundDate = parsed.data.roundDate
+    ? new Date(`${parsed.data.roundDate}T12:00:00`)
+    : undefined;
+
   const goingToCompleted =
     parsed.data.status === "completed" && round.status !== "completed";
+  // Corriger la date d'une tournée déjà clôturée recale aussi `finishedAt`,
+  // qui pilote la cadence (prochaine tournée due). On ne touche pas à
+  // `finishedAt` si le statut bascule en même temps (active/archived).
+  const syncFinishedToDate =
+    changingDate &&
+    round.status === "completed" &&
+    parsed.data.status === undefined;
+  const finishedAt = goingToCompleted
+    ? roundDate ?? new Date()
+    : syncFinishedToDate
+    ? roundDate
+    : undefined;
 
   await prisma.vehicleRound.update({
     where: { id },
@@ -95,9 +125,28 @@ export async function PATCH(
         parsed.data.generalComment === undefined
           ? undefined
           : parsed.data.generalComment,
-      finishedAt: goingToCompleted ? new Date() : undefined,
+      finishedAt,
+      roundDate,
     },
   });
+
+  // Trace d'audit de la rectification de date.
+  if (changingDate) {
+    await prisma.auditLog.create({
+      data: {
+        userId: u.id,
+        userEmail: u.email,
+        action: "VEHICLE_ROUND_DATE_EDITED",
+        entity: "VehicleRound",
+        entityId: id,
+        details: JSON.stringify({
+          previousDate: round.roundDate,
+          newDate: roundDate,
+          vehicleId: round.vehicleId,
+        }),
+      },
+    });
+  }
 
   // Génération NC + actions correctives à la fermeture de la tournée.
   // Pour chaque observation NON, une `VehicleRoundNonConformity` est créée

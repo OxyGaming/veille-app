@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -70,6 +70,11 @@ export default function VisitsListClient({
   const canReopen = userRole === "ADMIN" || userRole === "EDITOR";
   const [q, setQ] = useState("");
   const [list, setList] = useState(items);
+  // Édition inline de la date de réalisation. La clé est `${kind}-${id}` car
+  // une visite et une tournée pourraient théoriquement partager un id.
+  const [editingDate, setEditingDate] = useState<string | null>(null);
+  // Une sortie par Échap doit annuler sans déclencher la sauvegarde du onBlur.
+  const cancelNextBlur = useRef(false);
   const filteredLive = useMemo(
     () =>
       list.filter((it) =>
@@ -90,6 +95,33 @@ export default function VisitsListClient({
     return it.kind === "visit"
       ? `/api/visits/${it.id}`
       : `/api/vehicle-rounds/${it.id}`;
+  }
+
+  /** Enregistre une nouvelle date de réalisation (`value` = AAAA-MM-JJ). */
+  async function saveDate(it: Item, value: string) {
+    setEditingDate(null);
+    const current = it.date.slice(0, 10);
+    if (!value || value === current) return;
+    // Le serveur attend `visitDate` (visites) ou `roundDate` (tournées).
+    const field = it.kind === "visit" ? "visitDate" : "roundDate";
+    const res = await fetch(patchEndpoint(it), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || "Modification de la date refusée");
+      return;
+    }
+    // Midi pour rester sur le même jour calendaire à l'affichage (cf. API).
+    const iso = new Date(`${value}T12:00:00`).toISOString();
+    setList((arr) =>
+      arr.map((x) =>
+        x.kind === it.kind && x.id === it.id ? { ...x, date: iso } : x
+      )
+    );
+    toast.success("Date de réalisation mise à jour");
   }
 
   async function archive(it: Item) {
@@ -211,9 +243,65 @@ export default function VisitsListClient({
                     >
                       {theme.short}
                     </span>
-                    <span className="text-xs text-slate-500 font-mono">
-                      {format(new Date(it.date), "P", { locale: fr })}
-                    </span>
+                    {editingDate === `${it.kind}-${it.id}` ? (
+                      <input
+                        type="date"
+                        autoFocus
+                        defaultValue={it.date.slice(0, 10)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            // Laisse onBlur sauvegarder une seule fois.
+                            e.currentTarget.blur();
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            cancelNextBlur.current = true;
+                            setEditingDate(null);
+                          }
+                        }}
+                        onBlur={(e) => {
+                          if (cancelNextBlur.current) {
+                            cancelNextBlur.current = false;
+                            return;
+                          }
+                          saveDate(it, e.currentTarget.value);
+                        }}
+                        className="text-xs font-mono border border-indigo-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      />
+                    ) : (
+                      <span
+                        className={`text-xs text-slate-500 font-mono rounded px-1 -mx-1 ${
+                          canReopen
+                            ? "cursor-text hover:bg-slate-100 hover:text-slate-700"
+                            : ""
+                        }`}
+                        title={
+                          canReopen
+                            ? "Double-cliquez pour corriger la date de réalisation"
+                            : undefined
+                        }
+                        onClick={(e) => {
+                          // La date est dans le <Link> : sans ça, le premier clic
+                          // du double-clic ouvrirait la fiche avant l'édition.
+                          if (!canReopen) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        onDoubleClick={(e) => {
+                          if (!canReopen) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setEditingDate(`${it.kind}-${it.id}`);
+                        }}
+                      >
+                        {format(new Date(it.date), "P", { locale: fr })}
+                      </span>
+                    )}
                     {it.ncOpen > 0 && (
                       <span
                         className="text-[10px] font-mono text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded"

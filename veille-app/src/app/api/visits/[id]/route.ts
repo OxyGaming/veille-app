@@ -65,6 +65,13 @@ const patchSchema = z.object({
   status: z.enum(["draft", "active", "completed", "archived"]).optional(),
   generalComment: z.string().nullable().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  // Correction a posteriori de la date de réalisation affichée sur la carte.
+  // Format jour seul (AAAA-MM-JJ) ; convertie en DateTime à midi pour rester
+  // sur le même jour calendaire quelle que soit la timezone d'affichage.
+  visitDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Date attendue au format AAAA-MM-JJ")
+    .optional(),
 });
 
 export async function PATCH(
@@ -94,18 +101,6 @@ export async function PATCH(
     );
   }
   const data = parsed.data;
-  // Logique `finishedAt` symétrique à celle des sessions de veille :
-  //  - status → completed : stamp = maintenant
-  //  - status → active / draft : EFFACE explicitement (`null`). Sans ça
-  //    une réouverture laissait l'ancien horodatage et faisait croire que
-  //    la visite était toujours terminée côté rapports/feed.
-  //  - status inchangé : on n'écrit rien (`undefined`).
-  const finishedAt =
-    data.status === "completed"
-      ? new Date()
-      : data.status === "active" || data.status === "draft"
-      ? null
-      : undefined;
   // Réouverture d'une visite déjà clôturée → action sensible (le rapport
   // peut être archivé / signé). Réservée aux ADMIN/EDITOR. USER : 403.
   const reopening =
@@ -117,6 +112,34 @@ export async function PATCH(
       { status: 403 },
     );
   }
+  // Corriger la date de réalisation est sensible (le rapport peut être archivé /
+  // signé) → même garde que la réouverture : ADMIN/EDITOR uniquement.
+  const changingDate = data.visitDate !== undefined;
+  if (changingDate && u.role !== "ADMIN" && u.role !== "EDITOR") {
+    return NextResponse.json(
+      { error: "Modification de la date réservée aux administrateurs et éditeurs." },
+      { status: 403 },
+    );
+  }
+  const visitDate = data.visitDate
+    ? new Date(`${data.visitDate}T12:00:00`)
+    : undefined;
+  // Logique `finishedAt` (pilote le calcul de cadence — prochaine visite due) :
+  //  - status → completed : stamp = la date saisie si fournie, sinon maintenant.
+  //  - status → active / draft : EFFACE explicitement (`null`). Sans ça une
+  //    réouverture laissait l'ancien horodatage et faisait croire que la visite
+  //    était toujours terminée côté rapports/feed.
+  //  - simple correction de date sur une visite déjà clôturée : recale
+  //    `finishedAt` sur la nouvelle date pour que la cadence reparte du bon jour.
+  //  - sinon : on n'écrit rien (`undefined`).
+  const finishedAt =
+    data.status === "completed"
+      ? visitDate ?? new Date()
+      : data.status === "active" || data.status === "draft"
+      ? null
+      : changingDate && existing.status === "completed"
+      ? visitDate
+      : undefined;
   const updated = await prisma.siteVisit.update({
     where: { id },
     data: {
@@ -125,8 +148,28 @@ export async function PATCH(
         data.generalComment === undefined ? undefined : data.generalComment,
       metadata: data.metadata ? JSON.stringify(data.metadata) : undefined,
       finishedAt,
+      visitDate,
     },
   });
+
+  // Trace dédiée de la rectification de date — backdater une visite mérite son
+  // entrée d'audit au même titre que la réouverture.
+  if (changingDate) {
+    await prisma.auditLog.create({
+      data: {
+        userId: u.id,
+        userEmail: u.email,
+        action: "VISIT_DATE_EDITED",
+        entity: "SiteVisit",
+        entityId: id,
+        details: JSON.stringify({
+          previousDate: existing.visitDate,
+          newDate: visitDate,
+          siteId: existing.siteId,
+        }),
+      },
+    });
+  }
 
   // Audit log de la réouverture — la clôture est déjà tracée via
   // recordActivitySafe (VISIT_FINISHED), la réversion mérite son log dédié

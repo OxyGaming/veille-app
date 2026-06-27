@@ -140,14 +140,15 @@ export async function POST(
     },
   });
 
-  // Flux d'activité — multi-team via les équipes de l'agent.
+  // Cloisonnement (cohérent avec la validation) : l'événement ne concerne que
+  // l'équipe propriétaire de l'action, pas toutes les équipes de l'agent partagé.
   // targetUrl = fiche agent (pas de fiche action dédiée V1).
   const agentName = `${agent.lastName} ${agent.firstName}`.trim();
-  const teamIds = [
-    ...new Set([teamId, ...agent.memberships.map((m) => m.teamId)]),
-  ];
+  const teamIds = [teamId];
   await recordActivitySafe({
     teamIds,
+    // Notif dédiée notifyActionAssigned ci-dessous → pas de doublon.
+    notify: false,
     actorId: u.id,
     actorName: u.name,
     type: "ACTION_CREATED",

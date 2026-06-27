@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { agentScope, getSessionUser } from "@/lib/auth";
+import { agentScope, effectiveTeamIds, getSessionUser } from "@/lib/auth";
 import { aggregateAgentDevelopment } from "@/lib/agent-development-aggregator";
 import DevelopmentClient from "./DevelopmentClient";
 
@@ -45,7 +45,9 @@ export default async function AgentDevelopmentPage({
   const from = parseDate(sp.from) ?? defaultFrom;
   const to = parseDate(sp.to) ?? now;
 
-  const summary = await aggregateAgentDevelopment(id, from, to);
+  // Cloisonnement §5 : le CONTENU (veilles, NOTE, validations) est borné au
+  // périmètre de l'utilisateur ; les « Vu » SIGHT restent transversaux.
+  const summary = await aggregateAgentDevelopment(id, from, to, effectiveTeamIds(u));
   if (!summary) notFound();
 
   return (

@@ -35,9 +35,18 @@ type ImportResponse = {
 
 const PREVIEW_LIST_DISPLAY = 20;
 
-export default function PlanningImportClient() {
+export default function PlanningImportClient({
+  teams,
+}: {
+  teams: { id: string; name: string }[];
+}) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
+  // Équipe cible de l'import (planning par équipe). Pré-sélectionne s'il n'y
+  // en a qu'une ; sinon l'utilisateur doit choisir.
+  const [teamId, setTeamId] = useState<string>(
+    teams.length === 1 ? teams[0].id : "",
+  );
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
@@ -58,6 +67,10 @@ export default function PlanningImportClient() {
   async function submitPreview(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
+    if (!teamId) {
+      setError("Sélectionnez l'équipe cible de l'import.");
+      return;
+    }
     setError(null);
     setSuccessResult(null);
     setPreview(null);
@@ -66,6 +79,7 @@ export default function PlanningImportClient() {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      if (teamId) fd.append("teamId", teamId);
       const res = await fetch("/api/admin/planning/preview", {
         method: "POST",
         body: fd,
@@ -89,6 +103,7 @@ export default function PlanningImportClient() {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      if (teamId) fd.append("teamId", teamId);
       const res = await fetch("/api/admin/planning/import", {
         method: "POST",
         body: fd,
@@ -136,6 +151,36 @@ export default function PlanningImportClient() {
   return (
     <div className="space-y-4">
       <form onSubmit={submitPreview} className="card p-5">
+        {teams.length > 1 && (
+          <div className="mb-4">
+            <label
+              htmlFor="planning-team"
+              className="block text-xs font-medium text-slate-600 mb-1.5"
+            >
+              Équipe cible de l&apos;import
+            </label>
+            <select
+              id="planning-team"
+              value={teamId}
+              onChange={(e) => {
+                setTeamId(e.target.value);
+                setPreview(null);
+                setConfirmed(false);
+              }}
+              className="input w-full md:w-80"
+            >
+              <option value="">— Choisir une équipe —</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">
+              L&apos;import remplace uniquement le planning de cette équipe.
+            </p>
+          </div>
+        )}
         <label className="block text-xs font-medium text-slate-600 mb-1.5">
           Fichier planning (.ods, .xlsx, .txt, .tsv)
         </label>
@@ -172,7 +217,7 @@ export default function PlanningImportClient() {
         <div className="flex items-center gap-2 mt-4">
           <button
             type="submit"
-            disabled={!file || previewBusy}
+            disabled={!file || !teamId || previewBusy}
             className="btn btn-primary"
           >
             {previewBusy ? "Analyse en cours…" : "Analyser le fichier"}

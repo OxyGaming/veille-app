@@ -45,6 +45,11 @@ import {
   type ImportedActionRow,
 } from "./mappers";
 import type { TodoItem } from "./types";
+import {
+  criticalThreshold,
+  startOfEcheanceDay,
+} from "@/lib/echeances/action-echeance";
+import { dedupActions } from "@/lib/actions/dedup";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -373,13 +378,26 @@ export async function getEditorDiagnostic(
   user: SessionUser,
   now: Date,
 ): Promise<EditorDiagnostic> {
-  const [lateActions7d, expiredEquipments, expiringEquipments, lateVisits] =
+  // Bornes canoniques (cf. docs/NOMENCLATURE-ECHEANCES.md) :
+  //  - « En retard »          : dueAt < aujourd'hui 00:00 (Europe/Paris).
+  //  - « En retard critique » : dueAt < aujourd'hui 00:00 − 7 j (sous-ensemble).
+  const today0 = startOfEcheanceDay(now);
+  const critical0 = criticalThreshold(now);
+  const [activeActionRows, expiredEquipments, expiringEquipments, lateVisits] =
     await Promise.all([
-      prisma.importedAction.count({
-        where: {
-          ...actionScope(user),
-          localStatus: "ACTIVE",
-          dueAt: { lt: subDays(now, 7) },
+      // Lot 4B-2 — actions ACTIVE chargées (clé dédup + dueAt) pour compter en
+      // ACTIONS LOGIQUES « en retard » / « critique », et non en occurrences.
+      prisma.importedAction.findMany({
+        where: { ...actionScope(user), localStatus: "ACTIVE" },
+        select: {
+          id: true,
+          teamId: true,
+          agentId: true,
+          siteId: true,
+          vehicleId: true,
+          dedupHash: true,
+          localStatus: true,
+          dueAt: true,
         },
       }),
       prisma.siteEquipment.count({
@@ -402,19 +420,30 @@ export async function getEditorDiagnostic(
       }),
       countLateVisits(user, now),
     ]);
-  // Règles V1 (cf. TODAY-V1.md §5.4) :
-  //  - 🔴 si des actions actives sont en retard > 7 j ou des équipements
+  // Comptage en actions LOGIQUES : un groupe = une action ; le représentant
+  // (échéance la plus proche) détermine en retard / critique (membres alignés
+  // sur le même jour d'échéance).
+  const actionGroups = dedupActions(activeActionRows);
+  const lateActions = actionGroups.filter(
+    (g) => g.representative.dueAt != null && g.representative.dueAt < today0,
+  ).length;
+  const lateActionsCritical = actionGroups.filter(
+    (g) => g.representative.dueAt != null && g.representative.dueAt < critical0,
+  ).length;
+  // Règles V1 (cf. TODAY-V1.md §5.4, seuils alignés sur la nomenclature) :
+  //  - 🔴 si des actions sont EN RETARD CRITIQUE (> 7 j) ou des équipements
   //    sont déjà périmés (impact réglementaire immédiat).
-  //  - 🟡 sinon si des visites sont en retard ou des équipements vont
+  //  - 🟡 sinon si des actions/visites sont en retard ou des équipements vont
   //    expirer dans les 30 jours (alerte préventive).
   //  - 🟢 sinon : tout est sous contrôle.
   let state: EditorDiagnostic["state"];
-  if (lateActions7d > 0 || expiredEquipments > 0) state = "red";
-  else if (lateVisits > 0 || expiringEquipments > 0) state = "yellow";
+  if (lateActionsCritical > 0 || expiredEquipments > 0) state = "red";
+  else if (lateActions > 0 || lateVisits > 0 || expiringEquipments > 0) state = "yellow";
   else state = "green";
   return {
     state,
-    lateActions7d,
+    lateActions,
+    lateActionsCritical,
     lateVisits,
     expiredEquipments,
     expiringEquipments,

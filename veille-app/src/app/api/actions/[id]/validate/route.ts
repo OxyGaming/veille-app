@@ -10,6 +10,7 @@ import {
 } from "@/lib/activityFeed";
 import { notifyActionValidated } from "@/lib/notifications-generators";
 import { getEquipmentLinkForAction } from "@/lib/equipment-action-link";
+import { expandActiveSiblingIds } from "@/lib/actions/group-expansion";
 import { log } from "@/lib/logger";
 
 const schema = z.object({
@@ -64,6 +65,12 @@ export async function POST(
   if (!assertTeamAccess(u, action.teamId)) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   }
+  // Lot 4B-3 — idempotence : si l'action n'est plus ACTIVE (déjà validée par
+  // une occurrence du groupe — expansion ou cascade client), on ne re-valide
+  // pas (pas de doublon d'ActionValidation). 200 no-op.
+  if (action.localStatus !== "ACTIVE") {
+    return NextResponse.json({ ok: true, noop: true, reason: "not_active" });
+  }
   let body: unknown;
   try {
     body = await req.json();
@@ -107,19 +114,32 @@ export async function POST(
     parsedExpiration = d;
   }
 
+  // Lot 4B-3 — expansion : on valide TOUTES les occurrences ACTIVE du groupe
+  // logique (chacune reçoit sa propre ActionValidation + passe VALIDATED_LOCAL).
+  // dedupHash null ⇒ action seule. Inclut `action.id`.
+  const groupIds = await expandActiveSiblingIds(prisma, [action], u);
+
   const result = await prisma.$transaction(async (tx) => {
-    const validation = await tx.actionValidation.create({
-      data: {
-        actionId: action.id,
-        agentId: action.agentId,
-        validatedById: u.id,
-        teamId: action.teamId,
-        realizedAt,
-        comment: parsed.data.comment ?? null,
-      },
-    });
-    await tx.importedAction.update({
-      where: { id: action.id },
+    // Une ActionValidation par occurrence ; on conserve celle du représentant
+    // (action.id) pour la métadonnée de notification.
+    let validation = null as Awaited<
+      ReturnType<typeof tx.actionValidation.create>
+    > | null;
+    for (const sid of groupIds) {
+      const v = await tx.actionValidation.create({
+        data: {
+          actionId: sid,
+          agentId: action.agentId,
+          validatedById: u.id,
+          teamId: action.teamId,
+          realizedAt,
+          comment: parsed.data.comment ?? null,
+        },
+      });
+      if (sid === action.id) validation = v;
+    }
+    await tx.importedAction.updateMany({
+      where: { id: { in: groupIds } },
       data: { localStatus: "VALIDATED_LOCAL", realizedAt },
     });
     if (shouldUpdateEquipment && parsedExpiration && equipmentLink) {
@@ -137,18 +157,19 @@ export async function POST(
     // Filtre `redressedDate: null` : idempotent + ne réécrase pas un
     // redressement déjà saisi à la main. updateMany no-op silencieux
     // si l'action n'a pas de NC associée (action manuelle / import Excel).
+    // `in: groupIds` couvre toutes les occurrences du groupe.
     const ncUpdate = await tx.siteVisitNonConformity.updateMany({
-      where: { generatedActionId: action.id, redressedDate: null },
+      where: { generatedActionId: { in: groupIds }, redressedDate: null },
       data: { redressedDate: realizedAt },
     });
     // Idem pour les NC de tournée véhicule (cf. VehicleRoundNonConformity).
     // Mêmes garanties d'idempotence : updateMany no-op silencieux si pas de NC.
     const vehicleNcUpdate = await tx.vehicleRoundNonConformity.updateMany({
-      where: { generatedActionId: action.id, redressedDate: null },
+      where: { generatedActionId: { in: groupIds }, redressedDate: null },
       data: { redressedDate: realizedAt },
     });
     return {
-      validation,
+      validation: validation!,
       ncRedressedCount: ncUpdate.count + vehicleNcUpdate.count,
     };
   });
@@ -194,29 +215,26 @@ export async function POST(
     });
   }
 
-  // Flux d'activité — la stratégie multi-team dépend de la cible de l'action :
-  //  - agent : duplique sur toutes les équipes de l'agent ;
-  //  - site  : duplique sur toutes les équipes du site ;
-  //  - sinon : fallback sur l'équipe legacy de l'action.
-  // targetUrl pointe vers la fiche agent si possible, sinon fiche site.
+  // Cloisonnement (décision §Priorité 2) : une action validée ne notifie QUE
+  // les membres de son équipe propriétaire (`action.teamId`), pas toutes les
+  // équipes de l'agent ou du site partagé. Le flux d'activité suit la même
+  // règle (1 équipe propriétaire). targetUrl pointe vers la fiche agent si
+  // possible, sinon fiche site.
   const label =
     action.keyPoint?.trim() ||
     action.comment?.trim() ||
     `Action ${action.externalId}`;
-  const teamIdSet = new Set<string>([action.teamId]);
-  if (action.agent) {
-    for (const m of action.agent.memberships) teamIdSet.add(m.teamId);
-  }
-  if (action.site) {
-    for (const m of action.site.memberships) teamIdSet.add(m.teamId);
-  }
+  const ownerTeamIds = [action.teamId];
   const targetUrl = action.agent
     ? `/agents/${action.agent.id}`
     : action.site
       ? `/sites/${action.site.id}`
       : null;
   await recordActivitySafe({
-    teamIds: [...teamIdSet],
+    teamIds: ownerTeamIds,
+    // Notif dédiée notifyActionValidated ci-dessous → pas de TEAM_HISTORY_ADDED
+    // en double (règle « une notif par événement »).
+    notify: false,
     actorId: u.id,
     actorName: u.name,
     type: "ACTION_VALIDATED",
@@ -248,7 +266,7 @@ export async function POST(
     actionId: action.id,
     agentId: action.agentId,
     siteId: action.siteId,
-    teamIds: [...teamIdSet],
+    teamIds: ownerTeamIds,
     validatorId: u.id,
     validatorName: u.name,
     actionLabel: label,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { canActOnTeam, requireRole } from "@/lib/auth";
 
 const schema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -13,12 +13,17 @@ export async function PATCH(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  let actor;
   try {
-    await requireRole("ADMIN");
+    actor = await requireRole("ADMIN");
   } catch (r) {
     return r as Response;
   }
   const { id } = await ctx.params;
+  // Cloisonnement : un ADMIN scopé ne modifie que ses propres équipes.
+  if (!canActOnTeam(actor, id)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
   let body: unknown;
   try {
     body = await req.json();
@@ -50,12 +55,17 @@ export async function DELETE(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  let actor;
   try {
-    await requireRole("ADMIN");
+    actor = await requireRole("ADMIN");
   } catch (r) {
     return r as Response;
   }
   const { id } = await ctx.params;
+  // Cloisonnement : un ADMIN scopé ne supprime/archive que ses propres équipes.
+  if (!canActOnTeam(actor, id)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
   const url = new URL(req.url);
   const mode = url.searchParams.get("mode") ?? "soft";
   const team = await prisma.team.findUnique({ where: { id } });

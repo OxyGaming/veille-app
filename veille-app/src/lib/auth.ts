@@ -7,6 +7,7 @@ import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { COOKIE_NAME, decodeToken, encodeToken, type Role } from "@/lib/auth-edge";
+import { resolveAdminScope } from "@/lib/admin-scope";
 
 export { COOKIE_NAME, ROLES, type Role } from "@/lib/auth-edge";
 
@@ -54,7 +55,7 @@ export type SessionUser = {
 export async function getSessionUser(): Promise<SessionUser | null> {
   const jar = await cookies();
   const token = jar.get(COOKIE_NAME)?.value;
-  const userId = decodeToken(token);
+  const userId = await decodeToken(token);
   if (!userId) return null;
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -92,7 +93,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 
 export async function setAuthCookie(userId: string) {
   const jar = await cookies();
-  jar.set(COOKIE_NAME, encodeToken(userId), {
+  jar.set(COOKIE_NAME, await encodeToken(userId), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
@@ -145,11 +146,6 @@ function adminScopedTeamIds(u: SessionUser): string[] | null {
     u.adminScopeMode !== "TEAM"
   )
     return null;
-  // `resolveAdminScope` est importé en lazy pour éviter une dépendance
-  // circulaire avec @/lib/admin-scope (qui dépend de @/lib/admin-scope-
-  // preference, lequel touche au type SessionUser).
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { resolveAdminScope } = require("./admin-scope") as typeof import("./admin-scope");
   const scope = resolveAdminScope({
     role: u.role,
     teamIds: u.teamIds,
@@ -220,6 +216,103 @@ export function assertTeamAccess(u: SessionUser, teamId: string): boolean {
 }
 
 /**
+ * Autorisation d'AGIR (créer / modifier / supprimer) sur une donnée rattachée
+ * à une équipe précise, dans le back-office.
+ *
+ * Contrairement à `requireRole`, ce helper honore le périmètre effectif :
+ *  - ADMIN GLOBAL / `viewAllTeams` → `true` (aucune restriction).
+ *  - ADMIN scopé (MY_TEAMS / TEAM) → uniquement ses équipes.
+ *  - EDITOR / USER → uniquement leurs équipes.
+ *  - `teamId` null/undefined (donnée sans équipe) → refus pour les non-globaux.
+ *
+ * À appeler APRÈS `requireRole`, sur le `teamId` de l'entité chargée, pour
+ * empêcher un acteur scopé d'agir hors de son périmètre.
+ * Cf. memory/admin-scope-cosmetic-warning.md.
+ */
+export function canActOnTeam(
+  u: SessionUser,
+  teamId: string | null | undefined,
+): boolean {
+  const ids = effectiveTeamIds(u);
+  if (ids === null) return true; // global
+  if (!teamId) return false;
+  return ids.includes(teamId);
+}
+
+/**
+ * Variante « au moins une équipe » de `canActOnTeam`, pour les entités
+ * rattachées à plusieurs équipes (Agent / Site / User via leurs join tables).
+ * L'acteur peut agir s'il partage AU MOINS une équipe avec l'entité.
+ *  - ADMIN GLOBAL / `viewAllTeams` → `true`.
+ *  - sinon → intersection non vide entre son périmètre et `teamIds`.
+ *  - liste vide / sans équipe commune → refus (les non-globaux ne touchent
+ *    pas une entité sans équipe ou hors de leurs équipes).
+ */
+export function canActOnAnyTeam(
+  u: SessionUser,
+  teamIds: (string | null | undefined)[],
+): boolean {
+  const ids = effectiveTeamIds(u);
+  if (ids === null) return true; // global
+  return teamIds.some((t) => !!t && ids.includes(t));
+}
+
+/**
+ * Détermine l'équipe propriétaire d'un objet créé sur une entité partagée
+ * (action/sighting/visite sur agent ou site multi-équipes, tournée sur véhicule).
+ *
+ * Règles (cf. memory/cloisonnement-decisions.md) :
+ *  - candidats = équipes de l'entité ∩ périmètre de l'utilisateur
+ *    (ADMIN GLOBAL : toutes les équipes de l'entité) ;
+ *  - aucun candidat → `NO_TEAM` (l'entité n'a pas d'équipe commune au scope) ;
+ *  - `requested` fourni → doit être un candidat (sinon `TEAM_FORBIDDEN`) ;
+ *  - un seul candidat → choisi automatiquement ;
+ *  - plusieurs candidats sans `requested` → `TEAM_REQUIRED` (le front doit
+ *    proposer un sélecteur).
+ */
+export function resolveOwningTeam(
+  u: SessionUser,
+  entityTeamIds: (string | null | undefined)[],
+  requested?: string | null,
+):
+  | { ok: true; teamId: string }
+  | { ok: false; code: "TEAM_REQUIRED" | "TEAM_FORBIDDEN" | "NO_TEAM" } {
+  const entityTeams = Array.from(
+    new Set(entityTeamIds.filter((t): t is string => !!t)),
+  );
+  const eff = effectiveTeamIds(u); // null = global
+  const candidates =
+    eff === null ? entityTeams : entityTeams.filter((t) => eff.includes(t));
+  if (candidates.length === 0) return { ok: false, code: "NO_TEAM" };
+  if (requested) {
+    if (!candidates.includes(requested)) {
+      return { ok: false, code: "TEAM_FORBIDDEN" };
+    }
+    return { ok: true, teamId: requested };
+  }
+  if (candidates.length === 1) return { ok: true, teamId: candidates[0] };
+  return { ok: false, code: "TEAM_REQUIRED" };
+}
+
+/**
+ * Filtre Prisma pour lister les `User` visibles par l'acteur — un user est
+ * visible s'il partage au moins une équipe (via `UserTeam` ou le `teamId`
+ * legacy). ADMIN GLOBAL / viewAllTeams → aucun filtre. Aucune équipe → filtre
+ * impossible (`id: "__none__"`).
+ */
+export function userScope(u: SessionUser): Record<string, unknown> {
+  const ids = effectiveTeamIds(u);
+  if (ids === null) return {};
+  if (!ids.length) return { id: "__none__" };
+  return {
+    OR: [
+      { memberships: { some: { teamId: { in: ids } } } },
+      { teamId: { in: ids } },
+    ],
+  };
+}
+
+/**
  * Filtre Prisma pour les requêtes sur `Agent` (et tout modèle qui s'y rattache).
  * Un agent est visible si au moins une de ses équipes est dans le scope de
  * l'utilisateur.
@@ -237,31 +330,20 @@ export function agentScope(u: SessionUser): Record<string, unknown> {
 }
 
 /**
- * Filtre sur les actions importées. Une action est visible si :
- *  - sa team est dans le scope OU
- *  - son agent (s'il existe) appartient à au moins une équipe du scope OU
- *  - son site (s'il existe) appartient à au moins une équipe du scope.
+ * Filtre sur les actions importées — **STRICT par `teamId`** (décision de
+ * cloisonnement 2026-06, cf. memory/cloisonnement-decisions.md).
+ *
+ * Une action n'appartient qu'à son équipe propriétaire (`ImportedAction.teamId`)
+ * et n'est visible / modifiable que par cette équipe. L'ancien comportement
+ * « OU via agent/site partagé » a été retiré : il exposait et rendait mutables
+ * les actions d'une équipe à une autre dès qu'un agent ou un site était partagé,
+ * sans aucun bénéfice fonctionnel (la validation était déjà stricte).
+ *
+ * Conservé comme alias de `teamScope` pour limiter le churn de ses ~13
+ * appelants et garder l'intention « scope des actions » lisible aux call-sites.
  */
 export function actionScope(u: SessionUser): Record<string, unknown> {
-  const adminIds = adminScopedTeamIds(u);
-  if (adminIds) {
-    return {
-      OR: [
-        { teamId: { in: adminIds } },
-        { agent: { memberships: { some: { teamId: { in: adminIds } } } } },
-        { site: { memberships: { some: { teamId: { in: adminIds } } } } },
-      ],
-    };
-  }
-  if (u.role === "ADMIN" || u.viewAllTeams) return {};
-  if (!u.teamIds.length) return { id: "__none__" };
-  return {
-    OR: [
-      { teamId: { in: u.teamIds } },
-      { agent: { memberships: { some: { teamId: { in: u.teamIds } } } } },
-      { site: { memberships: { some: { teamId: { in: u.teamIds } } } } },
-    ],
-  };
+  return teamScope(u);
 }
 
 /**

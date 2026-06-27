@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser, teamScope } from "@/lib/auth";
+import { getSessionUser, siteScope } from "@/lib/auth";
 import VisitReportClient from "./VisitReportClient";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,8 @@ export default async function VisitReportPage({
   const u = await getSessionUser();
   if (!u) redirect("/login");
   const visit = await prisma.siteVisit.findFirst({
-    where: { id, ...teamScope(u) },
+    // Rapport lisible par toutes les équipes du site (cf. cloisonnement §2).
+    where: { id, site: siteScope(u) },
     include: {
       template: {
         include: {

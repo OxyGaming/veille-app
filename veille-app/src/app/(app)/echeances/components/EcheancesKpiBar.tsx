@@ -7,11 +7,14 @@ type Props = {
 };
 
 /**
- * 4 KPI principaux + indicateur transverse `Critiques` en accent rouge.
- * Les KPI suivent l'ordre PO : critiques / en retard / < 7 j / < 30 j.
+ * Vue d'ensemble — vocabulaire canonique (cf. docs/NOMENCLATURE-ECHEANCES.md) :
+ *  - En retard (dont critiques) · À venir (≤ 7 j) · Planifiée (> 7 j).
+ * « Critiques » reste un indicateur transverse (actions en retard > 7 j +
+ * visites/équipements critiques), distinct du sous-compte d'actions.
  */
 export function EcheancesKpiBar({ kpis }: Props) {
-  const has7 = kpis.today + kpis.soon;
+  const aVenir = kpis.today + kpis.soon; // aujourd'hui → J+7
+  const planifiee = kpis.later + kpis.future; // au-delà de J+7
   return (
     <KpiSection title="Vue d'ensemble">
       <KpiCard
@@ -26,15 +29,16 @@ export function EcheancesKpiBar({ kpis }: Props) {
         tone={kpis.late > 0 ? "danger" : "neutral"}
       />
       <KpiCard
-        label="< 7 jours"
-        value={has7}
-        tone={has7 > 0 ? "warn" : "neutral"}
+        label="À venir"
+        value={aVenir}
+        tone={aVenir > 0 ? "warn" : "neutral"}
         hint={kpis.today > 0 ? `dont ${kpis.today} aujourd'hui` : undefined}
       />
       <KpiCard
-        label="< 30 jours"
-        value={kpis.later}
-        tone={kpis.later > 0 ? "warn" : "neutral"}
+        label="Planifiée"
+        value={planifiee}
+        tone="neutral"
+        hint="au-delà de 7 jours"
       />
     </KpiSection>
   );

@@ -154,6 +154,16 @@ describe("findAutoValidableActions", () => {
     );
   });
 
+  it("cloisonne par teamId quand fourni (candidats de l'équipe de la veille)", async () => {
+    findManyAction.mockResolvedValue([]);
+    await findAutoValidableActions("ag1", ["Foo"], "team-A");
+    expect(findManyAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { agentId: "ag1", localStatus: "ACTIVE", teamId: "team-A" },
+      }),
+    );
+  });
+
   it("mappe le résultat Prisma avec matchedBy + dates non nulles", async () => {
     findManyAction.mockResolvedValue([
       {

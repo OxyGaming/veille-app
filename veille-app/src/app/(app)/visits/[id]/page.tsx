@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser, teamScope } from "@/lib/auth";
+import { getSessionUser, siteScope } from "@/lib/auth";
 import VisitClient from "./VisitClient";
 import VisitInventoryClient from "./VisitInventoryClient";
 
@@ -15,7 +15,8 @@ export default async function VisitPage({
   const u = await getSessionUser();
   if (!u) redirect("/login");
   const visit = await prisma.siteVisit.findFirst({
-    where: { id, ...teamScope(u) },
+    // Lecture via le site partagé ; l'édition reste gardée côté API (teamId).
+    where: { id, site: siteScope(u) },
     include: {
       template: {
         include: {

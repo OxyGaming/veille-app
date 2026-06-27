@@ -40,6 +40,23 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 /**
+ * Lot 4B-4 — badge ×N indiquant que la ligne appartient à un groupe logique de
+ * plusieurs occurrences (même cible + équipe + dedupHash) sur le périmètre
+ * filtré. Purement informatif : les lignes ne sont JAMAIS fusionnées.
+ */
+function GroupBadge({ count }: { count: number }) {
+  if (count <= 1) return null;
+  return (
+    <span
+      title={`Action logique regroupant ${count} occurrences sur le périmètre filtré`}
+      className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border bg-violet-50 text-violet-700 border-violet-200 whitespace-nowrap"
+    >
+      ×{count}
+    </span>
+  );
+}
+
+/**
  * Tableau dense desktop + cards mobile (Sprint 7 C3).
  *
  * Sélection multiple ; bouton « Marquer obsolètes » avec confirmation
@@ -365,8 +382,11 @@ export function AdminActionsTable({
                         a.keyPoint?.trim() ||
                         `Action ${a.externalId}`}
                     </div>
-                    <div className="text-[11px] font-mono text-slate-500 truncate">
-                      {a.externalId}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-[11px] font-mono text-slate-500 truncate">
+                        {a.externalId}
+                      </span>
+                      <GroupBadge count={a.occurrenceCount} />
                     </div>
                   </td>
                   <td className="px-3 py-2 align-top">
@@ -459,6 +479,7 @@ export function AdminActionsTable({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <StatusBadge status={a.localStatus} />
+                    <GroupBadge count={a.occurrenceCount} />
                     {late && (
                       <span className="text-[10px] font-mono text-rose-700">
                         ⚠ EN RETARD

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { canActOnTeam, requireRole } from "@/lib/auth";
 import { notifyTeamMembershipAddedSafe } from "@/lib/notifications-generators";
 
 const schema = z.object({
@@ -57,6 +57,11 @@ export async function PATCH(
     return r as Response;
   }
   const { id: teamId } = await ctx.params;
+  // Cloisonnement : un ADMIN scopé ne gère que la composition de ses équipes
+  // (empêche le rattachement/détachement d'users ou d'agents hors périmètre).
+  if (!canActOnTeam(actor, teamId)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
   let body: unknown;
   try {
     body = await req.json();

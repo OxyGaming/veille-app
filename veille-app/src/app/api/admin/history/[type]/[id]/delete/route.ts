@@ -76,6 +76,12 @@ export async function POST(
     case "forbidden_role":
       // En théorie inaccessible (requireRole(ADMIN) au-dessus) — fail-safe.
       return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+    case "forbidden_scope":
+      // ADMIN scopé tentant de supprimer hors de son périmètre.
+      return NextResponse.json(
+        { error: "Hors de votre périmètre." },
+        { status: 403 },
+      );
     case "invalid_reason":
       return NextResponse.json(
         {

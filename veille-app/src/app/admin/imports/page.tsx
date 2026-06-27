@@ -16,6 +16,9 @@ export default async function ImportsPage() {
   const eff = u ? effectiveTeamIds(u) : [];
   const [recent, agents, teams] = await Promise.all([
     prisma.actionImport.findMany({
+      // Cloisonnement : l'historique d'import ne montre que les équipes du
+      // périmètre (eff null = global → toutes).
+      where: eff === null ? {} : { teamId: { in: eff } },
       orderBy: { createdAt: "desc" },
       take: 20,
       include: { team: true },
@@ -52,13 +55,19 @@ export default async function ImportsPage() {
     ],
   }));
   const teamsForPicker = teams.map((t) => ({ id: t.id, name: t.name }));
+  // Import Excel + pointages + historique réservés ADMIN/EDITOR ; la création
+  // rapide reste accessible aux USER (cf. décision back-office actions).
+  const canManageImports = u?.role === "ADMIN" || u?.role === "EDITOR";
   return (
     <div>
       <div className="mb-5">
-        <h1 className="text-2xl font-bold tracking-tight">Imports actions</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          {canManageImports ? "Imports actions" : "Création d'action"}
+        </h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Téléversez le fichier Excel hebdomadaire ou créez une action à la
-          volée pour toute l&apos;équipe.
+          {canManageImports
+            ? "Téléversez le fichier Excel hebdomadaire ou créez une action à la volée pour toute l'équipe."
+            : "Créez une action pour votre équipe."}
         </p>
       </div>
 
@@ -68,13 +77,19 @@ export default async function ImportsPage() {
           teams={teamsForPicker}
           defaultTeamId={u?.teamId ?? null}
         />
-        <ImportClient teams={teamsForPicker} defaultTeamId={u?.teamId ?? null} />
+        {canManageImports && (
+          <ImportClient teams={teamsForPicker} defaultTeamId={u?.teamId ?? null} />
+        )}
       </div>
 
-      <div className="mb-6">
-        <PointagesImport />
-      </div>
+      {canManageImports && (
+        <div className="mb-6">
+          <PointagesImport teams={teamsForPicker} />
+        </div>
+      )}
 
+      {canManageImports && (
+        <>
       <h2 className="text-base font-bold mt-8 mb-2">Historique</h2>
       <div className="card overflow-hidden">
         <table className="w-full text-sm">
@@ -124,6 +139,8 @@ export default async function ImportsPage() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
     </div>
   );
 }

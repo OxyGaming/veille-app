@@ -9,6 +9,9 @@
  *     du choix de valider via la modale de confirmation).
  *   - Une action est candidate à la validation automatique si :
  *     * elle appartient à l'agent ciblé par la veille ;
+ *     * elle appartient à l'ÉQUIPE de la veille (`teamId` de la session) —
+ *       cloisonnement : on ne propose pas une action d'une autre équipe de
+ *       l'agent (qui serait de toute façon refusée par la route validate) ;
  *     * son `localStatus = ACTIVE` (les autres statuts sont ignorés
  *       — déjà validée, remplacée, obsolète) ;
  *     * son `keyPoint.startsWith(pointObservé)` (comparaison sensible
@@ -134,11 +137,17 @@ export async function getObservedKeyPointsForSession(
 export async function findAutoValidableActions(
   agentId: string | null | undefined,
   observedKeyPoints: readonly string[],
+  /** Équipe de la veille — restreint les candidats à cette équipe (cloisonnement). */
+  teamId?: string | null,
 ): Promise<AutoValidableAction[]> {
   if (!agentId) return [];
   if (observedKeyPoints.length === 0) return [];
   const rawActions = await prisma.importedAction.findMany({
-    where: { agentId, localStatus: "ACTIVE" },
+    where: {
+      agentId,
+      localStatus: "ACTIVE",
+      ...(teamId ? { teamId } : {}),
+    },
     select: {
       id: true,
       externalId: true,
@@ -171,9 +180,9 @@ export async function findAutoValidableActionsForSession(
 ): Promise<AutoValidableAction[]> {
   const session = await prisma.veilleSession.findUnique({
     where: { id: sessionId },
-    select: { agentId: true },
+    select: { agentId: true, teamId: true },
   });
   if (!session?.agentId) return [];
   const points = await getObservedKeyPointsForSession(sessionId);
-  return findAutoValidableActions(session.agentId, points);
+  return findAutoValidableActions(session.agentId, points, session.teamId);
 }

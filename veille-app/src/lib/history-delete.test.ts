@@ -12,6 +12,8 @@ const findAgentSighting = vi.fn();
 const deleteAgentSighting = vi.fn();
 const findSiteSighting = vi.fn();
 const deleteSiteSighting = vi.fn();
+const findVehicleRound = vi.fn();
+const deleteVehicleRound = vi.fn();
 const findPhotos = vi.fn();
 const createAudit = vi.fn();
 
@@ -44,6 +46,10 @@ vi.mock("@/lib/prisma", () => ({
     siteSighting: {
       findUnique: (...a: unknown[]) => findSiteSighting(...a),
       delete: (...a: unknown[]) => deleteSiteSighting(...a),
+    },
+    vehicleRound: {
+      findUnique: (...a: unknown[]) => findVehicleRound(...a),
+      delete: (...a: unknown[]) => deleteVehicleRound(...a),
     },
     photo: {
       findMany: (...a: unknown[]) => findPhotos(...a),
@@ -79,6 +85,51 @@ const USER: SessionUser = { ...EDITOR, role: "USER" };
 beforeEach(() => {
   vi.clearAllMocks();
   findPhotos.mockResolvedValue([]);
+  // Par défaut, pas de tournée véhicule (le type `visit` bascule sur
+  // VehicleRound quand l'id n'est pas une SiteVisit).
+  findVehicleRound.mockResolvedValue(null);
+});
+
+const SCOPED_ADMIN: SessionUser = {
+  ...ADMIN,
+  id: "u_scoped",
+  adminScopeMode: "TEAM",
+  adminTeamId: "tA",
+};
+
+describe("deleteHistoryEntry — cloisonnement (forbidden_scope)", () => {
+  it("ADMIN scopé TEAM=tA : refuse la suppression d'une session d'une autre équipe (tB)", async () => {
+    findSession.mockResolvedValueOnce({
+      id: "s1",
+      teamId: "tB",
+      agentId: null,
+      observerId: "x",
+      status: "completed",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      createdAt: new Date(),
+      _count: { procedures: 0, photos: 0, reports: 0 },
+    });
+    const out = await deleteHistoryEntry(SCOPED_ADMIN, "session", "s1", "motif test");
+    expect(out.kind).toBe("forbidden_scope");
+    expect(deleteSession).not.toHaveBeenCalled();
+  });
+
+  it("ADMIN global : autorise la suppression quelle que soit l'équipe", async () => {
+    findSession.mockResolvedValueOnce({
+      id: "s2",
+      teamId: "tB",
+      agentId: null,
+      observerId: "x",
+      status: "completed",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      createdAt: new Date(),
+      _count: { procedures: 0, photos: 0, reports: 0 },
+    });
+    const out = await deleteHistoryEntry(ADMIN, "session", "s2", "motif test");
+    expect(out.kind).toBe("ok");
+  });
 });
 
 function readAuditDetails() {

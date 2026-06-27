@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser, teamScope } from "@/lib/auth";
+import { getSessionUser, siteScope, teamScope } from "@/lib/auth";
 import { Icon } from "@/components/icons";
 import VisitsListClient from "./VisitsListClient";
 import { vehicleTypeLabel } from "@/lib/vehicle-types";
@@ -13,7 +13,8 @@ export default async function VisitsPage() {
   if (!u) redirect("/login");
   const [visits, rounds] = await Promise.all([
     prisma.siteVisit.findMany({
-      where: teamScope(u),
+      // Lecture via le site partagé (cf. cloisonnement-decisions §2).
+      where: { site: siteScope(u) },
       orderBy: { visitDate: "desc" },
       take: 100,
       include: {

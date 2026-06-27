@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { getSessionUser } from "@/lib/auth";
+import { effectiveTeamIds, getSessionUser, teamScope } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import PlanningImportClient from "./PlanningImportClient";
 
@@ -10,17 +10,24 @@ export const dynamic = "force-dynamic";
 export default async function AdminPlanningPage() {
   const u = await getSessionUser();
   if (!u) redirect("/login");
-  // Cohérent avec le layout admin + la route API : ADMIN strict (le layout
-  // laisse passer EDITOR mais on ferme cette page sous ADMIN uniquement).
-  if (u.role !== "ADMIN") redirect("/admin");
+  // Planning par équipe : ADMIN et EDITOR peuvent importer (selon leur scope).
+  if (u.role !== "ADMIN" && u.role !== "EDITOR") redirect("/admin");
 
-  // Un seul PlanningImport est en base à un instant T (overwrite), mais on
-  // utilise findFirst pour rester robuste si une partie d'une transaction
-  // échoue un jour.
+  // Équipes importables par l'utilisateur (sélecteur). Global = toutes.
+  const scopeIds = effectiveTeamIds(u);
+  const teams = await prisma.team.findMany({
+    where: scopeIds === null ? { isActive: true } : { id: { in: scopeIds } },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+
+  // Dernier import DANS LE PÉRIMÈTRE de l'utilisateur (cloisonné par teamId).
   const current = await prisma.planningImport.findFirst({
+    where: teamScope(u),
     orderBy: { createdAt: "desc" },
     include: {
       importedBy: { select: { name: true, email: true } },
+      team: { select: { name: true } },
       _count: { select: { shifts: true } },
     },
   });
@@ -37,12 +44,13 @@ export default async function AdminPlanningPage() {
         </p>
       </div>
 
-      <PlanningImportClient />
+      <PlanningImportClient teams={teams} />
 
-      <h2 className="text-base font-bold mt-8 mb-2">Import actuel</h2>
+      <h2 className="text-base font-bold mt-8 mb-2">Dernier import (votre périmètre)</h2>
       {current ? (
         <div className="card p-5">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Field label="Équipe" value={current.team?.name ?? "—"} />
             <Field
               label="Fichier"
               value={current.fileName ?? "—"}

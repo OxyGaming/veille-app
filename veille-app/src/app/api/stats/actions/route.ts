@@ -2,15 +2,27 @@ import { NextResponse } from "next/server";
 import { format } from "date-fns";
 import { prisma } from "@/lib/prisma";
 import { actionScope, requireUser, teamScope } from "@/lib/auth";
+import {
+  actionEcheanceStateAt,
+  echeanceBounds,
+} from "@/lib/echeances/action-echeance";
+import { dedupActions } from "@/lib/actions/dedup";
 
 /**
- * Stats actions :
- *  - overdue            : actions actives en retard, ventilation agent/site
- *  - soon               : actions actives à échéance < 7 j
- *  - validationDelay    : délai moyen et médian entre due/realized
- *  - actionsActiveAging : distribution des durées d'ancienneté
- *  - monthlyValidations : cumul des validations par mois
- *  - syncStatus         : LOCAL vs SYNCED des photos (proxy qualité offline)
+ * Stats actions — DEUX natures d'indicateurs à ne pas mélanger :
+ *
+ *  • INSTANTANÉ (état courant, indépendant de la période sélectionnée) :
+ *      - overdue            : actions « En retard » (dueAt < aujourd'hui 00:00),
+ *                             dont « En retard critique » (> 7 j) ;
+ *      - soon               : actions « À venir » (aujourd'hui → J+7) ;
+ *      - actionsActiveAging  : ancienneté des actions à traiter.
+ *  • SUR LA PÉRIODE (from/to) :
+ *      - validationDelay     : délai entre échéance/création et validation ;
+ *      - monthlyValidations  : cumul mensuel des validations ;
+ *      - photoSync           : LOCAL vs SYNCED des photos créées sur la période.
+ *
+ * Le champ `nature` du payload qualifie chaque bloc pour l'affichage (sous-titres).
+ * Nomenclature alignée sur lib/echeances/action-echeance.ts.
  */
 export async function GET(req: Request) {
   let u;
@@ -30,14 +42,21 @@ export async function GET(req: Request) {
   const scope = teamScope(u);
   const aScope = actionScope(u);
 
-  const today = new Date();
-  const in7 = new Date(today.getTime() + 7 * 24 * 3600 * 1000);
+  // Bornes canoniques (aujourd'hui 00:00 / +7 j / −7 j) — instantané « état courant ».
+  const now = new Date();
+  const bounds = echeanceBounds(now);
 
   const [activeActions, validations, photos] = await Promise.all([
     prisma.importedAction.findMany({
       where: { ...aScope, localStatus: "ACTIVE" },
       select: {
         id: true,
+        teamId: true,
+        agentId: true,
+        siteId: true,
+        vehicleId: true,
+        dedupHash: true,
+        localStatus: true,
         dueAt: true,
         createdAt: true,
         agent: { select: { firstName: true, lastName: true } },
@@ -51,31 +70,58 @@ export async function GET(req: Request) {
         action: { select: { dueAt: true, createdAt: true } },
       },
     }),
+    // Cloisonnement : ne compter que les photos dont le parent (session,
+    // observation, sighting agent/site, RCI) est dans le périmètre. Sans ce
+    // filtre, le KPI photoSync agrégeait toutes les équipes.
     prisma.photo.findMany({
-      where: { createdAt: { gte: from, lte: to } },
+      where:
+        "teamId" in scope
+          ? {
+              createdAt: { gte: from, lte: to },
+              OR: [
+                { session: scope },
+                {
+                  observation: {
+                    procedureObservation: { session: scope },
+                  },
+                },
+                { agentSighting: scope },
+                { siteSighting: scope },
+                { rci: scope },
+              ],
+            }
+          : { createdAt: { gte: from, lte: to } },
       select: { syncStatus: true },
     }),
   ]);
 
-  // 1 & 2. En retard / à venir.
+  // INSTANTANÉ — état courant compté en ACTIONS LOGIQUES (doublons regroupés
+  // via le helper central). Les indicateurs de période (validations/photos)
+  // restent en occurrences (cf. §6 du return).
+  const actionGroups = dedupActions(activeActions);
+
+  // 1 & 2. En retard / À venir (classification canonique, sur le représentant).
   type AgentSlot = { name: string; count: number };
   const overdueByAgent = new Map<string, number>();
   const overdueBySite = new Map<string, number>();
   const soonByAgent = new Map<string, number>();
   const soonBySite = new Map<string, number>();
   let overdueTotal = 0;
+  let overdueCriticalTotal = 0;
   let soonTotal = 0;
-  for (const a of activeActions) {
-    if (!a.dueAt) continue;
-    if (a.dueAt < today) {
+  for (const g of actionGroups) {
+    const a = g.representative;
+    const state = actionEcheanceStateAt(a.dueAt, bounds);
+    if (state === "OVERDUE" || state === "OVERDUE_CRITICAL") {
       overdueTotal++;
+      if (state === "OVERDUE_CRITICAL") overdueCriticalTotal++;
       if (a.agent) {
         const n = `${a.agent.lastName} ${a.agent.firstName}`;
         overdueByAgent.set(n, (overdueByAgent.get(n) ?? 0) + 1);
       } else if (a.site) {
         overdueBySite.set(a.site.name, (overdueBySite.get(a.site.name) ?? 0) + 1);
       }
-    } else if (a.dueAt <= in7) {
+    } else if (state === "DUE_SOON") {
       soonTotal++;
       if (a.agent) {
         const n = `${a.agent.lastName} ${a.agent.firstName}`;
@@ -131,8 +177,8 @@ export async function GET(req: Request) {
     { label: "> 180 j", max: Infinity },
   ];
   const actionsActiveAging = ageBuckets.map((b) => ({ label: b.label, count: 0 }));
-  for (const a of activeActions) {
-    const days = (today.getTime() - a.createdAt.getTime()) / 86400000;
+  for (const g of actionGroups) {
+    const days = (now.getTime() - g.representative.createdAt.getTime()) / 86400000;
     const idx = ageBuckets.findIndex((b) => days <= b.max);
     if (idx >= 0) actionsActiveAging[idx].count++;
   }
@@ -160,8 +206,23 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     range: { from: from.toISOString(), to: to.toISOString() },
+    // Qualifie chaque bloc :
+    //  - "instant"  = état courant (ignore la période), compté en ACTIONS
+    //    LOGIQUES (doublons regroupés) ;
+    //  - "period"   = calculé sur from/to, en OCCURRENCES (validations/photos
+    //    sont des événements unitaires, pas des actions à dédupliquer).
+    counting: { instant: "logical", period: "occurrences" },
+    nature: {
+      overdue: "instant",
+      soon: "instant",
+      actionsActiveAging: "instant",
+      validationDelay: "period",
+      monthlyValidations: "period",
+      photoSync: "period",
+    },
     overdue: {
       total: overdueTotal,
+      critical: overdueCriticalTotal,
       byAgent: topList(overdueByAgent),
       bySite: topList(overdueBySite),
     },

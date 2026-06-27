@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireUser, teamScope } from "@/lib/auth";
+import { requireUser, resolveOwningTeam, teamScope } from "@/lib/auth";
 import { isVehicleType } from "@/lib/vehicle-types";
 
 /**
@@ -111,13 +111,22 @@ export async function POST(req: Request) {
     );
   }
 
-  const teamId = vehicle.teamId ?? u.teamId ?? u.teamIds[0];
-  if (!teamId) {
+  // Équipe propriétaire = équipe du véhicule (pas d'héritage de l'équipe de
+  // l'observateur). Un véhicule sans équipe ne peut pas porter de tournée.
+  const owning = resolveOwningTeam(u, [vehicle.teamId]);
+  if (!owning.ok) {
     return NextResponse.json(
-      { error: "Aucune équipe rattachée à ce véhicule." },
-      { status: 400 }
+      {
+        error:
+          owning.code === "NO_TEAM"
+            ? "Ce véhicule n'est rattaché à aucune équipe — affectez-le d'abord."
+            : "Équipe hors de votre périmètre.",
+        code: owning.code,
+      },
+      { status: owning.code === "TEAM_REQUIRED" ? 400 : 403 }
     );
   }
+  const teamId = owning.teamId;
 
   // Filtrage des items applicables au type du véhicule.
   const allItems = template.sections.flatMap((s) =>

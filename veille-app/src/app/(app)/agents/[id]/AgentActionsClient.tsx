@@ -9,11 +9,28 @@ import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
 import { TagChips, TagInput } from "@/components/TagChips";
 import { TAG_OBLIGATOIRE, TAG_VEILLE_LEGALE } from "@/lib/tags";
+import {
+  ACTION_ECHEANCE_LABEL,
+  actionEcheanceStateAt,
+  deserializeEcheanceBounds,
+  isOverdue,
+  type ActionEcheanceState,
+  type SerializedEcheanceBounds,
+} from "@/lib/echeances/action-echeance";
 import NoteModal from "@/components/NoteModal";
 import SightingModal from "@/components/SightingModal";
 import ResolveEquipmentModal, {
   type ResolveEquipmentLink,
 } from "@/components/ResolveEquipmentModal";
+
+/** Couleur du badge d'échéance par état canonique (cf. nomenclature). */
+const ECHEANCE_BADGE_CLS: Record<ActionEcheanceState, string> = {
+  OVERDUE_CRITICAL: "text-rose-700",
+  OVERDUE: "text-amber-700",
+  DUE_SOON: "text-indigo-700",
+  SCHEDULED: "text-slate-500",
+  NO_DUE_DATE: "text-slate-400",
+};
 
 type Duplicate = {
   id: string;
@@ -50,6 +67,7 @@ export default function AgentActionsClient({
   targetKind = "agent",
   userRole = "USER",
   teams = [],
+  echeanceBounds: serializedBounds,
 }: {
   agentId: string;
   agentName: string;
@@ -66,8 +84,20 @@ export default function AgentActionsClient({
    * user ∩ agent). Vide sur la fiche site (pas de sélecteur d'équipe).
    */
   teams?: { id: string; name: string }[];
+  /**
+   * Bornes d'échéance résolues par le SERVEUR (fuseau Europe/Paris). Les badges
+   * sont calculés contre ces instants absolus — jamais avec l'horloge du
+   * navigateur — pour rester cohérents avec les compteurs serveur.
+   */
+  echeanceBounds: SerializedEcheanceBounds;
 }) {
   const router = useRouter();
+  // Bornes désérialisées une seule fois (instants absolus, indépendants du
+  // fuseau du navigateur).
+  const bounds = useMemo(
+    () => deserializeEcheanceBounds(serializedBounds),
+    [serializedBounds],
+  );
   const [actions, setActions] = useState(initial);
   // Resynchro après `router.refresh()` : sans cet effet, l'état local restait
   // figé sur la liste du premier rendu — les actions ajoutées via le modal
@@ -426,14 +456,18 @@ export default function AgentActionsClient({
       <ul className="grid grid-cols-1 gap-2">
         {filteredActions.map((a) => {
           const due = a.dueAt ? new Date(a.dueAt) : null;
-          const late = due && due < new Date();
+          // État d'échéance canonique calculé contre les bornes SERVEUR
+          // (pas d'horloge navigateur) — cohérent avec les compteurs serveur.
+          const state = actionEcheanceStateAt(due, bounds);
           return (
             <li
               key={a.id}
               className={`relative bg-white border rounded-xl px-3 py-3 min-w-0 break-words transition-shadow hover:shadow-sm ${
-                late
+                state === "OVERDUE_CRITICAL"
                   ? "border-rose-200 bg-rose-50/40"
-                  : "border-slate-200"
+                  : state === "OVERDUE"
+                    ? "border-amber-200 bg-amber-50/40"
+                    : "border-slate-200"
               }`}
             >
               {canManage && (
@@ -460,11 +494,10 @@ export default function AgentActionsClient({
                 )}
                 {due && (
                   <span
-                    className={`text-[10px] font-mono ${
-                      late ? "text-rose-700" : "text-slate-500"
-                    }`}
+                    className={`text-[10px] font-mono ${ECHEANCE_BADGE_CLS[state]}`}
                   >
-                    {late ? "⚠ EN RETARD · " : "Échéance "}
+                    {isOverdue(state) ? "⚠ " : ""}
+                    {ACTION_ECHEANCE_LABEL[state]} ·{" "}
                     {format(due, "P", { locale: fr })}
                   </span>
                 )}

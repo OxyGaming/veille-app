@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireUser, teamScope } from "@/lib/auth";
+import { agentScope, assertTeamAccess, requireUser, teamScope } from "@/lib/auth";
 
 const createSchema = z.object({
   procedureIds: z.array(z.string().min(1)).min(1),
@@ -67,12 +67,33 @@ export async function POST(req: Request) {
   }
   const data = parsed.data;
 
-  // Idempotence offline
+  // Idempotence offline — ne JAMAIS renvoyer une session d'une autre équipe
+  // (le clientGeneratedId est unique global, devinable hors périmètre).
   if (data.clientGeneratedId) {
     const existing = await prisma.veilleSession.findUnique({
       where: { clientGeneratedId: data.clientGeneratedId },
     });
-    if (existing) return NextResponse.json(existing);
+    if (existing) {
+      if (!assertTeamAccess(u, existing.teamId)) {
+        return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+      }
+      return NextResponse.json(existing);
+    }
+  }
+
+  // Cloisonnement : un agent rattaché à la veille doit être dans le périmètre
+  // de l'utilisateur (empêche de lier la session à l'agent d'une autre équipe).
+  if (data.agentId) {
+    const agent = await prisma.agent.findFirst({
+      where: { id: data.agentId, ...agentScope(u) },
+      select: { id: true },
+    });
+    if (!agent) {
+      return NextResponse.json(
+        { error: "Agent hors de votre périmètre." },
+        { status: 403 }
+      );
+    }
   }
 
   const session = await prisma.$transaction(async (tx) => {

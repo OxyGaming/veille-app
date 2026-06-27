@@ -73,6 +73,14 @@ export type EcheanceItem = {
   urgency: EcheanceUrgency;
   /** D13 — précalculé à l'agrégation (cf. `isCriticalEcheance`). */
   isCritical: boolean;
+  /**
+   * Lot 4B-2 — nombre d'occurrences physiques regroupées sous cet item
+   * (actions dédupliquées via `dedupActions`). 1 pour les items non
+   * dédupliqués (visites, équipements, tournées). Sert au badge « ×N ».
+   */
+  occurrenceCount?: number;
+  /** Ids des occurrences regroupées (préparation expansion serveur Lot 4B-3). */
+  memberIds?: string[];
   context: EcheanceContext;
   cta: EcheanceCta;
 };

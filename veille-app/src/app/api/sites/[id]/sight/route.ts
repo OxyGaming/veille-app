@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireUser, siteScope } from "@/lib/auth";
+import { requireUser, resolveOwningTeam, siteScope } from "@/lib/auth";
 
 /**
  * Crée un « Vu » (kind=SIGHT) ou un « Commentaire personnalisé » (kind=NOTE)
@@ -11,6 +11,8 @@ const schema = z.object({
   kind: z.enum(["SIGHT", "NOTE"]).default("SIGHT"),
   comment: z.string().trim().max(2000).optional().nullable(),
   sightedAt: z.string().datetime().optional(),
+  /** Équipe propriétaire (site multi-équipes) — requise si ambiguë. */
+  teamId: z.string().optional(),
 });
 
 export async function POST(
@@ -47,14 +49,29 @@ export async function POST(
       { status: 400 }
     );
   }
-  const teamId =
-    site.teamId ?? site.memberships[0]?.teamId ?? u.teamId ?? u.teamIds[0];
-  if (!teamId) {
+  // Équipe propriétaire désambiguïsée (site multi-équipes) — pas d'héritage
+  // automatique du teamId legacy.
+  const owning = resolveOwningTeam(
+    u,
+    [site.teamId, ...site.memberships.map((m) => m.teamId)],
+    parsed.data.teamId,
+  );
+  if (!owning.ok) {
+    const status = owning.code === "TEAM_REQUIRED" ? 400 : 403;
     return NextResponse.json(
-      { error: "Aucune équipe rattachée à ce site." },
-      { status: 400 }
+      {
+        error:
+          owning.code === "TEAM_REQUIRED"
+            ? "Site partagé : précisez l'équipe."
+            : owning.code === "NO_TEAM"
+              ? "Aucune équipe de votre périmètre rattachée à ce site."
+              : "Équipe hors de votre périmètre.",
+        code: owning.code,
+      },
+      { status }
     );
   }
+  const teamId = owning.teamId;
   const sighting = await prisma.siteSighting.create({
     data: {
       siteId,

@@ -96,11 +96,16 @@ function computeStats(data: ReportPayload) {
       }
     }
   }
+  // « Items observés » = items ayant reçu un verdict de conformité
+  // (CONFORME / NON_CONFORME / A_REVOIR). NON_OBSERVE et NON_APPLICABLE en
+  // sont exclus → c'est exactement le dénominateur du taux, pour que la
+  // cellule « Items observés » et le « Taux » soient cohérents partout.
   const observed = total - nonObserve - na;
   const rate = observed > 0 ? Math.round((conforme / observed) * 1000) / 10 : null;
   return {
     procedures: data.procedures.length,
     total,
+    observed,
     conforme,
     nc,
     aRevoir,
@@ -204,7 +209,7 @@ export default function ReportClient({ sessionId }: { sessionId: string }) {
         body: [
           [
             String(stats.procedures),
-            String(stats.total - stats.nonObserve),
+            String(stats.observed),
             String(stats.conforme),
             String(stats.nc),
             String(stats.aRevoir),

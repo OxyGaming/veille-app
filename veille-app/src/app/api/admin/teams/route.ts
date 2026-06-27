@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { effectiveTeamIds, requireRole } from "@/lib/auth";
 
 export async function GET() {
+  let u;
   try {
-    await requireRole(["ADMIN", "EDITOR"]);
+    u = await requireRole(["ADMIN", "EDITOR"]);
   } catch (r) {
     return r as Response;
   }
+  // Cloisonnement : un EDITOR / ADMIN scopé ne liste que ses propres équipes.
+  const scopeIds = effectiveTeamIds(u);
   const teams = await prisma.team.findMany({
+    where: scopeIds === null ? {} : { id: { in: scopeIds } },
     orderBy: { name: "asc" },
     include: {
       _count: {
@@ -27,10 +31,19 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
+  let actor;
   try {
-    await requireRole("ADMIN");
+    actor = await requireRole("ADMIN");
   } catch (r) {
     return r as Response;
+  }
+  // Création d'équipe = opération établissement, réservée à l'ADMIN GLOBAL
+  // (un admin scopé ne verrait même pas l'équipe créée).
+  if (effectiveTeamIds(actor) !== null) {
+    return NextResponse.json(
+      { error: "Création d'équipe réservée à un administrateur global." },
+      { status: 403 }
+    );
   }
   let body: unknown;
   try {

@@ -1,17 +1,26 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { hashPassword, requireRole } from "@/lib/auth";
+import {
+  canActOnTeam,
+  effectiveTeamIds,
+  hashPassword,
+  requireRole,
+  userScope,
+} from "@/lib/auth";
 
 const ROLES = ["ADMIN", "EDITOR", "USER"] as const;
 
 export async function GET() {
+  let u;
   try {
-    await requireRole(["ADMIN", "EDITOR"]);
+    u = await requireRole(["ADMIN", "EDITOR"]);
   } catch (r) {
     return r as Response;
   }
+  // Cloisonnement : un EDITOR / ADMIN scopé ne voit que les users de ses équipes.
   const users = await prisma.user.findMany({
+    where: userScope(u),
     orderBy: { name: "asc" },
     include: { team: true },
   });
@@ -40,8 +49,9 @@ const createSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  let actor;
   try {
-    await requireRole("ADMIN");
+    actor = await requireRole("ADMIN");
   } catch (r) {
     return r as Response;
   }
@@ -59,6 +69,22 @@ export async function POST(req: Request) {
     );
   }
   const data = parsed.data;
+  const isGlobal = effectiveTeamIds(actor) === null;
+  // Cloisonnement : un ADMIN scopé ne crée un user que dans son périmètre…
+  if (!canActOnTeam(actor, data.teamId ?? null)) {
+    return NextResponse.json(
+      { error: "Équipe cible hors de votre périmètre." },
+      { status: 403 }
+    );
+  }
+  // …et ne peut pas fabriquer un compte à pouvoir global (ADMIN ou
+  // viewAllTeams) — réservé à un ADMIN GLOBAL (anti-élévation de privilège).
+  if (!isGlobal && (data.role === "ADMIN" || data.viewAllTeams === true)) {
+    return NextResponse.json(
+      { error: "Création d'un compte global réservée à un administrateur global." },
+      { status: 403 }
+    );
+  }
   try {
     const user = await prisma.user.create({
       data: {

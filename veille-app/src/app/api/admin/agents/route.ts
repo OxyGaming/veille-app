@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { canActOnAnyTeam, canActOnTeam, requireRole } from "@/lib/auth";
 
 const schema = z.object({
   matricule: z.string().trim().min(1).max(40),
@@ -52,6 +52,16 @@ export async function POST(req: Request) {
   const { matricule, firstName, lastName, teamIds, reactivateIfExists } =
     parsed.data;
 
+  // Cloisonnement : toute équipe rattachée à l'agent doit être dans le
+  // périmètre de l'acteur (un EDITOR/ADMIN scopé ne crée/rattache pas un agent
+  // dans une équipe tierce).
+  if (teamIds && teamIds.some((t) => !canActOnTeam(u, t))) {
+    return NextResponse.json(
+      { error: "Une ou plusieurs équipes cibles sont hors de votre périmètre." },
+      { status: 403 }
+    );
+  }
+
   const existing = await prisma.agent.findUnique({
     where: { matricule },
     select: {
@@ -61,8 +71,27 @@ export async function POST(req: Request) {
       lastName: true,
       isActive: true,
       isVisible: true,
+      teamId: true,
+      memberships: { select: { teamId: true } },
     },
   });
+
+  // Réactivation par matricule : interdire la « capture » d'un agent existant
+  // appartenant à des équipes hors périmètre (sinon un admin scopé pourrait
+  // s'approprier un agent d'une autre équipe via son matricule).
+  if (
+    existing &&
+    reactivateIfExists &&
+    !canActOnAnyTeam(u, [
+      existing.teamId,
+      ...existing.memberships.map((m) => m.teamId),
+    ])
+  ) {
+    return NextResponse.json(
+      { error: "Agent existant hors de votre périmètre." },
+      { status: 403 }
+    );
+  }
 
   if (existing && !reactivateIfExists) {
     return NextResponse.json(

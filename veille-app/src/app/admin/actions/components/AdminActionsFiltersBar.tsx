@@ -17,6 +17,11 @@ type Props = {
   filters: AdminActionsFilters;
   teamsAvailable: { id: string; name: string }[];
   totalCount: number;
+  /**
+   * Lot 4B-4 — nombre d'actions LOGIQUES (groupes dédupliqués) sur le périmètre
+   * filtré. Compteur secondaire ; `totalCount` reste la référence primaire.
+   */
+  logicalCount: number;
 };
 
 const STATUS_OPTIONS: { value: AdminActionStatus; label: string }[] = [
@@ -37,6 +42,7 @@ export function AdminActionsFiltersBar({
   filters,
   teamsAvailable,
   totalCount,
+  logicalCount,
 }: Props) {
   const router = useRouter();
   const params = useSearchParams();
@@ -202,8 +208,18 @@ export function AdminActionsFiltersBar({
         )}
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
-            {totalCount.toLocaleString("fr-FR")} action
+            {totalCount.toLocaleString("fr-FR")} occurrence
             {totalCount > 1 ? "s" : ""}
+            {logicalCount < totalCount && (
+              <span
+                className="ml-2 text-slate-400 normal-case"
+                title="Nombre d'actions logiques (occurrences identiques regroupées) sur le périmètre filtré"
+              >
+                · {logicalCount.toLocaleString("fr-FR")} action
+                {logicalCount > 1 ? "s" : ""} logique
+                {logicalCount > 1 ? "s" : ""}
+              </span>
+            )}
           </span>
           {hasActiveFilters && (
             <button

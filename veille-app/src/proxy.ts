@@ -35,7 +35,7 @@ function isAdminPath(pathname: string): boolean {
   );
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Bypass PWA shell + Next assets.
@@ -63,7 +63,7 @@ export function proxy(request: NextRequest) {
   if (isPublic(pathname)) return NextResponse.next();
 
   const token = request.cookies.get(COOKIE_NAME)?.value;
-  const userId = decodeToken(token);
+  const userId = await decodeToken(token);
   if (!userId) return redirectToLogin(request, pathname);
 
   // Note : le rôle est revérifié côté handler. Ici on bloque seulement les
@@ -72,8 +72,13 @@ export function proxy(request: NextRequest) {
   // on ne peut pas requêter Prisma : on délègue la vérif fine côté handler.
 
   if (isAdminPath(pathname)) {
-    // On laisse passer ; le handler / layout fera un requireRole("ADMIN").
-    return NextResponse.next();
+    // On laisse passer ; le layout /admin fera la vérif de rôle. On forwarde
+    // le chemin courant en header de requête pour que le layout puisse ouvrir
+    // certaines pages aux USER (ex. /admin/actions, /admin/imports) sans
+    // requêter Prisma ici (Edge).
+    const reqHeaders = new Headers(request.headers);
+    reqHeaders.set("x-veille-path", pathname);
+    return NextResponse.next({ request: { headers: reqHeaders } });
   }
 
   const response = NextResponse.next();

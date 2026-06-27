@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { canActOnAnyTeam, canActOnTeam, requireRole } from "@/lib/auth";
 
 /**
  * Audit non bloquant des mutations d'équipes sur un site. Trace
@@ -67,8 +67,37 @@ export async function PATCH(
       { status: 400 }
     );
   }
-  const existing = await prisma.site.findUnique({ where: { id } });
+  const existing = await prisma.site.findUnique({
+    where: { id },
+    include: { memberships: { select: { teamId: true } } },
+  });
   if (!existing) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+
+  // Cloisonnement : l'acteur doit partager une équipe avec le site existant.
+  const existingTeams = [
+    existing.teamId,
+    ...existing.memberships.map((m) => m.teamId),
+  ];
+  if (!canActOnAnyTeam(actor, existingTeams)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
+  // …et toute équipe ajoutée/retirée doit appartenir à son périmètre (pas de
+  // rattachement/détachement d'une équipe tierce sur un site partagé).
+  if (parsed.data.teamIds) {
+    const wanted = new Set(parsed.data.teamIds);
+    const currentSet = new Set(existingTeams.filter((t): t is string => !!t));
+    const touched = [
+      ...parsed.data.teamIds.filter((t) => !currentSet.has(t)), // ajoutées
+      ...[...currentSet].filter((t) => !wanted.has(t)), // retirées
+    ];
+    const touchedOutOfScope = touched.filter((t) => !canActOnTeam(actor, t));
+    if (touchedOutOfScope.length > 0) {
+      return NextResponse.json(
+        { error: "Modification d'un rattachement d'équipe hors de votre périmètre." },
+        { status: 403 }
+      );
+    }
+  }
 
   // Règle métier : un site doit toujours appartenir à au moins une équipe.
   // Cohérent avec memory/business-rules.md §Sites et le scope multi-team.
@@ -155,16 +184,29 @@ export async function DELETE(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  let actor;
   try {
-    await requireRole("ADMIN");
+    actor = await requireRole("ADMIN");
   } catch (r) {
     return r as Response;
   }
   const { id } = await ctx.params;
   const url = new URL(req.url);
   const mode = url.searchParams.get("mode") ?? "soft";
-  const site = await prisma.site.findUnique({ where: { id } });
+  const site = await prisma.site.findUnique({
+    where: { id },
+    include: { memberships: { select: { teamId: true } } },
+  });
   if (!site) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+  // Cloisonnement : un ADMIN scopé ne supprime que les sites de son périmètre.
+  if (
+    !canActOnAnyTeam(actor, [
+      site.teamId,
+      ...site.memberships.map((m) => m.teamId),
+    ])
+  ) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
 
   if (mode === "soft") {
     await prisma.site.update({

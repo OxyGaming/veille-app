@@ -314,6 +314,29 @@ describe("getActionEcheances", () => {
     expect(items[0].title).toBe("Vérifier la porte"); // fallback comment
   });
 
+  it("action due PLUS TÔT aujourd'hui → À venir (today), PAS en retard (borne 00:00)", async () => {
+    // Régression : avec l'ancien floor instantané, une action due à 08:00 alors
+    // qu'il est 12:00 était classée « en retard » (-1). Avec la borne canonique
+    // « aujourd'hui 00:00 », elle reste « À venir » (today).
+    findManyAction.mockResolvedValue([
+      {
+        id: "a-today",
+        teamId: "tA",
+        agentId: "agA",
+        siteId: null,
+        keyPoint: "Échéance du jour",
+        comment: null,
+        dueAt: new Date("2026-06-14T08:00:00.000Z"), // même jour que NOW (12:00)
+        agent: { id: "agA", firstName: "Jean", lastName: "Dupont" },
+        site: null,
+      },
+    ]);
+    const items = await getActionEcheances(USER, NOW);
+    expect(items[0].daysToDue).toBe(0);
+    expect(items[0].urgency).toBe("today");
+    expect(items[0].isCritical).toBe(false);
+  });
+
   it("action à venir 20 j → later, non critique, CTA Ouvrir", async () => {
     findManyAction.mockResolvedValue([
       {
@@ -357,6 +380,51 @@ describe("getActionEcheances", () => {
     await getActionEcheances(USER, NOW, "s1");
     const arg = findManyAction.mock.calls[0][0];
     expect(arg.where.siteId).toBe("s1");
+  });
+
+  it("Lot 4B-2 : doublons (même agent+équipe+dedupHash) → 1 item, occurrenceCount=2", async () => {
+    findManyAction.mockResolvedValue([
+      {
+        id: "dup1",
+        teamId: "tA",
+        agentId: "agA",
+        siteId: null,
+        vehicleId: null,
+        dedupHash: "H",
+        keyPoint: "Refaire incendie",
+        comment: null,
+        dueAt: ago(10),
+        agent: { id: "agA", firstName: "Jean", lastName: "Dupont" },
+        site: null,
+      },
+      {
+        id: "dup2",
+        teamId: "tA",
+        agentId: "agA",
+        siteId: null,
+        vehicleId: null,
+        dedupHash: "H",
+        keyPoint: "Refaire incendie",
+        comment: null,
+        dueAt: ago(10),
+        agent: { id: "agA", firstName: "Jean", lastName: "Dupont" },
+        site: null,
+      },
+    ]);
+    const items = await getActionEcheances(USER, NOW);
+    expect(items).toHaveLength(1); // 1 action logique
+    expect(items[0].occurrenceCount).toBe(2);
+    expect(items[0].memberIds?.sort()).toEqual(["dup1", "dup2"]);
+  });
+
+  it("Lot 4B-2 : dedupHash différent → 2 items distincts (occurrenceCount=1)", async () => {
+    findManyAction.mockResolvedValue([
+      { id: "a", teamId: "tA", agentId: "agA", siteId: null, vehicleId: null, dedupHash: "H1", keyPoint: "X", comment: null, dueAt: ago(5), agent: { id: "agA", firstName: "J", lastName: "D" }, site: null },
+      { id: "b", teamId: "tA", agentId: "agA", siteId: null, vehicleId: null, dedupHash: "H2", keyPoint: "Y", comment: null, dueAt: ago(5), agent: { id: "agA", firstName: "J", lastName: "D" }, site: null },
+    ]);
+    const items = await getActionEcheances(USER, NOW);
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.occurrenceCount === 1)).toBe(true);
   });
 });
 

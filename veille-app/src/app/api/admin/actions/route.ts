@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { requireRole } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import {
   aggregateAdminActions,
   parseAdminActionsStatus,
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   let user;
   try {
-    user = await requireRole(["ADMIN"]);
+    user = await requireUser();
   } catch (r) {
     return r as Response;
   }

@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { canActOnTeam, requireRole, siteScope } from "@/lib/auth";
 
 export async function GET() {
+  let u;
   try {
-    await requireRole(["ADMIN", "EDITOR"]);
+    u = await requireRole(["ADMIN", "EDITOR"]);
   } catch (r) {
     return r as Response;
   }
+  // Cloisonnement : un EDITOR / ADMIN scopé ne voit que les sites de ses équipes.
   const sites = await prisma.site.findMany({
+    where: siteScope(u),
     orderBy: { name: "asc" },
     include: {
       memberships: { include: { team: true } },
@@ -70,8 +73,26 @@ export async function POST(req: Request) {
     );
   }
   const data = parsed.data;
+  // Cloisonnement : toutes les équipes rattachées au site doivent appartenir
+  // au périmètre de l'acteur (un EDITOR / ADMIN scopé ne crée pas un site dans
+  // une équipe tierce).
+  const outOfScope = data.teamIds.filter((t) => !canActOnTeam(u, t));
+  if (outOfScope.length > 0) {
+    return NextResponse.json(
+      { error: "Une ou plusieurs équipes cibles sont hors de votre périmètre." },
+      { status: 403 }
+    );
+  }
   // teamId principal = première équipe sélectionnée, sinon équipe de l'utilisateur.
   const primaryTeamId = data.teamIds[0] ?? u.teamId ?? null;
+  // Garde-fou : interdire la création d'un site sans aucune équipe pour un
+  // acteur non global (sinon il serait invisible et non géré).
+  if (!canActOnTeam(u, primaryTeamId)) {
+    return NextResponse.json(
+      { error: "Au moins une équipe de votre périmètre est requise." },
+      { status: 403 }
+    );
+  }
   const site = await prisma.site.create({
     data: {
       name: data.name,

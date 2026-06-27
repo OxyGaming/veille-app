@@ -7,6 +7,12 @@ import {
   getSessionUser,
   teamScope,
 } from "@/lib/auth";
+import {
+  actionEcheanceStateAt,
+  echeanceBounds,
+  isOverdue,
+  serializeEcheanceBounds,
+} from "@/lib/echeances/action-echeance";
 import AgentActionsClient from "./AgentActionsClient";
 import RecentValidations, {
   type ValidationEntry,
@@ -155,10 +161,11 @@ export default async function AgentPage({
     },
   });
 
-  // « Vu » / commentaires : TRANSVERSAUX (partagés entre équipes). On charge le
-  // nom de l'équipe uniquement pour afficher un badge d'origine.
+  // « Vu » (SIGHT) : TRANSVERSAL — simple trace de croisement terrain, partagée
+  // entre toutes les équipes de l'agent. « Note » (NOTE) : acte managérial,
+  // CLOISONNÉ par équipe. (Décision cloisonnement §5.)
   const sightings = await prisma.agentSighting.findMany({
-    where: { agentId: id },
+    where: { agentId: id, OR: [{ kind: "SIGHT" }, { ...teamScope(u) }] },
     orderBy: { sightedAt: "desc" },
     take: 30,
     include: {
@@ -168,9 +175,10 @@ export default async function AgentPage({
     },
   });
 
-  // Sessions de veille : TRANSVERSALES (partagées). Badge d'équipe informatif.
+  // Sessions de veille : CLOISONNÉES par équipe (évaluation formelle nominative,
+  // cf. décision §5). Badge d'équipe informatif.
   const sessions = await prisma.veilleSession.findMany({
-    where: { agentId: id },
+    where: { agentId: id, ...teamScope(u) },
     orderBy: { startedAt: "desc" },
     take: 20,
     include: {
@@ -179,13 +187,20 @@ export default async function AgentPage({
     },
   });
 
-  const today = new Date();
-  const sevenDays = new Date(today.getTime() + 7 * 24 * 3600 * 1000);
-  const lateCount = activeActions.filter(
-    (a) => a.dueAt && a.dueAt < today
+  // Référence temporelle UNIQUE (serveur, fuseau Europe/Paris) : on résout les
+  // bornes une seule fois et on les partage entre les compteurs (calculés ici)
+  // et les badges (calculés côté client avec ces MÊMES bornes). Aucun
+  // `new Date()` côté client pour la borne du jour.
+  const bounds = echeanceBounds(new Date());
+  const serializedBounds = serializeEcheanceBounds(bounds);
+  const lateCount = activeActions.filter((a) =>
+    isOverdue(actionEcheanceStateAt(a.dueAt, bounds)),
+  ).length;
+  const criticalCount = activeActions.filter(
+    (a) => actionEcheanceStateAt(a.dueAt, bounds) === "OVERDUE_CRITICAL",
   ).length;
   const soonCount = activeActions.filter(
-    (a) => a.dueAt && a.dueAt >= today && a.dueAt <= sevenDays
+    (a) => actionEcheanceStateAt(a.dueAt, bounds) === "DUE_SOON",
   ).length;
   const duplicateGroups = activeActions.filter((a) => a.duplicateCount > 1).length;
   const hiddenDuplicates = activeActions.reduce(
@@ -221,8 +236,17 @@ export default async function AgentPage({
         </div>
         <div className="grid grid-cols-3 gap-3 mt-5">
           <Stat label="Actions à traiter" value={activeActions.length} tone="default" />
-          <Stat label="En retard" value={lateCount} tone="warn" />
-          <Stat label="< 7 jours" value={soonCount} tone="info" />
+          <Stat
+            label="En retard"
+            value={lateCount}
+            tone="warn"
+            hint={
+              criticalCount > 0
+                ? `dont ${criticalCount} critique${criticalCount > 1 ? "s" : ""}`
+                : undefined
+            }
+          />
+          <Stat label="À venir" value={soonCount} tone="info" />
         </div>
         {(u.role === "ADMIN" || u.role === "EDITOR") && (
           <div className="mt-4 flex justify-end">
@@ -256,6 +280,7 @@ export default async function AgentPage({
           agentName={`${agent.firstName} ${agent.lastName}`}
           userRole={u.role}
           teams={creatableTeams}
+          echeanceBounds={serializedBounds}
           actions={activeActions.map((a) => ({
             id: a.id,
             externalId: a.externalId,
@@ -410,10 +435,12 @@ function Stat({
   label,
   value,
   tone,
+  hint,
 }: {
   label: string;
   value: number;
   tone: "default" | "warn" | "info";
+  hint?: string;
 }) {
   const cls =
     tone === "warn"
@@ -427,6 +454,7 @@ function Stat({
       <div className="text-[10px] uppercase tracking-wider mt-1.5 font-semibold">
         {label}
       </div>
+      {hint && <div className="text-[10px] mt-0.5 opacity-80">{hint}</div>}
     </div>
   );
 }

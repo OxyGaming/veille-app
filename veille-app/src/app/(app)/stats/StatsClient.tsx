@@ -69,6 +69,8 @@ type Activity = {
 type Actions = {
   overdue: {
     total: number;
+    /** Sous-ensemble en retard de plus de 7 jours (« critique »). */
+    critical: number;
     byAgent: { name: string; count: number }[];
     bySite: { name: string; count: number }[];
   };
@@ -670,17 +672,63 @@ function ActionsTab({ data }: { data: Actions | null }) {
     return <div className="text-sm text-slate-500 py-8 text-center">Chargement…</div>;
   return (
     <>
+      {/* ── INSTANTANÉ : état courant, indépendant de la période ── */}
+      <p className="text-[11px] font-mono uppercase tracking-wider text-slate-500 mb-2">
+        État courant · instantané · actions logiques (doublons regroupés)
+      </p>
       <section className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-5">
         <Tile
           label="Actions en retard"
           value={data.overdue.total}
           color="#F43F5E"
+          hint={
+            data.overdue.critical > 0
+              ? `dont ${data.overdue.critical} critique${data.overdue.critical > 1 ? "s" : ""} (> 7 j)`
+              : undefined
+          }
         />
         <Tile
-          label="Actions < 7 jours"
+          label="Actions à venir"
           value={data.soon.total}
           color="#F59E0B"
+          hint="échéance ≤ 7 j"
         />
+      </section>
+
+      <div className="grid gap-4 lg:grid-cols-2 mb-5">
+        <Card title="En retard : top agents">
+          <HorizontalBars data={data.overdue.byAgent} />
+        </Card>
+        <Card title="En retard : top sites">
+          <HorizontalBars data={data.overdue.bySite} />
+        </Card>
+      </div>
+
+      <div className="mb-5">
+        <Card title="Ancienneté des actions à traiter (instantané)">
+          <Histogram
+            data={data.actionsActiveAging.map((b, i) => ({
+              ...b,
+              color:
+                i === 0
+                  ? "#10B981"
+                  : i === 1
+                    ? "#06B6D4"
+                    : i === 2
+                      ? "#F59E0B"
+                      : i === 3
+                        ? "#F43F5E"
+                        : "#7F1D1D",
+            }))}
+          />
+        </Card>
+      </div>
+
+      {/* ── SUR LA PÉRIODE sélectionnée (from/to) ── */}
+      <p className="text-[11px] font-mono uppercase tracking-wider text-slate-500 mb-2">
+        Sur la période sélectionnée · occurrences (événements unitaires)
+      </p>
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-5">
         <Tile
           label="Écart moy. / échéance"
           value={data.validationDelay.avgDays ?? 0}
@@ -698,33 +746,7 @@ function ActionsTab({ data }: { data: Actions | null }) {
       </section>
 
       <div className="grid gap-4 lg:grid-cols-2 mb-5">
-        <Card title="En retard : top agents">
-          <HorizontalBars data={data.overdue.byAgent} />
-        </Card>
-        <Card title="En retard : top sites">
-          <HorizontalBars data={data.overdue.bySite} />
-        </Card>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2 mb-5">
-        <Card title="Aging des actions actives">
-          <Histogram
-            data={data.actionsActiveAging.map((b, i) => ({
-              ...b,
-              color:
-                i === 0
-                  ? "#10B981"
-                  : i === 1
-                  ? "#06B6D4"
-                  : i === 2
-                  ? "#F59E0B"
-                  : i === 3
-                  ? "#F43F5E"
-                  : "#7F1D1D",
-            }))}
-          />
-        </Card>
-        <Card title="Statut sync des photos">
+        <Card title="Statut sync des photos" subtitle="photos créées sur la période">
           <Donut
             data={[
               {

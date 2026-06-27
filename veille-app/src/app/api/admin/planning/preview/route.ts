@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireRole } from "@/lib/auth";
+import { canActOnTeam, effectiveTeamIds, requireRole } from "@/lib/auth";
 import { previewPlanningImport } from "@/lib/planning/import";
 
 /**
@@ -29,8 +29,9 @@ const PREVIEW_UNKNOWN_LIMIT = 50;
 const PREVIEW_ERROR_LIMIT = 50;
 
 export async function POST(req: Request) {
+  let u;
   try {
-    await requireRole(["ADMIN"]);
+    u = await requireRole(["ADMIN", "EDITOR"]);
   } catch (r) {
     return r as Response;
   }
@@ -42,6 +43,30 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: "Requête invalide (multipart attendu)." },
       { status: 400 },
+    );
+  }
+
+  // Équipe cible : la preview scope la résolution des matricules à cette équipe.
+  const eff = effectiveTeamIds(u);
+  const requestedTeamId = form.get("teamId");
+  let teamId =
+    typeof requestedTeamId === "string" && requestedTeamId
+      ? requestedTeamId
+      : null;
+  if (!teamId) {
+    if (eff !== null && eff.length === 1) {
+      teamId = eff[0];
+    } else {
+      return NextResponse.json(
+        { error: "Sélectionnez l'équipe cible.", code: "TEAM_REQUIRED" },
+        { status: 400 },
+      );
+    }
+  }
+  if (!canActOnTeam(u, teamId)) {
+    return NextResponse.json(
+      { error: "Équipe cible hors de votre périmètre." },
+      { status: 403 },
     );
   }
 
@@ -67,7 +92,7 @@ export async function POST(req: Request) {
   const buffer = Buffer.from(await file.arrayBuffer());
 
   try {
-    const preview = await previewPlanningImport(buffer);
+    const preview = await previewPlanningImport(buffer, teamId);
     return NextResponse.json({
       fileName,
       fileSizeBytes: file.size,

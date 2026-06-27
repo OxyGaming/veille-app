@@ -13,10 +13,10 @@ const URGENCY_OPTIONS: { value: EcheanceUrgency | "critical"; label: string }[] 
   [
     { value: "critical", label: "Critiques" },
     { value: "late", label: "En retard" },
-    { value: "today", label: "Aujourd'hui" },
-    { value: "soon", label: "< 7 j" },
-    { value: "later", label: "< 30 j" },
-    { value: "future", label: "Plus tard" },
+    { value: "today", label: "À venir (auj.)" },
+    { value: "soon", label: "À venir (≤ 7 j)" },
+    { value: "later", label: "Planifiée (≤ 30 j)" },
+    { value: "future", label: "Planifiée (> 30 j)" },
   ];
 
 const TYPE_OPTIONS: { value: EcheanceKind; label: string }[] = [

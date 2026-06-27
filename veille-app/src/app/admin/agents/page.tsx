@@ -1,11 +1,20 @@
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { agentScope, effectiveTeamIds, getSessionUser } from "@/lib/auth";
 import AgentsAdminClient from "./AgentsAdminClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function AgentsAdminPage() {
+  const u = await getSessionUser();
+  if (!u) redirect("/login");
+  if (u.role !== "ADMIN" && u.role !== "EDITOR") redirect("/procedures");
+  // Cloisonnement : un EDITOR / ADMIN scopé ne voit que les agents et les
+  // équipes de son périmètre (effectiveTeamIds null = global).
+  const scopeIds = effectiveTeamIds(u);
   const [agents, teams] = await Promise.all([
     prisma.agent.findMany({
+      where: agentScope(u),
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       include: {
         memberships: { include: { team: true } },
@@ -17,7 +26,10 @@ export default async function AgentsAdminPage() {
         },
       },
     }),
-    prisma.team.findMany({ orderBy: { name: "asc" } }),
+    prisma.team.findMany({
+      where: scopeIds === null ? {} : { id: { in: scopeIds } },
+      orderBy: { name: "asc" },
+    }),
   ]);
   return (
     <AgentsAdminClient

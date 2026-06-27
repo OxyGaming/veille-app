@@ -155,6 +155,8 @@ model Team {
   rcis             Rci[]
   vehicles         Vehicle[]
   vehicleRounds    VehicleRound[]
+  planningImports  PlanningImport[]
+  planningShifts   PlanningShift[]
 }
 
 // ─── Référentiel métier (commun à toutes les équipes) ─────────────────────────
@@ -982,6 +984,13 @@ model ImportedAction {
   /// `actionScope + localStatus=ACTIVE + dueAt<now` (dashboard
   /// pilotage KPI actions en retard, Hub Échéances).
   @@index([localStatus, dueAt])
+  /// Index composite Lot 4B-4bis — expansion serveur des groupes logiques
+  /// (`expandActiveSiblingIds`, cf. src/lib/actions/group-expansion.ts) :
+  /// recherche `teamId IN … + dedupHash IN … + localStatus = "ACTIVE"`.
+  /// teamId en tête (cloisonnement universel), dedupHash = discriminant du
+  /// groupe, localStatus complète le filtre. L'index `[agentId, dedupHash]`
+  /// existant ne couvre PAS cette requête (clé team-based, pas agent-based).
+  @@index([teamId, dedupHash, localStatus])
 }
 
 /// Historique d'un import Excel.
@@ -1202,6 +1211,11 @@ model Notification {
 ///    `AgentTeam` (memberships Veille existants), pas sur les UCH du fichier.
 model PlanningImport {
   id                String    @id @default(cuid())
+  /// Équipe propriétaire du planning importé. Chaque équipe importe et écrase
+  /// son propre planning indépendamment (cf. memory/planning-import-rules.md).
+  /// Nullable transitoire : les imports antérieurs à la migration teamId n'en
+  /// ont pas — ils seront remplacés au prochain import de leur équipe.
+  teamId            String?
   importedById      String?
   fileName          String?
   /// Période couverte par le fichier (min/max DATE DEBUT des lignes SERVICE).
@@ -1227,17 +1241,24 @@ model PlanningImport {
   createdAt         DateTime  @default(now())
 
   importedBy User?           @relation(fields: [importedById], references: [id], onDelete: SetNull)
+  team       Team?           @relation(fields: [teamId], references: [id], onDelete: Cascade)
   shifts     PlanningShift[]
 
+  @@index([teamId])
   @@index([createdAt])
 }
 
 /// Un créneau de service d'un agent (SERVICE uniquement en V1).
 ///
-/// Le scope d'affichage utilise `AgentTeam` côté requête ; pas de FK Team ici.
+/// Le scope d'affichage croise l'équipe propriétaire (`teamId`) ET `AgentTeam`.
+/// Chaque équipe importe son propre planning ; un shift est rattaché à l'équipe
+/// qui l'a importé.
 model PlanningShift {
   id        String   @id @default(cuid())
   importId  String
+  /// Équipe propriétaire (= équipe de l'import). Nullable transitoire (cf.
+  /// PlanningImport.teamId).
+  teamId    String?
   agentId   String
   /// Borne basse — DATE DEBUT + HEURE DEBUT, fuseau Europe/Paris.
   startsAt  DateTime
@@ -1252,12 +1273,14 @@ model PlanningShift {
 
   import PlanningImport @relation(fields: [importId], references: [id], onDelete: Cascade)
   agent  Agent          @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  team   Team?          @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   /// "Quels shifts pour cet agent ?" — fiche agent / wizard veille.
   @@index([agentId, startsAt])
   /// Écran Today : `startsAt < demain` ET `endsAt > maintenant`.
   @@index([startsAt, endsAt])
   @@index([importId])
+  @@index([teamId])
 }
 
 // ─── Push notifications (Sprint Push V1) ─────────────────────────────────────

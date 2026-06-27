@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { actionScope, requireRole, requireUser } from "@/lib/auth";
+import { requireUser, teamScope } from "@/lib/auth";
 import { obsoleteAction } from "@/lib/action-obsolete";
 
 const patchSchema = z.object({
@@ -20,13 +20,17 @@ export async function PATCH(
 ) {
   let u;
   try {
-    u = await requireRole(["ADMIN", "EDITOR"]);
+    // Édition d'action ouverte à tout utilisateur authentifié (gestion des
+    // actions back-office) ; cloisonnement strict via teamScope ci-dessous.
+    u = await requireUser();
   } catch (r) {
     return r as Response;
   }
   const { id } = await ctx.params;
+  // Cloisonnement STRICT : seule l'équipe propriétaire de l'action peut la
+  // modifier (teamScope, pas actionScope — pas de mutation via agent/site partagé).
   const a = await prisma.importedAction.findFirst({
-    where: { id, ...actionScope(u) },
+    where: { id, ...teamScope(u) },
     select: { id: true },
   });
   if (!a) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
@@ -74,18 +78,18 @@ export async function DELETE(
 ) {
   let u;
   try {
+    // Suppression d'action ouverte à tout utilisateur authentifié ;
+    // cloisonnement strict via teamScope sur le findFirst ci-dessous.
     u = await requireUser();
   } catch (r) {
     return r as Response;
   }
-  if (u.role !== "ADMIN" && u.role !== "EDITOR") {
-    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
-  }
   const { id } = await ctx.params;
   const url = new URL(req.url);
   const mode = url.searchParams.get("mode") ?? "soft";
+  // Cloisonnement STRICT : suppression réservée à l'équipe propriétaire.
   const a = await prisma.importedAction.findFirst({
-    where: { id, ...actionScope(u) },
+    where: { id, ...teamScope(u) },
     select: { id: true, keyPoint: true },
   });
   if (!a) return NextResponse.json({ error: "Inconnu" }, { status: 404 });

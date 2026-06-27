@@ -1,31 +1,41 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { getSessionUser } from "@/lib/auth";
 import { Icon } from "@/components/icons";
+
+type Role = "ADMIN" | "EDITOR" | "USER";
 
 type Section = {
   href: string;
   label: string;
   icon: (typeof Icon)[keyof typeof Icon];
   /** Si défini, lien visible uniquement pour ces rôles. */
-  roles?: ("ADMIN" | "EDITOR")[];
+  roles?: Role[];
 };
 
+/**
+ * Pages du back-office ouvertes aux USER (gestion des actions : création,
+ * remplacement, suppression/obsolescence). Toutes les autres pages /admin
+ * restent réservées ADMIN/EDITOR. Le cloisonnement par équipe s'applique.
+ */
+const USER_ALLOWED_PATHS = ["/admin/actions", "/admin/imports"];
+
 const SECTIONS: Section[] = [
-  { href: "/admin", label: "Tableau de bord", icon: Icon.Home },
-  { href: "/admin/procedures", label: "Procédures", icon: Icon.ClipboardCheck },
+  { href: "/admin", label: "Tableau de bord", icon: Icon.Home, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/procedures", label: "Procédures", icon: Icon.ClipboardCheck, roles: ["ADMIN", "EDITOR"] },
   { href: "/admin/imports", label: "Imports actions", icon: Icon.Upload },
-  { href: "/admin/planning", label: "Planning agents", icon: Icon.Calendar, roles: ["ADMIN"] },
-  { href: "/admin/actions", label: "Actions (obsolescence)", icon: Icon.Trash, roles: ["ADMIN"] },
-  { href: "/admin/teams", label: "Équipes", icon: Icon.Building },
-  { href: "/admin/users", label: "Utilisateurs", icon: Icon.Users },
-  { href: "/admin/agents", label: "Agents", icon: Icon.User },
-  { href: "/admin/sites", label: "Sites", icon: Icon.Building },
-  { href: "/admin/vehicles", label: "Véhicules", icon: Icon.Truck },
-  { href: "/admin/vehicle-round-templates", label: "Grille tournée VS", icon: Icon.FileEdit },
-  { href: "/admin/visit-templates", label: "Modèles de visite", icon: Icon.FileText },
-  { href: "/admin/links", label: "Liens utiles", icon: Icon.Link },
-  { href: "/admin/contacts", label: "Contacts", icon: Icon.Phone },
+  { href: "/admin/planning", label: "Planning agents", icon: Icon.Calendar, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/actions", label: "Actions (obsolescence)", icon: Icon.Trash },
+  { href: "/admin/teams", label: "Équipes", icon: Icon.Building, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/users", label: "Utilisateurs", icon: Icon.Users, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/agents", label: "Agents", icon: Icon.User, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/sites", label: "Sites", icon: Icon.Building, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/vehicles", label: "Véhicules", icon: Icon.Truck, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/vehicle-round-templates", label: "Grille tournée VS", icon: Icon.FileEdit, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/visit-templates", label: "Modèles de visite", icon: Icon.FileText, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/links", label: "Liens utiles", icon: Icon.Link, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/contacts", label: "Contacts", icon: Icon.Phone, roles: ["ADMIN", "EDITOR"] },
   { href: "/admin/audit", label: "Audit", icon: Icon.Shield, roles: ["ADMIN"] },
 ];
 
@@ -36,7 +46,15 @@ export default async function AdminLayout({
 }) {
   const u = await getSessionUser();
   if (!u) redirect("/login");
-  if (u.role !== "ADMIN" && u.role !== "EDITOR") redirect("/procedures");
+  // USER : accès limité aux pages back-office "actions" (cf. USER_ALLOWED_PATHS).
+  // ADMIN/EDITOR : accès complet. Le chemin courant est fourni par le proxy.
+  const path = (await headers()).get("x-veille-path") ?? "";
+  const isUserAllowedPath = USER_ALLOWED_PATHS.some(
+    (p) => path === p || path.startsWith(p + "/"),
+  );
+  if (u.role !== "ADMIN" && u.role !== "EDITOR" && !isUserAllowedPath) {
+    redirect("/procedures");
+  }
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-slate-50">
       <aside className="lg:w-64 bg-slate-900 text-slate-100 lg:min-h-screen lg:sticky lg:top-0">
@@ -61,7 +79,7 @@ export default async function AdminLayout({
         </div>
         <nav className="p-3 grid grid-cols-2 lg:block gap-1">
           {SECTIONS.filter(
-            (s) => !s.roles || s.roles.includes(u.role as "ADMIN" | "EDITOR"),
+            (s) => !s.roles || s.roles.includes(u.role as Role),
           ).map((s) => (
             <Link
               key={s.href}

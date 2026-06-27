@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createHash, randomUUID } from "crypto";
 import { addMonths } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { effectiveTeamIds, requireRole } from "@/lib/auth";
+import { effectiveTeamIds, requireUser } from "@/lib/auth";
 import { encodeTags, normalizeTag } from "@/lib/tags";
 
 /**
@@ -29,7 +29,9 @@ const schema = z.object({
 export async function POST(req: Request) {
   let u;
   try {
-    u = await requireRole(["ADMIN", "EDITOR"]);
+    // Création d'action ouverte à tout utilisateur authentifié ; cloisonnement
+    // assuré par la validation effectiveTeamIds du teamId cible ci-dessous.
+    u = await requireUser();
   } catch (r) {
     return r as Response;
   }

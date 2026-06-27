@@ -62,6 +62,14 @@ export type RecordActivityInput = {
   /** URL cible au clic. À calculer via `defaultTargetUrlFor` si besoin. */
   targetUrl?: string | null;
   metadata?: Record<string, unknown>;
+  /**
+   * Émettre la notification générique `TEAM_HISTORY_ADDED` ? Défaut `true`.
+   * Passer `false` quand le call-site déclenche DÉJÀ une notification dédiée
+   * et plus riche pour le même événement (action assignée/validée, visite
+   * terminée) — règle « une notification par événement métier ». La ligne de
+   * flux d'activité (TeamActivity) reste écrite dans tous les cas.
+   */
+  notify?: boolean;
 };
 
 /**
@@ -102,21 +110,26 @@ export async function recordActivity(
   // C9.1 — on transmet `input.message` (déjà composé via defaultMessageFor)
   // comme `detailMessage` pour que le destinataire voie le contexte
   // métier dans sa notif (ex. « Marie a terminé une visite — POS-LYON. »).
-  notifyTeamHistoryAdded({
-    teamIds,
-    entityType: input.entityType,
-    entityId: input.entityId,
-    actorId: input.actorId ?? null,
-    targetUrl: input.targetUrl ?? null,
-    detailMessage: input.message,
-  }).catch((e) => {
-    log.error("activityFeed.notify.team-history.failed", {
-      type: input.type,
+  //
+  // Règle « une notif par événement » : si le call-site a déjà émis une
+  // notification dédiée (notify=false), on n'ajoute PAS TEAM_HISTORY_ADDED.
+  if (input.notify !== false) {
+    notifyTeamHistoryAdded({
+      teamIds,
       entityType: input.entityType,
       entityId: input.entityId,
-      err: e instanceof Error ? e.message : String(e),
+      actorId: input.actorId ?? null,
+      targetUrl: input.targetUrl ?? null,
+      detailMessage: input.message,
+    }).catch((e) => {
+      log.error("activityFeed.notify.team-history.failed", {
+        type: input.type,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        err: e instanceof Error ? e.message : String(e),
+      });
     });
-  });
+  }
 
   return res.count;
 }

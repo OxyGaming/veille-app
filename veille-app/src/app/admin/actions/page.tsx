@@ -6,7 +6,7 @@
  */
 
 import { redirect } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { getSessionUser } from "@/lib/auth";
 import {
   aggregateAdminActions,
   parseAdminActionsStatus,
@@ -45,12 +45,10 @@ export default async function AdminActionsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  let user;
-  try {
-    user = await requireRole(["ADMIN"]);
-  } catch {
-    redirect("/today");
-  }
+  // Gestion des actions ouverte à tout utilisateur authentifié ; le cloisonnement
+  // par équipe est appliqué par l'agrégateur (teamScope) et les routes de mutation.
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
   const raw = await searchParams;
   const filters = parseFilters(raw);
   const cursor = pickString(raw.cursor);
@@ -72,6 +70,7 @@ export default async function AdminActionsPage({
         filters={filters}
         teamsAvailable={payload.teamsAvailable}
         totalCount={payload.total}
+        logicalCount={payload.logicalTotal}
       />
       <AdminActionsTable
         initialItems={payload.items}

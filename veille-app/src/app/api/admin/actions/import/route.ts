@@ -108,13 +108,47 @@ export async function POST(req: Request) {
         .filter((m): m is string => !!m)
     ),
   ];
+  // Cloisonnement (Priorité 3) : le lookup matricule est global (matricule =
+  // clé unique), mais on ne LIE une action qu'à un agent appartenant à l'équipe
+  // cible. On charge donc l'appartenance pour décider :
+  //  - agent déjà dans l'équipe cible (AgentTeam ou teamId legacy) → liable ;
+  //  - agent orphelin (aucune équipe) → adopté dans l'équipe cible (AgentTeam) ;
+  //  - agent appartenant à une AUTRE équipe → JAMAIS lié ni modifié (compté).
   const existingAgents = await prisma.agent.findMany({
     where: { matricule: { in: matricules } },
-    select: { id: true, matricule: true, teamId: true },
+    select: {
+      id: true,
+      matricule: true,
+      teamId: true,
+      memberships: { select: { teamId: true } },
+    },
   });
-  const agentByMat = new Map(existingAgents.map((a) => [a.matricule, a]));
+  // agentByMat : matricule → { id, inTeam } ; inTeam=false ⇒ agent d'une autre
+  // équipe, l'action sera créée sans agentId (rattachée à l'équipe cible seule).
+  const agentByMat = new Map<string, { id: string; inTeam: boolean }>();
+  const orphansToAdopt: string[] = [];
+  for (const a of existingAgents) {
+    const memTeams = a.memberships.map((m) => m.teamId);
+    const inTarget = a.teamId === teamId || memTeams.includes(teamId);
+    const isOrphan = !a.teamId && memTeams.length === 0;
+    if (inTarget) {
+      agentByMat.set(a.matricule, { id: a.id, inTeam: true });
+    } else if (isOrphan) {
+      orphansToAdopt.push(a.id);
+      agentByMat.set(a.matricule, { id: a.id, inTeam: true });
+    } else {
+      // Agent d'une autre équipe : on ne le lie pas et on ne le modifie pas.
+      agentByMat.set(a.matricule, { id: a.id, inTeam: false });
+    }
+  }
+  // Adoption des orphelins (rattachement additif à l'équipe cible uniquement).
+  if (orphansToAdopt.length) {
+    await prisma.agentTeam.createMany({
+      data: orphansToAdopt.map((agentId) => ({ agentId, teamId })),
+    });
+  }
 
-  // Agents nouveaux à créer.
+  // Agents nouveaux à créer (matricule inconnu en base).
   const newAgents: {
     matricule: string;
     firstName: string;
@@ -142,17 +176,16 @@ export async function POST(req: Request) {
     await prisma.agent.createMany({ data: newAgents });
     const refetched = await prisma.agent.findMany({
       where: { matricule: { in: newAgents.map((a) => a.matricule) } },
-      select: { id: true, matricule: true, teamId: true },
+      select: { id: true, matricule: true },
     });
-    for (const a of refetched) agentByMat.set(a.matricule, a);
-  }
-  // Mettre à jour les agents existants sans teamId.
-  const agentsToFix = existingAgents.filter((a) => !a.teamId);
-  if (agentsToFix.length) {
-    await prisma.agent.updateMany({
-      where: { id: { in: agentsToFix.map((a) => a.id) } },
-      data: { teamId },
+    // Rattachement AgentTeam à l'équipe cible — le scope effectif passe par
+    // AgentTeam (sans ça les agents importés seraient invisibles via agentScope).
+    await prisma.agentTeam.createMany({
+      data: refetched.map((a) => ({ agentId: a.id, teamId })),
     });
+    for (const a of refetched) {
+      agentByMat.set(a.matricule, { id: a.id, inTeam: true });
+    }
   }
 
   // 2. Création de l'enregistrement d'import (sera mis à jour à la fin).
@@ -184,9 +217,17 @@ export async function POST(req: Request) {
   const toCreate: ParsedActionRow[] = [];
   const toUpdate: { row: ParsedActionRow; existing: typeof existingActions[number] }[] = [];
   let unknownAgents = 0;
+  // Compteur des lignes dont le matricule pointe un agent d'une AUTRE équipe :
+  // l'action est créée dans l'équipe cible mais SANS agentId (cloisonnement).
+  let crossTeamAgents = 0;
   // dedupKey via agentId (résolu via agentByMat) pour matcher l'index BDD.
-  const resolveAgentId = (r: ParsedActionRow): string | null =>
-    r.parsedAgent ? agentByMat.get(r.parsedAgent.matricule)?.id ?? null : null;
+  // Un agent hors équipe cible (inTeam=false) n'est jamais lié → agentId null.
+  const resolveAgentId = (r: ParsedActionRow): string | null => {
+    const pa = r.parsedAgent;
+    if (!pa) return null;
+    const a = agentByMat.get(pa.matricule);
+    return a && a.inTeam ? a.id : null;
+  };
   const dedupKey = (r: ParsedActionRow) =>
     `${r.externalId}|${resolveAgentId(r) ?? "__none__"}`;
   // seenKeys = ensemble des (externalId|agentId) vus dans ce fichier.
@@ -198,6 +239,11 @@ export async function POST(req: Request) {
 
     if (!row.parsedAgent && row.observedElement) {
       unknownAgents++;
+    }
+    // Matricule connu mais agent d'une autre équipe → non lié (compté).
+    if (row.parsedAgent) {
+      const a = agentByMat.get(row.parsedAgent.matricule);
+      if (a && !a.inTeam) crossTeamAgents++;
     }
 
     const existing = existingByKey.get(dedupKey(row));
@@ -230,7 +276,7 @@ export async function POST(req: Request) {
       data: slice.map((r) => ({
         externalId: r.externalId,
         teamId,
-        agentId: r.parsedAgent ? agentByMat.get(r.parsedAgent.matricule)?.id ?? null : null,
+        agentId: resolveAgentId(r),
         localStatus: r.realizedAt != null ? "OBSOLETE" : "ACTIVE",
         dedupHash: dedupHashFor(r),
         originalStatus: r.originalStatus,
@@ -274,9 +320,7 @@ export async function POST(req: Request) {
             : isDone
             ? "OBSOLETE"
             : "ACTIVE";
-        const agentId = row.parsedAgent
-          ? agentByMat.get(row.parsedAgent.matricule)?.id ?? null
-          : null;
+        const agentId = resolveAgentId(row);
         return prisma.importedAction.update({
           where: { id: existing.id },
           data: {
@@ -350,7 +394,12 @@ export async function POST(req: Request) {
       rowsErrored: 0,
       agentsCreated: newAgents.length,
       unknownAgents,
-      summary: JSON.stringify({ elapsedMs: elapsed, uniqueRows: uniqueRows.length }),
+      summary: JSON.stringify({
+        elapsedMs: elapsed,
+        uniqueRows: uniqueRows.length,
+        crossTeamAgents,
+        orphansAdopted: orphansToAdopt.length,
+      }),
     },
   });
 
@@ -363,6 +412,7 @@ export async function POST(req: Request) {
     obsoleted,
     agentsCreated: newAgents.length,
     unknownAgents,
+    crossTeamAgents,
     elapsedMs: elapsed,
   });
 }

@@ -22,7 +22,14 @@ import { log } from "@/lib/logger";
 import { isCriticalEcheance } from "./criticality";
 import { ctaForEcheance } from "./cta";
 import { classifyEcheanceUrgency } from "./urgency";
-import type { EcheanceItem } from "./types";
+import {
+  actionEcheanceStateAt,
+  echeanceBounds,
+  isOverdue,
+} from "./action-echeance";
+import { dedupActions } from "@/lib/actions/dedup";
+import type { EcheanceItem, EcheanceUrgency } from "./types";
+import { differenceInCalendarDays } from "date-fns";
 import { vehicleTypeLabel } from "@/lib/vehicle-types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -149,9 +156,24 @@ function buildActionEcheance(
     } | null;
   },
   now: Date,
+  meta: { occurrenceCount: number; memberIds: string[] } = {
+    occurrenceCount: 1,
+    memberIds: [],
+  },
 ): EcheanceItem {
-  const daysToDue = diffDaysFloor(row.dueAt, now);
-  const urgency = classifyEcheanceUrgency(daysToDue);
+  // Classification CANONIQUE des actions (cf. lib/echeances/action-echeance.ts
+  // + docs/NOMENCLATURE-ECHEANCES.md) :
+  //  - « En retard »          : dueAt < aujourd'hui 00:00  → urgence `late` ;
+  //  - « En retard critique » : dueAt < aujourd'hui − 7 j  → `isCritical` ;
+  //  - sinon, granularité « aujourd'hui / ≤7 j / ≤30 j / au-delà » via les
+  //    jours CALENDAIRES (et non un floor instantané qui classait à tort une
+  //    action due plus tôt aujourd'hui comme « en retard »).
+  const state = actionEcheanceStateAt(row.dueAt, echeanceBounds(now));
+  const daysToDue = differenceInCalendarDays(row.dueAt, now);
+  const urgency: EcheanceUrgency = isOverdue(state)
+    ? "late"
+    : classifyEcheanceUrgency(daysToDue);
+  const isCritical = state === "OVERDUE_CRITICAL";
   const agentName =
     row.agent && (row.agent.firstName || row.agent.lastName)
       ? `${row.agent.lastName ?? ""} ${row.agent.firstName ?? ""}`.trim()
@@ -176,7 +198,9 @@ function buildActionEcheance(
     dueAt: row.dueAt,
     daysToDue,
     urgency,
-    isCritical: isCriticalEcheance({ kind: "ACTION_OVERDUE", daysToDue }),
+    isCritical,
+    occurrenceCount: meta.occurrenceCount,
+    memberIds: meta.memberIds.length ? meta.memberIds : [row.id],
     context: {
       siteId: row.site?.id,
       siteName: row.site?.name,
@@ -341,6 +365,8 @@ export async function getActionEcheances(
       teamId: true,
       agentId: true,
       siteId: true,
+      vehicleId: true,
+      dedupHash: true,
       keyPoint: true,
       comment: true,
       dueAt: true,
@@ -360,9 +386,22 @@ export async function getActionEcheances(
     log.warn("echeances.actions.truncated", { limit: ACTION_MAX });
   }
 
-  return rows
-    .filter((r): r is typeof r & { dueAt: Date } => !!r.dueAt)
-    .map((r) => buildActionEcheance(r, now));
+  // Lot 4B-2 — dédoublonnage : un item par action LOGIQUE (groupe). Les KPIs et
+  // la liste comptent donc des actions logiques, plus des occurrences. La cible
+  // étant déjà ACTIVE + dueAt non null, l'item est construit depuis le
+  // représentant (échéance la plus proche). Navigation/CTA inchangés.
+  const withDue = rows.filter(
+    (r): r is typeof r & { dueAt: Date } => !!r.dueAt,
+  );
+  const groups = dedupActions(
+    withDue.map((r) => ({ ...r, localStatus: "ACTIVE" as const })),
+  );
+  return groups.map((g) =>
+    buildActionEcheance(g.representative, now, {
+      occurrenceCount: g.occurrenceCount,
+      memberIds: g.memberIds,
+    }),
+  );
 }
 
 function buildVehicleRoundEcheance(

@@ -66,6 +66,14 @@ export function EcheanceRow({ item }: Props) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-slate-900 truncate">
             {item.title}
+            {item.occurrenceCount && item.occurrenceCount > 1 && (
+              <span
+                className="ml-1.5 align-middle text-[10px] font-mono font-semibold px-1 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200"
+                title={`${item.occurrenceCount} occurrences regroupées`}
+              >
+                ×{item.occurrenceCount}
+              </span>
+            )}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500 truncate">
             {metaParts.join(" · ")}

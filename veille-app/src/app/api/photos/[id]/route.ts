@@ -2,8 +2,44 @@ import { NextResponse } from "next/server";
 import { unlink } from "fs/promises";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { assertTeamAccess, requireUser } from "@/lib/auth";
 import { resolvePhotoFilePath } from "@/lib/photoStorage";
+
+/** Inclusions pour résoudre l'équipe propriétaire d'une photo via son parent. */
+const PHOTO_TEAM_INCLUDE = {
+  session: { select: { teamId: true } },
+  observation: {
+    select: {
+      procedureObservation: {
+        select: { session: { select: { teamId: true } } },
+      },
+    },
+  },
+  agentSighting: { select: { teamId: true } },
+  siteSighting: { select: { teamId: true } },
+  rci: { select: { teamId: true } },
+} as const;
+
+type PhotoWithTeam = {
+  session: { teamId: string } | null;
+  observation: {
+    procedureObservation: { session: { teamId: string } };
+  } | null;
+  agentSighting: { teamId: string } | null;
+  siteSighting: { teamId: string } | null;
+  rci: { teamId: string } | null;
+};
+
+function photoTeamId(p: PhotoWithTeam): string | null {
+  return (
+    p.session?.teamId ??
+    p.observation?.procedureObservation.session.teamId ??
+    p.agentSighting?.teamId ??
+    p.siteSighting?.teamId ??
+    p.rci?.teamId ??
+    null
+  );
+}
 
 const patchSchema = z.object({
   legend: z.string().nullable().optional(),
@@ -21,9 +57,17 @@ export async function PATCH(
     return r as Response;
   }
   const { id } = await ctx.params;
-  const photo = await prisma.photo.findUnique({ where: { id } });
+  const photo = await prisma.photo.findUnique({
+    where: { id },
+    include: PHOTO_TEAM_INCLUDE,
+  });
   if (!photo) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
-  // Seul l'uploader ou un admin peut modifier.
+  // Cloisonnement : la photo doit appartenir au périmètre de l'utilisateur…
+  const teamId = photoTeamId(photo);
+  if (!teamId || !assertTeamAccess(u, teamId)) {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+  // …et seul l'uploader ou un admin peut la modifier.
   if (photo.uploaderId !== u.id && u.role !== "ADMIN") {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   }
@@ -67,8 +111,17 @@ export async function DELETE(
     return r as Response;
   }
   const { id } = await ctx.params;
-  const photo = await prisma.photo.findUnique({ where: { id } });
+  const photo = await prisma.photo.findUnique({
+    where: { id },
+    include: PHOTO_TEAM_INCLUDE,
+  });
   if (!photo) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+  // Cloisonnement : la photo doit appartenir au périmètre de l'utilisateur…
+  const teamId = photoTeamId(photo);
+  if (!teamId || !assertTeamAccess(u, teamId)) {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+  // …et seul l'uploader ou un admin peut la supprimer.
   if (photo.uploaderId !== u.id && u.role !== "ADMIN") {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   }

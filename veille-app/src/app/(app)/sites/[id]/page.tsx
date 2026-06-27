@@ -1,7 +1,14 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser, siteScope } from "@/lib/auth";
+import { getSessionUser, siteScope, teamScope } from "@/lib/auth";
+import {
+  actionEcheanceStateAt,
+  echeanceBounds,
+  isOverdue,
+  serializeEcheanceBounds,
+} from "@/lib/echeances/action-echeance";
+import { dedupActions } from "@/lib/actions/dedup";
 import AgentActionsClient from "@/app/(app)/agents/[id]/AgentActionsClient";
 import SiteEquipmentsClient from "./SiteEquipmentsClient";
 import { SiteEcheancesSection } from "./components/SiteEcheancesSection";
@@ -35,8 +42,13 @@ export default async function SitePage({
   });
   if (!site) notFound();
 
+  // Cloisonnement (cohérent avec la fiche agent + la section Échéances du site) :
+  //  - actions / validations : STRICT par teamScope (équipe propriétaire) ;
+  //  - sightings : « Vu » (SIGHT) transversal, « Note » cloisonnée ;
+  //  - visites : lisibles par toutes les équipes du site (décision §2 visites
+  //    de site partagé — la cadence est au niveau site) → filtre par siteId seul.
   const activeRaw = await prisma.importedAction.findMany({
-    where: { siteId: id, localStatus: "ACTIVE" },
+    where: { siteId: id, localStatus: "ACTIVE", ...teamScope(u) },
     orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
   });
   const visits = await prisma.siteVisit.findMany({
@@ -49,14 +61,14 @@ export default async function SitePage({
     },
   });
   const validated = await prisma.actionValidation.findMany({
-    where: { siteId: id },
+    where: { siteId: id, ...teamScope(u) },
     orderBy: { realizedAt: "desc" },
     take: 30,
     include: { action: true, validatedBy: { select: { name: true } } },
   });
 
   const sightings = await prisma.siteSighting.findMany({
-    where: { siteId: id },
+    where: { siteId: id, OR: [{ kind: "SIGHT" }, { ...teamScope(u) }] },
     orderBy: { sightedAt: "desc" },
     take: 30,
     include: {
@@ -70,40 +82,51 @@ export default async function SitePage({
   });
   const canEdit = u.role === "ADMIN" || u.role === "EDITOR";
 
-  const today = new Date();
-  const sevenDays = new Date(today.getTime() + 7 * 24 * 3600 * 1000);
-  const lateCount = activeRaw.filter(
-    (a) => a.dueAt && a.dueAt < today
+  // Lot 4B-2 — déduplication via le helper central (cohérent fiche agent) :
+  // les actions sont regroupées en actions LOGIQUES ; compteurs et badges ×N
+  // dérivent des groupes. Périmètre ACTIVE uniquement (cf. décision Lot 4A).
+  const groups = dedupActions(activeRaw);
+
+  // Référence temporelle UNIQUE (serveur) partagée entre compteurs et badges
+  // (cf. fiche agent). Aucun `new Date()` côté client pour la borne du jour.
+  const bounds = echeanceBounds(new Date());
+  const serializedBounds = serializeEcheanceBounds(bounds);
+  const lateCount = groups.filter((g) =>
+    isOverdue(actionEcheanceStateAt(g.representative.dueAt, bounds)),
   ).length;
-  const soonCount = activeRaw.filter(
-    (a) => a.dueAt && a.dueAt >= today && a.dueAt <= sevenDays
+  const criticalCount = groups.filter(
+    (g) => actionEcheanceStateAt(g.representative.dueAt, bounds) === "OVERDUE_CRITICAL",
+  ).length;
+  const soonCount = groups.filter(
+    (g) => actionEcheanceStateAt(g.representative.dueAt, bounds) === "DUE_SOON",
   ).length;
 
-  // Réutilise AgentActionsClient (rendu identique, basé sur tags) :
-  // on adapte la liste en passant les infos nécessaires.
-  const actionsForClient = activeRaw.map((a) => ({
-    id: a.id,
-    externalId: a.externalId,
-    comment: a.comment,
-    keyPoint: a.keyPoint,
-    domain: a.domain,
-    theme: a.theme,
-    type: a.type,
-    actionPlan: a.actionPlan,
-    dueAt: a.dueAt?.toISOString() ?? null,
-    procedureId: a.procedureId,
-    duplicateCount: 1,
-    duplicates: [
-      {
-        id: a.id,
-        externalId: a.externalId,
-        dueAt: a.dueAt?.toISOString() ?? null,
-        originalStatus: a.originalStatus,
-        createdAt: a.createdAt.toISOString(),
-      },
-    ],
-    tags: parseTagsField(a.tags),
-  }));
+  // Réutilise AgentActionsClient (rendu identique, basé sur tags) : une carte
+  // par action logique, avec ses occurrences (badge ×N + cascade existante).
+  const actionsForClient = groups.map((g) => {
+    const a = g.representative;
+    return {
+      id: a.id,
+      externalId: a.externalId,
+      comment: a.comment,
+      keyPoint: a.keyPoint,
+      domain: a.domain,
+      theme: a.theme,
+      type: a.type,
+      actionPlan: a.actionPlan,
+      dueAt: a.dueAt?.toISOString() ?? null,
+      procedureId: a.procedureId,
+      duplicateCount: g.occurrenceCount,
+      duplicates: g.members.map((m) => ({
+        id: m.id,
+        externalId: m.externalId,
+        dueAt: m.dueAt?.toISOString() ?? null,
+        originalStatus: m.originalStatus,
+        createdAt: m.createdAt.toISOString(),
+      })),
+      tags: parseTagsField(a.tags),
+    };
+  });
 
   return (
     <div className="px-4 lg:px-8 py-4 lg:py-6 max-w-5xl mx-auto">
@@ -142,11 +165,20 @@ export default async function SitePage({
         <div className="grid grid-cols-3 gap-3 mt-5">
           <Stat
             label="Actions à traiter"
-            value={activeRaw.length}
+            value={groups.length}
             tone="default"
           />
-          <Stat label="En retard" value={lateCount} tone="warn" />
-          <Stat label="< 7 jours" value={soonCount} tone="info" />
+          <Stat
+            label="En retard"
+            value={lateCount}
+            tone="warn"
+            hint={
+              criticalCount > 0
+                ? `dont ${criticalCount} critique${criticalCount > 1 ? "s" : ""}`
+                : undefined
+            }
+          />
+          <Stat label="À venir" value={soonCount} tone="info" />
         </div>
         <div className="mt-4 flex gap-2">
           <Link
@@ -174,6 +206,7 @@ export default async function SitePage({
           agentName={site.name}
           targetKind="site"
           userRole={u.role}
+          echeanceBounds={serializedBounds}
           actions={actionsForClient}
         />
       </section>
@@ -323,10 +356,12 @@ function Stat({
   label,
   value,
   tone,
+  hint,
 }: {
   label: string;
   value: number;
   tone: "default" | "warn" | "info";
+  hint?: string;
 }) {
   const cls =
     tone === "warn"
@@ -340,6 +375,7 @@ function Stat({
       <div className="text-[10px] uppercase tracking-wider mt-1.5 font-semibold">
         {label}
       </div>
+      {hint && <div className="text-[10px] mt-0.5 opacity-80">{hint}</div>}
     </div>
   );
 }

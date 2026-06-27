@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { agentScope, requireUser } from "@/lib/auth";
+import { agentScope, requireUser, resolveOwningTeam } from "@/lib/auth";
 import {
   defaultMessageFor,
   defaultTargetUrlFor,
@@ -21,6 +21,8 @@ const schema = z.object({
   kind: z.enum(["SIGHT", "NOTE"]).default("SIGHT"),
   comment: z.string().trim().max(2000).optional().nullable(),
   sightedAt: z.string().datetime().optional(),
+  /** Équipe propriétaire (agent multi-équipes) — requise si ambiguë. */
+  teamId: z.string().optional(),
 });
 
 export async function POST(
@@ -57,14 +59,31 @@ export async function POST(
       { status: 400 }
     );
   }
-  const teamId =
-    agent.teamId ?? agent.memberships[0]?.teamId ?? u.teamId ?? u.teamIds[0];
-  if (!teamId) {
+  // Équipe propriétaire désambiguïsée dans le périmètre de l'AUTEUR (pas
+  // l'équipe legacy de l'agent) — sinon une NOTE créée par un membre hors
+  // équipe principale serait estampillée hors de son scope et disparaîtrait
+  // de sa propre fiche (la lecture des NOTE est cloisonnée par teamScope).
+  const owning = resolveOwningTeam(
+    u,
+    [agent.teamId, ...agent.memberships.map((m) => m.teamId)],
+    parsed.data.teamId,
+  );
+  if (!owning.ok) {
+    const status = owning.code === "TEAM_REQUIRED" ? 400 : 403;
     return NextResponse.json(
-      { error: "Aucune équipe rattachée à cet agent." },
-      { status: 400 }
+      {
+        error:
+          owning.code === "TEAM_REQUIRED"
+            ? "Agent partagé : précisez l'équipe."
+            : owning.code === "NO_TEAM"
+              ? "Aucune équipe de votre périmètre rattachée à cet agent."
+              : "Équipe hors de votre périmètre.",
+        code: owning.code,
+      },
+      { status }
     );
   }
+  const teamId = owning.teamId;
   const sighting = await prisma.agentSighting.create({
     data: {
       agentId,
@@ -78,16 +97,15 @@ export async function POST(
     },
   });
 
-  // Flux d'activité — duplique sur toutes les équipes de l'agent (un agent
-  // peut être multi-team via AgentTeam, cf. memory/business-rules.md).
+  // Flux d'activité aligné sur la lecture : « Vu » (SIGHT) transversal →
+  // toutes les équipes de l'agent ; « Note » (NOTE) cloisonnée → équipe
+  // propriétaire uniquement (cf. décision §5).
   const agentName = `${agent.lastName} ${agent.firstName}`.trim();
-  const teamIds = [
-    ...new Set([
-      teamId,
-      ...agent.memberships.map((m) => m.teamId),
-    ]),
-  ];
   const type = parsed.data.kind === "NOTE" ? "AGENT_NOTE" : "AGENT_SIGHTED";
+  const teamIds =
+    type === "AGENT_SIGHTED"
+      ? [...new Set([teamId, ...agent.memberships.map((m) => m.teamId)])]
+      : [teamId];
   await recordActivitySafe({
     teamIds,
     actorId: u.id,

@@ -7,7 +7,9 @@ type Props = {
 const KPI_DEFS: {
   key: keyof DashboardKpis;
   label: string;
-  toneFn: (v: number) => "danger" | "warn" | "neutral";
+  toneFn: (v: number, kpis: DashboardKpis) => "danger" | "warn" | "neutral";
+  /** Sous-info optionnelle (ex. « dont N critiques »). */
+  hintFn?: (kpis: DashboardKpis) => string | undefined;
 }[] = [
   {
     key: "criticalCount",
@@ -22,7 +24,13 @@ const KPI_DEFS: {
   {
     key: "lateActions",
     label: "Actions en retard",
-    toneFn: (v) => (v > 0 ? "danger" : "neutral"),
+    // Rouge seulement si des retards CRITIQUES (> 7 j) ; sinon ambre.
+    toneFn: (v, k) =>
+      k.lateActionsCritical > 0 ? "danger" : v > 0 ? "warn" : "neutral",
+    hintFn: (k) =>
+      k.lateActionsCritical > 0
+        ? `dont ${k.lateActionsCritical} critique${k.lateActionsCritical > 1 ? "s" : ""} (> 7 j)`
+        : undefined,
   },
   {
     key: "sitesWithoutQuarterly",
@@ -59,9 +67,10 @@ export function DashboardKpiGrid({ kpis }: Props) {
         Indicateurs clés
       </h2>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-        {KPI_DEFS.map(({ key, label, toneFn }) => {
+        {KPI_DEFS.map(({ key, label, toneFn, hintFn }) => {
           const value = kpis[key];
-          const tone = toneFn(value);
+          const tone = toneFn(value, kpis);
+          const hint = hintFn?.(kpis);
           return (
             <div
               key={key}
@@ -71,6 +80,9 @@ export function DashboardKpiGrid({ kpis }: Props) {
               <div className="mt-1.5 text-[11px] font-mono uppercase tracking-wider opacity-80">
                 {label}
               </div>
+              {hint && (
+                <div className="mt-0.5 text-[10px] opacity-70">{hint}</div>
+              )}
             </div>
           );
         })}

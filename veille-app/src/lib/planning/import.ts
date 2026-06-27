@@ -43,10 +43,11 @@ export type PlanningPrismaClient = Pick<
  */
 export async function previewPlanningImport(
   buffer: ArrayBuffer | Uint8Array | Buffer,
+  teamId: string,
   client: PlanningPrismaClient = defaultPrisma,
 ): Promise<PlanningImportPreview> {
   const parsed = parsePlanningBuffer(buffer);
-  return resolveAgents(parsed, client);
+  return resolveAgents(parsed, teamId, client);
 }
 
 /**
@@ -55,12 +56,19 @@ export async function previewPlanningImport(
  */
 export async function resolveAgents(
   parsed: PlanningParseResult,
+  teamId: string,
   client: PlanningPrismaClient = defaultPrisma,
 ): Promise<PlanningImportPreview> {
   const matricules = Array.from(new Set(parsed.shifts.map((s) => s.matricule)));
+  // Cloisonnement : seul un agent appartenant à l'équipe cible (AgentTeam ou
+  // teamId legacy) est résolu ; les autres matricules sont comptés inconnus.
+  // Le planning n'importe jamais un agent d'une autre équipe.
   const knownAgents = matricules.length
     ? await client.agent.findMany({
-        where: { matricule: { in: matricules } },
+        where: {
+          matricule: { in: matricules },
+          OR: [{ teamId }, { memberships: { some: { teamId } } }],
+        },
         select: { id: true, matricule: true },
       })
     : [];
@@ -104,6 +112,8 @@ export async function resolveAgents(
 // ─── Commit transactionnel ───────────────────────────────────────────────────
 
 export type CommitOptions = {
+  /** Équipe cible — l'import écrase UNIQUEMENT le planning de cette équipe. */
+  teamId: string;
   importedById: string | null;
   importedByEmail: string | null;
   fileName: string | null;
@@ -138,17 +148,18 @@ export async function commitPlanningImport(
     rowsErrored: preview.rowsErrored,
     unknownMatricules: JSON.stringify(preview.unknownMatricules),
     rawUchSummary: JSON.stringify(preview.rawUchSummary),
+    team: { connect: { id: options.teamId } },
     ...(options.importedById
       ? { importedBy: { connect: { id: options.importedById } } }
       : {}),
   };
 
   return client.$transaction(async (tx) => {
-    // 1. Vider l'historique : les shifts d'abord (FK), puis les imports.
-    //    Cascade est posé côté schema (PlanningShift.importId onDelete:Cascade)
-    //    mais on supprime explicitement pour rester lisible et indépendant.
-    await tx.planningShift.deleteMany({});
-    await tx.planningImport.deleteMany({});
+    // 1. Vider le planning DE CETTE ÉQUIPE uniquement (overwrite par équipe —
+    //    plus de purge globale qui effacerait les autres équipes). Cascade
+    //    schema supprimerait aussi les shifts mais on filtre par teamId.
+    await tx.planningShift.deleteMany({ where: { teamId: options.teamId } });
+    await tx.planningImport.deleteMany({ where: { teamId: options.teamId } });
 
     // 2. Créer le nouvel import.
     const created = await tx.planningImport.create({
@@ -161,6 +172,7 @@ export async function commitPlanningImport(
       await tx.planningShift.createMany({
         data: preview.resolvedShifts.map((s) => ({
           importId: created.id,
+          teamId: options.teamId,
           agentId: s.agentId,
           startsAt: s.startsAt,
           endsAt: s.endsAt,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { addDays, format } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { agentScope, requireUser } from "@/lib/auth";
+import { agentScope, requireUser, teamScope } from "@/lib/auth";
 
 /**
  * Renvoie un mini timeline d'activité par agent sur les 30 derniers jours
@@ -37,6 +37,11 @@ export async function GET() {
   if (!ids.length)
     return NextResponse.json({ agents: {}, lastAt: {}, days });
 
+  // Cloisonnement §5 : l'activité agrégée (veilles + validations) est strictement
+  // par équipe ; seuls les « Vu » (SIGHT) restent transversaux.
+  const scope = teamScope(u);
+  const sightingScope = { OR: [{ kind: "SIGHT" }, { ...scope }] };
+
   const [
     sessions,
     validations,
@@ -46,31 +51,31 @@ export async function GET() {
     lastSightings,
   ] = await Promise.all([
     prisma.veilleSession.findMany({
-      where: { agentId: { in: ids }, startedAt: { gte: from, lte: today } },
+      where: { agentId: { in: ids }, startedAt: { gte: from, lte: today }, ...scope },
       select: { agentId: true, startedAt: true },
     }),
     prisma.actionValidation.findMany({
-      where: { agentId: { in: ids }, realizedAt: { gte: from, lte: today } },
+      where: { agentId: { in: ids }, realizedAt: { gte: from, lte: today }, ...scope },
       select: { agentId: true, realizedAt: true },
     }),
     prisma.agentSighting.findMany({
-      where: { agentId: { in: ids }, sightedAt: { gte: from, lte: today } },
+      where: { agentId: { in: ids }, sightedAt: { gte: from, lte: today }, ...sightingScope },
       select: { agentId: true, sightedAt: true },
     }),
     // Toutes périodes confondues, on prend le max par agent.
     prisma.veilleSession.groupBy({
       by: ["agentId"],
-      where: { agentId: { in: ids } },
+      where: { agentId: { in: ids }, ...scope },
       _max: { startedAt: true },
     }),
     prisma.actionValidation.groupBy({
       by: ["agentId"],
-      where: { agentId: { in: ids } },
+      where: { agentId: { in: ids }, ...scope },
       _max: { realizedAt: true },
     }),
     prisma.agentSighting.groupBy({
       by: ["agentId"],
-      where: { agentId: { in: ids } },
+      where: { agentId: { in: ids }, ...sightingScope },
       _max: { sightedAt: true },
     }),
   ]);

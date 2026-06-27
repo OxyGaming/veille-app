@@ -17,6 +17,7 @@
 
 import { teamScope, type SessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { expandActiveSiblingIds } from "@/lib/actions/group-expansion";
 
 export type ObsoleteOutcome =
   /** Transition réussie ACTIVE/REPLACED → OBSOLETE. */
@@ -65,6 +66,8 @@ export async function obsoleteAction(
       localStatus: true,
       agentId: true,
       siteId: true,
+      vehicleId: true,
+      dedupHash: true,
       teamId: true,
       keyPoint: true,
       comment: true,
@@ -97,9 +100,16 @@ export async function obsoleteAction(
     action.comment?.trim() ||
     `Action ${action.externalId}`;
 
+  // Lot 4B-3 — expansion : on obsolète l'ancre + TOUTES les occurrences ACTIVE
+  // de son groupe logique (mêmes cible + équipe + dedupHash). `action.id` est
+  // toujours inclus (couvre le cas REPLACED → OBSOLETE, non étendu).
+  const groupIds = Array.from(
+    new Set([action.id, ...(await expandActiveSiblingIds(prisma, [action], user))]),
+  );
+
   await prisma.$transaction([
-    prisma.importedAction.update({
-      where: { id: action.id },
+    prisma.importedAction.updateMany({
+      where: { id: { in: groupIds } },
       data: { localStatus: "OBSOLETE" },
     }),
     prisma.auditLog.create({
@@ -116,6 +126,9 @@ export async function obsoleteAction(
           siteId: action.siteId,
           teamId: action.teamId,
           label,
+          // Traçabilité de l'expansion de groupe.
+          groupIds,
+          groupSize: groupIds.length,
         }),
       },
     }),
@@ -189,19 +202,36 @@ export async function batchObsoleteActions(
     select: {
       id: true,
       localStatus: true,
+      teamId: true,
+      agentId: true,
+      siteId: true,
+      vehicleId: true,
+      dedupHash: true,
     },
   });
   const seenIds = new Set(accessible.map((a) => a.id));
   const forbidden = requested.filter((id) => !seenIds.has(id));
 
-  const updated: string[] = [];
   const skipped: string[] = [];
   const alreadyObsolete: string[] = [];
+  const activeAnchors: typeof accessible = [];
+  const replacedAnchorIds: string[] = [];
   for (const a of accessible) {
     if (a.localStatus === "VALIDATED_LOCAL") skipped.push(a.id);
     else if (a.localStatus === "OBSOLETE") alreadyObsolete.push(a.id);
-    else updated.push(a.id);
+    else if (a.localStatus === "ACTIVE") activeAnchors.push(a);
+    else replacedAnchorIds.push(a.id); // REPLACED → obsolétée telle quelle
   }
+
+  // Lot 4B-3 — expansion : tout le groupe logique de chaque ancre ACTIVE +
+  // les ancres REPLACED telles quelles (leurs siblings de même hash sont déjà
+  // REPLACED, donc aucune occurrence ACTIVE à étendre).
+  const updated = Array.from(
+    new Set([
+      ...replacedAnchorIds,
+      ...(await expandActiveSiblingIds(prisma, activeAnchors, user)),
+    ]),
+  );
 
   // Transaction interactive : updateMany (conditionnel) + 1 AuditLog.
   // Pas d'écriture inutile si aucune action n'est éligible — seul le

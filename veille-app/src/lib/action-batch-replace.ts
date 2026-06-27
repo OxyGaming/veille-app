@@ -15,6 +15,8 @@
 import { teamScope, type SessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { encodeTags } from "@/lib/tags";
+import { dedupActions } from "@/lib/actions/dedup";
+import { expandActiveSiblingIds } from "@/lib/actions/group-expansion";
 import { randomUUID } from "node:crypto";
 
 export const BATCH_REPLACE_MAX = 200;
@@ -72,33 +74,61 @@ export async function batchReplaceActions(
       teamId: true,
       agentId: true,
       siteId: true,
-      procedureId: true,
-      externalId: true,
-      veilleType: true,
-      originalStatus: true,
-      tags: true,
-      dueAt: true,
+      vehicleId: true,
+      dedupHash: true,
       localStatus: true,
     },
   });
   const seenIds = new Set(accessible.map((a) => a.id));
   const forbidden = requested.filter((id) => !seenIds.has(id));
 
+  // Lot 4B-3 — seules les ancres ACTIVE sont remplaçables (périmètre ACTIVE) ;
+  // VALIDATED_LOCAL → refus métier ; OBSOLETE/REPLACED → ignorées (historique).
   const skippedValidated: string[] = [];
-  const eligible: typeof accessible = [];
+  const activeAnchors: typeof accessible = [];
   for (const a of accessible) {
     if (a.localStatus === "VALIDATED_LOCAL") skippedValidated.push(a.id);
-    else eligible.push(a);
+    else if (a.localStatus === "ACTIVE") activeAnchors.push(a);
   }
+
+  // Expansion : on remplace tout le groupe logique. On recharge le contenu des
+  // occurrences ACTIVE pour cloner le représentant de chaque groupe (1 clone /
+  // action logique, et non 1 par occurrence).
+  const expandedActiveIds = await expandActiveSiblingIds(
+    prisma,
+    activeAnchors,
+    user,
+  );
+  const fullRows = expandedActiveIds.length
+    ? await prisma.importedAction.findMany({
+        where: { id: { in: expandedActiveIds } },
+        select: {
+          id: true,
+          teamId: true,
+          agentId: true,
+          siteId: true,
+          vehicleId: true,
+          dedupHash: true,
+          localStatus: true,
+          procedureId: true,
+          externalId: true,
+          veilleType: true,
+          originalStatus: true,
+          tags: true,
+          dueAt: true,
+        },
+      })
+    : [];
+  const groups = dedupActions(fullRows);
 
   const nextDueAt =
     content.dueAt === undefined
-      ? undefined // hérite de l'originale (per-action)
+      ? undefined // hérite du représentant (per-groupe)
       : content.dueAt === null
       ? null
       : new Date(content.dueAt);
 
-  // Tags : `undefined` → hérite (per-action), liste fournie → encodage unique.
+  // Tags : `undefined` → hérite (per-groupe), liste fournie → encodage unique.
   const nextTagsEncoded =
     content.tags === undefined ? undefined : encodeTags(content.tags);
 
@@ -106,32 +136,35 @@ export async function batchReplaceActions(
   const createdIds: string[] = [];
 
   await prisma.$transaction(async (tx) => {
-    for (const a of eligible) {
+    for (const g of groups) {
+      const rep = g.representative;
       const newId = `repl-${randomUUID()}`;
       const created = await tx.importedAction.create({
         data: {
           externalId: newId,
-          teamId: a.teamId,
-          agentId: a.agentId,
-          siteId: a.siteId,
-          procedureId: a.procedureId,
+          teamId: rep.teamId,
+          agentId: rep.agentId,
+          siteId: rep.siteId,
+          vehicleId: rep.vehicleId,
+          procedureId: rep.procedureId,
           localStatus: "ACTIVE",
-          originalStatus: a.originalStatus,
-          veilleType: a.veilleType,
-          tags: nextTagsEncoded === undefined ? a.tags : nextTagsEncoded,
+          originalStatus: rep.originalStatus,
+          veilleType: rep.veilleType,
+          tags: nextTagsEncoded === undefined ? rep.tags : nextTagsEncoded,
           comment: content.comment,
           keyPoint: content.keyPoint,
           theme: content.theme,
           domain: content.domain,
-          dueAt: nextDueAt === undefined ? a.dueAt : nextDueAt,
+          dueAt: nextDueAt === undefined ? rep.dueAt : nextDueAt,
         },
         select: { id: true },
       });
-      await tx.importedAction.update({
-        where: { id: a.id },
+      // Toutes les occurrences ACTIVE du groupe → REPLACED.
+      await tx.importedAction.updateMany({
+        where: { id: { in: g.memberIds } },
         data: { localStatus: "REPLACED" },
       });
-      replaced.push(a.id);
+      replaced.push(...g.memberIds);
       createdIds.push(created.id);
     }
     await tx.auditLog.create({

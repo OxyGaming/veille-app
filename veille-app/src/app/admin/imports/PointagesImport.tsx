@@ -10,6 +10,7 @@ type Report = {
   agentSightings: number;
   siteSightings: number;
   icareMarked: number;
+  outOfScope: number;
   usersCreated: string[];
   agentMissing: string[];
   siteMissing: string[];
@@ -19,14 +20,26 @@ type Report = {
 /**
  * Import CSV historique des pointages — un seul fichier CSV par opération,
  * idempotent côté serveur (externalRef = pointage-{ID}).
+ * L'historique importé est rattaché à l'équipe cible (cloisonnement).
  */
-export default function PointagesImport() {
+export default function PointagesImport({
+  teams,
+}: {
+  teams: { id: string; name: string }[];
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [filename, setFilename] = useState<string | null>(null);
+  const [teamId, setTeamId] = useState<string>(
+    teams.length === 1 ? teams[0].id : "",
+  );
 
   async function handleFile(file: File) {
+    if (!teamId) {
+      setError("Sélectionnez l'équipe cible avant d'importer.");
+      return;
+    }
     setBusy(true);
     setError(null);
     setReport(null);
@@ -36,7 +49,7 @@ export default function PointagesImport() {
       const res = await fetch("/api/admin/imports/pointages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv }),
+        body: JSON.stringify({ csv, teamId }),
       });
       const j = await res.json();
       if (!res.ok) {
@@ -66,6 +79,34 @@ export default function PointagesImport() {
           </p>
         </div>
       </div>
+
+      {teams.length > 1 && (
+        <div className="mb-3">
+          <label
+            htmlFor="pointages-team"
+            className="block text-xs font-medium text-slate-600 mb-1.5"
+          >
+            Équipe cible
+          </label>
+          <select
+            id="pointages-team"
+            value={teamId}
+            onChange={(e) => setTeamId(e.target.value)}
+            className="input w-full md:w-72"
+          >
+            <option value="">— Choisir une équipe —</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-slate-500 mt-1">
+            L&apos;historique importé (sightings, utilisateurs) est rattaché à
+            cette équipe ; seuls ses agents/sites sont concernés.
+          </p>
+        </div>
+      )}
 
       <label className="block border-2 border-dashed border-slate-300 rounded-xl px-4 py-6 text-center cursor-pointer hover:border-sky-400 hover:bg-sky-50/30 transition-colors">
         <Icon.Upload className="w-6 h-6 mx-auto text-slate-400 mb-2" />
@@ -132,6 +173,11 @@ export default function PointagesImport() {
               label="Vu/Notes site"
               value={report.siteSightings}
               color="text-sky-700"
+            />
+            <Stat
+              label="Hors équipe (ignorés)"
+              value={report.outOfScope}
+              color="text-amber-700"
             />
           </div>
 

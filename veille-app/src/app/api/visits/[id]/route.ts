@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createHash } from "crypto";
 import { addDays } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { requireUser, teamScope } from "@/lib/auth";
+import { requireUser, siteScope, teamScope } from "@/lib/auth";
 import {
   encodeTags,
   normalizeTag,
@@ -18,30 +18,51 @@ import {
 } from "@/lib/activityFeed";
 import { notifyVisitFinished } from "@/lib/notifications-generators";
 
-async function loadScoped(
+const VISIT_INCLUDE = {
+  template: {
+    include: {
+      sections: {
+        include: {
+          items: { where: { isActive: true }, orderBy: { sortOrder: "asc" } },
+        },
+        orderBy: { sortOrder: "asc" },
+        where: { isActive: true },
+      },
+    },
+  },
+  site: true,
+  observer: { select: { id: true, name: true } },
+  participants: { orderBy: { sortOrder: "asc" } },
+  observations: true,
+  nonConformities: { orderBy: { sortOrder: "asc" } },
+} as const;
+
+/**
+ * Lecture : cloisonnée VIA LE SITE — une visite d'un site partagé est visible
+ * par toutes les équipes du site (la cadence réglementaire est au niveau site).
+ */
+function loadForRead(
+  id: string,
+  u: Awaited<ReturnType<typeof requireUser>>
+) {
+  return prisma.siteVisit.findFirst({
+    where: { id, site: siteScope(u) },
+    include: VISIT_INCLUDE,
+  });
+}
+
+/**
+ * Écriture (PATCH/DELETE) : cloisonnée STRICTEMENT sur l'équipe créatrice
+ * (`teamId`). Une équipe partageant le site peut consulter la visite mais pas
+ * la modifier ni la supprimer.
+ */
+function loadScoped(
   id: string,
   u: Awaited<ReturnType<typeof requireUser>>
 ) {
   return prisma.siteVisit.findFirst({
     where: { id, ...teamScope(u) },
-    include: {
-      template: {
-        include: {
-          sections: {
-            include: {
-              items: { where: { isActive: true }, orderBy: { sortOrder: "asc" } },
-            },
-            orderBy: { sortOrder: "asc" },
-            where: { isActive: true },
-          },
-        },
-      },
-      site: true,
-      observer: { select: { id: true, name: true } },
-      participants: { orderBy: { sortOrder: "asc" } },
-      observations: true,
-      nonConformities: { orderBy: { sortOrder: "asc" } },
-    },
+    include: VISIT_INCLUDE,
   });
 }
 
@@ -56,7 +77,7 @@ export async function GET(
     return r as Response;
   }
   const { id } = await ctx.params;
-  const v = await loadScoped(id, u);
+  const v = await loadForRead(id, u);
   if (!v) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
   return NextResponse.json(v);
 }
@@ -228,6 +249,8 @@ export async function PATCH(
         : "Aucune non-conformité.";
     await recordActivitySafe({
       teamIds,
+      // Notif dédiée notifyVisitFinished ci-dessous → pas de doublon.
+      notify: false,
       actorId: u.id,
       actorName: u.name,
       type: "VISIT_FINISHED",

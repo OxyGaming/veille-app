@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { agentScope, getSessionUser, teamScope } from "@/lib/auth";
+import { agentScope, effectiveTeamIds, getSessionUser, teamScope } from "@/lib/auth";
 import { getAgentsPlanningHints } from "@/lib/today/planning";
 import SessionClient from "./SessionClient";
 
@@ -47,6 +47,7 @@ export default async function SessionPage({
   const planningHints = await getAgentsPlanningHints(
     agents.map((a) => a.id),
     new Date(),
+    effectiveTeamIds(u),
   );
   return (
     <SessionClient

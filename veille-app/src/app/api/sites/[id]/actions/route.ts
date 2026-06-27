@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createHash, randomUUID } from "crypto";
 import { addMonths } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { requireUser, siteScope } from "@/lib/auth";
+import { requireUser, resolveOwningTeam, siteScope } from "@/lib/auth";
 import { encodeTags, normalizeTag } from "@/lib/tags";
 import {
   defaultMessageFor,
@@ -22,6 +22,8 @@ const schema = z.object({
   title: z.string().trim().min(1).max(300),
   dueAt: z.string().datetime().optional(),
   extraTags: z.array(z.string().trim().min(1).max(40)).max(10).default([]),
+  /** Équipe propriétaire (site multi-équipes) — requise si ambiguë. */
+  teamId: z.string().optional(),
 });
 
 export async function POST(
@@ -64,14 +66,28 @@ export async function POST(
     : addMonths(new Date(), 7);
   const tags = parsed.data.extraTags ?? [];
 
-  const teamId =
-    site.teamId ?? site.memberships[0]?.teamId ?? u.teamId ?? u.teamIds[0];
-  if (!teamId) {
+  // Équipe propriétaire désambiguïsée (site multi-équipes).
+  const owning = resolveOwningTeam(
+    u,
+    [site.teamId, ...site.memberships.map((m) => m.teamId)],
+    parsed.data.teamId,
+  );
+  if (!owning.ok) {
+    const status = owning.code === "TEAM_REQUIRED" ? 400 : 403;
     return NextResponse.json(
-      { error: "Aucune équipe rattachée à ce site." },
-      { status: 400 }
+      {
+        error:
+          owning.code === "TEAM_REQUIRED"
+            ? "Site partagé : précisez l'équipe."
+            : owning.code === "NO_TEAM"
+              ? "Aucune équipe de votre périmètre rattachée à ce site."
+              : "Équipe hors de votre périmètre.",
+        code: owning.code,
+      },
+      { status }
     );
   }
+  const teamId = owning.teamId;
 
   const externalId = `manual-${randomUUID()}`;
   const dedupHash = createHash("sha1")
@@ -102,11 +118,13 @@ export async function POST(
     },
   });
 
-  const teamIds = [
-    ...new Set([teamId, ...site.memberships.map((m) => m.teamId)]),
-  ];
+  // Cloisonnement (cohérent avec la validation) : seul l'équipe propriétaire
+  // de l'action est notifiée, pas toutes les équipes du site partagé.
+  const teamIds = [teamId];
   await recordActivitySafe({
     teamIds,
+    // Notif dédiée notifyActionAssigned ci-dessous → pas de doublon.
+    notify: false,
     actorId: u.id,
     actorName: u.name,
     type: "ACTION_CREATED",

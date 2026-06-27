@@ -46,7 +46,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import type { SessionUser } from "@/lib/auth";
+import { canActOnTeam, type SessionUser } from "@/lib/auth";
 
 export const HISTORY_DELETE_TYPES = [
   "visit",
@@ -79,6 +79,7 @@ export type HistoryDeleteOutcome =
     }
   | { kind: "not_found"; type: HistoryDeleteType; entityId: string }
   | { kind: "forbidden_role" }
+  | { kind: "forbidden_scope" }
   | { kind: "invalid_reason" };
 
 /**
@@ -155,6 +156,8 @@ async function deleteVisit(
   // tournées véhicule (VehicleRound) sous le type `visit`. On bascule donc
   // sur la suppression de tournée avant de conclure à `not_found`.
   if (!visit) return deleteVehicleRound(user, id, reason);
+  // Cloisonnement : un ADMIN scopé ne supprime que dans son périmètre.
+  if (!canActOnTeam(user, visit.teamId)) return { kind: "forbidden_scope" };
 
   // Le modèle Photo n'a aucune relation directe avec SiteVisit /
   // SiteVisitObservation en V1 — donc pas de fichier orphelin lié à la
@@ -235,6 +238,7 @@ async function deleteVehicleRound(
     },
   });
   if (!round) return { kind: "not_found", type: "visit", entityId: id };
+  if (!canActOnTeam(user, round.teamId)) return { kind: "forbidden_scope" };
 
   // Les actions correctives générées (ImportedAction) survivent à la
   // suppression de la tournée : on capture leurs ids dans le snapshot pour
@@ -310,6 +314,7 @@ async function deleteSession(
     },
   });
   if (!session) return { kind: "not_found", type: "session", entityId: id };
+  if (!canActOnTeam(user, session.teamId)) return { kind: "forbidden_scope" };
 
   // Photos cascadées : directement attachées à la session OU à un
   // ObservationItem appartenant à la session.
@@ -388,6 +393,9 @@ async function deleteValidation(
   });
   if (!validation) {
     return { kind: "not_found", type: "validation", entityId: id };
+  }
+  if (!canActOnTeam(user, validation.teamId)) {
+    return { kind: "forbidden_scope" };
   }
 
   // Si l'action liée est VALIDATED_LOCAL, on la repasse à ACTIVE pour
@@ -477,6 +485,9 @@ async function deleteAgentSighting(
   if (!sighting) {
     return { kind: "not_found", type: "agent-sighting", entityId: id };
   }
+  if (!canActOnTeam(user, sighting.teamId)) {
+    return { kind: "forbidden_scope" };
+  }
 
   const photos = await prisma.photo.findMany({
     where: { agentSightingId: id },
@@ -540,6 +551,9 @@ async function deleteSiteSighting(
   });
   if (!sighting) {
     return { kind: "not_found", type: "site-sighting", entityId: id };
+  }
+  if (!canActOnTeam(user, sighting.teamId)) {
+    return { kind: "forbidden_scope" };
   }
 
   const photos = await prisma.photo.findMany({

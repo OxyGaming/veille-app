@@ -252,6 +252,66 @@ describe("obsoleteAction — AuditLog payload", () => {
   });
 });
 
+// ─── Lot 4B-3 — expansion de groupe sur obsolescence ────────────────────────
+
+describe("obsoleteAction — expansion de groupe (Lot 4B-3)", () => {
+  it("ACTIVE avec dedupHash → obsolète tout le groupe (updateMany sur le groupe)", async () => {
+    findFirst.mockResolvedValue({
+      ...baseRow,
+      localStatus: "ACTIVE",
+      agentId: "ag_1",
+      siteId: null,
+      vehicleId: null,
+      teamId: "tA",
+      dedupHash: "h1",
+    });
+    // Siblings ACTIVE de même clé (agent ag_1, équipe tA, hash h1).
+    findMany.mockResolvedValue([
+      { id: "act_1", teamId: "tA", agentId: "ag_1", siteId: null, vehicleId: null, dedupHash: "h1", localStatus: "ACTIVE" },
+      { id: "act_2", teamId: "tA", agentId: "ag_1", siteId: null, vehicleId: null, dedupHash: "h1", localStatus: "ACTIVE" },
+    ]);
+    await obsoleteAction(EDITOR, "act_1");
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    const arg = updateMany.mock.calls[0][0];
+    expect(arg.where.id.in.sort()).toEqual(["act_1", "act_2"]);
+    expect(arg.data).toEqual({ localStatus: "OBSOLETE" });
+    // Audit trace l'expansion.
+    const details = JSON.parse(createAudit.mock.calls[0][0].data.details);
+    expect(details.groupSize).toBe(2);
+    expect(details.groupIds.sort()).toEqual(["act_1", "act_2"]);
+  });
+
+  it("ACTIVE sans dedupHash → reste seule (pas de requête siblings)", async () => {
+    findFirst.mockResolvedValue({
+      ...baseRow,
+      localStatus: "ACTIVE",
+      agentId: "ag_1",
+      vehicleId: null,
+      dedupHash: null,
+    });
+    await obsoleteAction(EDITOR, "act_1");
+    expect(findMany).not.toHaveBeenCalled();
+    const arg = updateMany.mock.calls[0][0];
+    expect(arg.where.id.in).toEqual(["act_1"]);
+  });
+
+  it("REPLACED → obsolétée telle quelle, pas d'expansion ACTIVE", async () => {
+    findFirst.mockResolvedValue({
+      ...baseRow,
+      localStatus: "REPLACED",
+      agentId: "ag_1",
+      vehicleId: null,
+      dedupHash: "h1",
+    });
+    await obsoleteAction(EDITOR, "act_1");
+    // dedupHash présent mais ancre non-ACTIVE → expandActiveSiblingIds n'étend
+    // pas ; groupIds = [action.id] grâce à l'inclusion forcée de l'ancre.
+    expect(findMany).not.toHaveBeenCalled();
+    const arg = updateMany.mock.calls[0][0];
+    expect(arg.where.id.in).toEqual(["act_1"]);
+  });
+});
+
 // ─── Sprint 7 C3 — batchObsoleteActions ─────────────────────────────────────
 
 describe("batchObsoleteActions — dédup / vide / plafond", () => {

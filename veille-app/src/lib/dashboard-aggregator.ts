@@ -23,6 +23,11 @@ import {
 } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { aggregateEcheances } from "@/lib/echeances/aggregator";
+import {
+  criticalThreshold,
+  startOfEcheanceDay,
+} from "@/lib/echeances/action-echeance";
+import { dedupActions } from "@/lib/actions/dedup";
 import type { EcheanceItem } from "@/lib/echeances/types";
 import { parseTags } from "@/lib/tags";
 
@@ -42,6 +47,8 @@ export type DashboardKpis = {
   criticalCount: number;
   openActions: number;
   lateActions: number;
+  /** Sous-ensemble de `lateActions` en retard de plus de 7 jours (sous-info). */
+  lateActionsCritical: number;
   sitesWithoutQuarterly: number;
   sitesWithoutPlanned: number;
   vehiclesOverdueRound: number;
@@ -332,10 +339,14 @@ export async function aggregateDashboard(
   //    le scope ADMIN persisté (badge header). Les helpers Prisma
   //    (siteScope / actionScope) appliquent déjà la restriction via
   //    C5. On n'a plus rien à passer ici.
+  // Bornes canoniques d'échéance (cf. lib/echeances/action-echeance.ts) :
+  //  - « En retard »          : dueAt < aujourd'hui 00:00.
+  //  - « En retard critique » : dueAt < aujourd'hui 00:00 − 7 j (sous-info).
+  const today0 = startOfEcheanceDay(now);
+  const critical0 = criticalThreshold(now);
   const [
     echeances,
-    openActionsCount,
-    lateActionsCount,
+    activeActionRows,
     activityRows,
     notifRows,
     visitsRows,
@@ -347,14 +358,19 @@ export async function aggregateDashboard(
     teamsAvailable,
   ] = await Promise.all([
     aggregateEcheances(user, now),
-    prisma.importedAction.count({
+    // Lot 4B-2 — on charge les actions ACTIVE (clé de dédup + dueAt) pour
+    // compter en ACTIONS LOGIQUES (et non en occurrences). Champs minimaux.
+    prisma.importedAction.findMany({
       where: { ...actionScope(user), localStatus: "ACTIVE" },
-    }),
-    prisma.importedAction.count({
-      where: {
-        ...actionScope(user),
-        localStatus: "ACTIVE",
-        dueAt: { not: null, lt: now },
+      select: {
+        id: true,
+        teamId: true,
+        agentId: true,
+        siteId: true,
+        vehicleId: true,
+        dedupHash: true,
+        localStatus: true,
+        dueAt: true,
       },
     }),
     prisma.teamActivity.findMany({
@@ -491,10 +507,23 @@ export async function aggregateDashboard(
   // déjà « jamais visité » + « retard ». On les exploite directement.
   const lateItems = echeances.groups.late;
 
+  // Lot 4B-2 — compteurs d'actions à traiter en ACTIONS LOGIQUES (dédup).
+  // Le représentant porte l'échéance la plus proche ; comme les membres d'un
+  // groupe partagent le jour d'échéance, le test sur le représentant suffit.
+  const actionGroups = dedupActions(activeActionRows);
+  const openActionsCount = actionGroups.length;
+  const lateActionsCount = actionGroups.filter(
+    (g) => g.representative.dueAt != null && g.representative.dueAt < today0,
+  ).length;
+  const lateActionsCriticalCount = actionGroups.filter(
+    (g) => g.representative.dueAt != null && g.representative.dueAt < critical0,
+  ).length;
+
   const kpis: DashboardKpis = {
     criticalCount: echeances.kpis.critical,
     openActions: openActionsCount,
     lateActions: lateActionsCount,
+    lateActionsCritical: lateActionsCriticalCount,
     sitesWithoutQuarterly: countItems(lateItems, "VISIT_QUARTERLY"),
     sitesWithoutPlanned: countItems(lateItems, "VISIT_PLANNED"),
     vehiclesOverdueRound: countItems(lateItems, "VEHICLE_ROUND"),

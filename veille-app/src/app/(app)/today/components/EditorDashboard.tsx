@@ -37,9 +37,19 @@ export function EditorDashboard({ payload, canImportPlanning }: Props) {
       <KpiSection title="Périmètre">
         <KpiCard
           label="Actions en retard"
-          value={d.lateActions7d}
-          tone={d.lateActions7d > 0 ? "danger" : "neutral"}
-          hint={d.lateActions7d > 0 ? "depuis plus de 7 jours" : undefined}
+          value={d.lateActions}
+          tone={
+            d.lateActionsCritical > 0
+              ? "danger"
+              : d.lateActions > 0
+                ? "warn"
+                : "neutral"
+          }
+          hint={
+            d.lateActionsCritical > 0
+              ? `dont ${d.lateActionsCritical} critique${plural(d.lateActionsCritical)} (> 7 j)`
+              : undefined
+          }
         />
         <KpiCard
           label="Sites à visiter"
@@ -161,9 +171,12 @@ function freshnessLabelForSite(item: WatchlistItem): string {
 function buildDiagnosticLines(payload: EditorPayload): string[] {
   const lines: string[] = [];
   const { diagnostic: d, sitesWithoutVisitTotal } = payload;
-  if (d.lateActions7d > 0) {
+  if (d.lateActions > 0) {
     lines.push(
-      `${d.lateActions7d} action${plural(d.lateActions7d)} en retard de plus de 7 jours`,
+      `${d.lateActions} action${plural(d.lateActions)} en retard` +
+        (d.lateActionsCritical > 0
+          ? `, dont ${d.lateActionsCritical} critique${plural(d.lateActionsCritical)} (> 7 j)`
+          : ""),
     );
   }
   if (d.expiredEquipments > 0) {

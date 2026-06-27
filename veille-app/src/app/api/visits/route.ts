@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireUser, siteScope, teamScope } from "@/lib/auth";
+import { requireUser, resolveOwningTeam, siteScope } from "@/lib/auth";
 
 export async function GET(req: Request) {
   let u;
@@ -13,9 +13,12 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const status = url.searchParams.get("status") ?? undefined;
   const siteId = url.searchParams.get("siteId") ?? undefined;
+  // Lecture cloisonnée VIA LE SITE (décision : une visite d'un site partagé est
+  // visible par toutes les équipes du site — la cadence réglementaire est au
+  // niveau site). L'édition/suppression reste stricte sur teamId créateur.
   const items = await prisma.siteVisit.findMany({
     where: {
-      ...teamScope(u),
+      site: siteScope(u),
       ...(status ? { status } : {}),
       ...(siteId ? { siteId } : {}),
     },
@@ -34,6 +37,8 @@ export async function GET(req: Request) {
 const createSchema = z.object({
   templateId: z.string().min(1),
   siteId: z.string().min(1),
+  /** Équipe propriétaire (site multi-équipes) — requise si ambiguë. */
+  teamId: z.string().optional(),
   visitDate: z.string().datetime().optional(),
   participants: z
     .array(
@@ -72,6 +77,7 @@ export async function POST(req: Request) {
   // Vérif scope site.
   const site = await prisma.site.findFirst({
     where: { id: data.siteId, ...siteScope(u) },
+    include: { memberships: { select: { teamId: true } } },
   });
   if (!site) {
     return NextResponse.json(
@@ -85,14 +91,29 @@ export async function POST(req: Request) {
   if (!template) {
     return NextResponse.json({ error: "Modèle inconnu" }, { status: 404 });
   }
-  // teamId : équipe principale du site, sinon de l'utilisateur.
-  const teamId = site.teamId ?? u.teamId ?? u.teamIds[0];
-  if (!teamId) {
+  // Équipe propriétaire désambiguïsée (site multi-équipes) — pas d'héritage
+  // automatique du teamId legacy.
+  const owning = resolveOwningTeam(
+    u,
+    [site.teamId, ...site.memberships.map((m) => m.teamId)],
+    data.teamId,
+  );
+  if (!owning.ok) {
+    const status = owning.code === "TEAM_REQUIRED" ? 400 : 403;
     return NextResponse.json(
-      { error: "Aucune équipe rattachée à ce site." },
-      { status: 400 }
+      {
+        error:
+          owning.code === "TEAM_REQUIRED"
+            ? "Site partagé : précisez l'équipe de la visite."
+            : owning.code === "NO_TEAM"
+              ? "Aucune équipe de votre périmètre rattachée à ce site."
+              : "Équipe hors de votre périmètre.",
+        code: owning.code,
+      },
+      { status }
     );
   }
+  const teamId = owning.teamId;
 
   const visit = await prisma.siteVisit.create({
     data: {

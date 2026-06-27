@@ -132,13 +132,20 @@ export type AgentDevelopmentSummary = {
 /**
  * Construit la fiche de développement pour `agentId` entre `from` et `to`.
  *
- * Aucun filtrage d'accès n'est fait ici — l'appelant doit garantir que
- * l'utilisateur a le droit de lire les données de l'agent (via `agentScope`).
+ * `teamIds` borne les données au périmètre de l'utilisateur (décision
+ * cloisonnement §5 : veilles, NOTE et développement cloisonnés par équipe).
+ *  - `null` → aucune restriction (ADMIN GLOBAL / viewAllTeams).
+ *  - tableau → veilles, validations et actions filtrées sur ces équipes ; les
+ *    « Vu » (SIGHT) restent transversaux, seules les NOTE sont cloisonnées.
+ *
+ * L'appelant doit garantir l'accès À L'AGENT lui-même (via `agentScope`) ;
+ * passer `effectiveTeamIds(u)` ici pour le cloisonnement du CONTENU.
  */
 export async function aggregateAgentDevelopment(
   agentId: string,
   from: Date,
   to: Date,
+  teamIds: string[] | null = null,
 ): Promise<AgentDevelopmentSummary | null> {
   const agent = await prisma.agent.findFirst({
     where: { id: agentId },
@@ -147,11 +154,16 @@ export async function aggregateAgentDevelopment(
   if (!agent) return null;
 
   const dateRange = { gte: from, lte: to };
+  // Filtre teamId strict (null = global). Les « Vu » SIGHT restent transversaux.
+  const teamFilter = teamIds ? { teamId: { in: teamIds } } : {};
+  const sightingFilter = teamIds
+    ? { OR: [{ kind: "SIGHT" }, { teamId: { in: teamIds } }] }
+    : {};
 
-  // Requêtes parallèles — toutes scopées par agentId + période.
+  // Requêtes parallèles — scopées par agentId + période + équipe.
   const [sessions, sightings, validations, openActions] = await Promise.all([
     prisma.veilleSession.findMany({
-      where: { agentId, startedAt: dateRange, status: { not: "archived" } },
+      where: { agentId, startedAt: dateRange, status: { not: "archived" }, ...teamFilter },
       orderBy: { startedAt: "asc" },
       include: {
         procedures: {
@@ -168,12 +180,12 @@ export async function aggregateAgentDevelopment(
       },
     }),
     prisma.agentSighting.findMany({
-      where: { agentId, sightedAt: dateRange },
+      where: { agentId, sightedAt: dateRange, ...sightingFilter },
       orderBy: { sightedAt: "asc" },
       include: { observer: { select: { name: true } } },
     }),
     prisma.actionValidation.findMany({
-      where: { agentId, realizedAt: dateRange },
+      where: { agentId, realizedAt: dateRange, ...teamFilter },
       orderBy: { realizedAt: "asc" },
       include: {
         action: {
@@ -188,7 +200,7 @@ export async function aggregateAgentDevelopment(
       },
     }),
     prisma.importedAction.findMany({
-      where: { agentId, localStatus: "ACTIVE" },
+      where: { agentId, localStatus: "ACTIVE", ...teamFilter },
       orderBy: { dueAt: "asc" },
       take: 50,
     }),

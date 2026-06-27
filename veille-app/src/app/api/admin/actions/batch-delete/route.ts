@@ -7,7 +7,7 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireRole } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import {
   BATCH_DELETE_MAX,
   batchHardDeleteActions,
@@ -21,7 +21,7 @@ const schema = z.object({
 export async function POST(req: Request) {
   let user;
   try {
-    user = await requireRole(["ADMIN"]);
+    user = await requireUser();
   } catch (r) {
     return r as Response;
   }

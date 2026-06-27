@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { hashPassword, requireRole } from "@/lib/auth";
+import {
+  canActOnAnyTeam,
+  canActOnTeam,
+  effectiveTeamIds,
+  hashPassword,
+  requireRole,
+} from "@/lib/auth";
 
 const ROLES = ["ADMIN", "EDITOR", "USER"] as const;
 
@@ -39,8 +45,41 @@ export async function PATCH(
       { status: 400 }
     );
   }
-  const target = await prisma.user.findUnique({ where: { id } });
+  const target = await prisma.user.findUnique({
+    where: { id },
+    include: { memberships: { select: { teamId: true } } },
+  });
   if (!target) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+
+  // Cloisonnement : l'acteur doit partager une équipe avec la cible (un ADMIN
+  // scopé ne touche pas un user hors de son périmètre — y compris un autre
+  // ADMIN global, qui n'a pas d'équipe commune).
+  const targetTeams = [
+    target.teamId,
+    ...target.memberships.map((m) => m.teamId),
+  ];
+  if (!canActOnAnyTeam(me, targetTeams)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
+  const isGlobal = effectiveTeamIds(me) === null;
+  // Anti-élévation : seul un ADMIN GLOBAL peut accorder le rôle ADMIN ou le
+  // flag viewAllTeams, ou déplacer un user vers une équipe hors périmètre.
+  if (!isGlobal && (parsed.data.role === "ADMIN" || parsed.data.viewAllTeams === true)) {
+    return NextResponse.json(
+      { error: "Attribution d'un pouvoir global réservée à un administrateur global." },
+      { status: 403 }
+    );
+  }
+  if (
+    parsed.data.teamId !== undefined &&
+    parsed.data.teamId !== null &&
+    !canActOnTeam(me, parsed.data.teamId)
+  ) {
+    return NextResponse.json(
+      { error: "Équipe cible hors de votre périmètre." },
+      { status: 403 }
+    );
+  }
 
   // Garde-fous spec :
   // - interdire l'auto-désactivation
@@ -161,8 +200,21 @@ export async function DELETE(
     );
   }
 
-  const target = await prisma.user.findUnique({ where: { id } });
+  const target = await prisma.user.findUnique({
+    where: { id },
+    include: { memberships: { select: { teamId: true } } },
+  });
   if (!target) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+
+  // Cloisonnement : suppression réservée au périmètre de l'acteur.
+  if (
+    !canActOnAnyTeam(me, [
+      target.teamId,
+      ...target.memberships.map((m) => m.teamId),
+    ])
+  ) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
 
   // Dernier ADMIN ?
   if (target.role === "ADMIN") {

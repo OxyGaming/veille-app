@@ -25,12 +25,14 @@ import { EcheanceGroup } from "./components/EcheanceGroup";
 
 export const dynamic = "force-dynamic";
 
+// Vocabulaire canonique (En retard / À venir / Planifiée) avec la granularité
+// jour en qualificatif — cf. docs/NOMENCLATURE-ECHEANCES.md.
 const GROUP_TITLES: Record<EcheanceUrgency, string> = {
   late: "En retard",
-  today: "Aujourd'hui",
-  soon: "Dans les 7 jours",
-  later: "Dans les 30 jours",
-  future: "Plus tard",
+  today: "À venir — aujourd'hui",
+  soon: "À venir — sous 7 jours",
+  later: "Planifiée — sous 30 jours",
+  future: "Planifiée — au-delà",
 };
 
 const GROUP_ORDER: EcheanceUrgency[] = [

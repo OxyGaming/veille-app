@@ -132,6 +132,7 @@ describe("resolveAgents", () => {
         shift("ZZZ999"), // inconnu
         shift("ZZZ999"), // inconnu (doublon)
       ]),
+      "team-X",
     );
 
     expect(preview.rowsImported).toBe(2);
@@ -144,7 +145,7 @@ describe("resolveAgents", () => {
   });
 
   it("ne lance pas de requête findMany si aucun shift", async () => {
-    const preview = await resolveAgents(parsed([]));
+    const preview = await resolveAgents(parsed([]), "team-X");
     expect(findManyAgent).not.toHaveBeenCalled();
     expect(preview.rowsImported).toBe(0);
     expect(preview.resolvedShifts).toEqual([]);
@@ -154,7 +155,7 @@ describe("resolveAgents", () => {
     findManyAgent.mockResolvedValue([{ id: "agent-A", matricule: "AAA111" }]);
     const a = shift("AAA111", { jsNumber: "1" });
     const b = shift("AAA111", { jsNumber: "2" });
-    const preview = await resolveAgents(parsed([a, b]));
+    const preview = await resolveAgents(parsed([a, b]), "team-X");
     expect(preview.rowsImported).toBe(2);
     expect(preview.resolvedShifts.map((s) => s.jsNumber).sort()).toEqual([
       "1",
@@ -175,7 +176,7 @@ describe("resolveAgents", () => {
       periodStart: new Date(2026, 0, 1),
       periodEnd: new Date(2026, 11, 31),
     };
-    const preview = await resolveAgents(input);
+    const preview = await resolveAgents(input, "team-X");
     expect(preview.rowsTotal).toBe(10);
     expect(preview.rowsNonService).toBe(8);
     expect(preview.rowsErrored).toBe(1);
@@ -215,6 +216,7 @@ describe("commitPlanningImport", () => {
     };
 
     const result = await commitPlanningImport(previewFor([resolved]), {
+      teamId: "team-X",
       importedById: "user-1",
       importedByEmail: "u@x",
       fileName: "planning.ods",
@@ -258,6 +260,7 @@ describe("commitPlanningImport", () => {
 
   it("ne crée pas de PlanningShift si la preview est vide, mais log quand même l'import", async () => {
     await commitPlanningImport(previewFor([]), {
+      teamId: "team-X",
       importedById: null,
       importedByEmail: null,
       fileName: null,
@@ -280,6 +283,7 @@ describe("commitPlanningImport", () => {
     ]);
     await expect(
       commitPlanningImport(preview, {
+        teamId: "team-X",
         importedById: null,
         importedByEmail: null,
         fileName: null,
@@ -296,6 +300,7 @@ describe("commitPlanningImport", () => {
       rawUchSummary: { byAppartenance: { ONDAINE: 3 }, byAffectation: {} },
     };
     await commitPlanningImport(preview, {
+      teamId: "team-X",
       importedById: null,
       importedByEmail: null,
       fileName: null,

@@ -10,7 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireRole } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import {
   BATCH_REPLACE_MAX,
   batchReplaceActions,
@@ -51,7 +51,7 @@ const schema = z
 export async function POST(req: Request) {
   let user;
   try {
-    user = await requireRole(["ADMIN", "EDITOR"]);
+    user = await requireUser();
   } catch (r) {
     return r as Response;
   }

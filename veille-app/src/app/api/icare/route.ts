@@ -1,7 +1,65 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { assertTeamAccess, requireUser } from "@/lib/auth";
+
+/**
+ * Résout l'équipe propriétaire de l'entité référencée par (refType, refId).
+ * Renvoie `undefined` si l'entité n'existe pas. Sert au contrôle d'accès :
+ * une marque Icare ne peut être posée/retirée que sur une entité du périmètre.
+ */
+async function resolveRefTeamId(
+  refType: string,
+  refId: string,
+): Promise<string | undefined> {
+  switch (refType) {
+    case "visit": {
+      const v = await prisma.siteVisit.findUnique({
+        where: { id: refId },
+        select: { teamId: true },
+      });
+      if (v) return v.teamId;
+      // L'historique range aussi les tournées véhicule sous « visit ».
+      const r = await prisma.vehicleRound.findUnique({
+        where: { id: refId },
+        select: { teamId: true },
+      });
+      return r?.teamId;
+    }
+    case "session": {
+      const s = await prisma.veilleSession.findUnique({
+        where: { id: refId },
+        select: { teamId: true },
+      });
+      return s?.teamId;
+    }
+    case "validation": {
+      const v = await prisma.actionValidation.findUnique({
+        where: { id: refId },
+        select: { teamId: true },
+      });
+      return v?.teamId;
+    }
+    case "sighting":
+    case "note": {
+      const s = await prisma.agentSighting.findUnique({
+        where: { id: refId },
+        select: { teamId: true },
+      });
+      return s?.teamId;
+    }
+    case "site-sighting":
+    case "site-note": {
+      const s = await prisma.siteSighting.findUnique({
+        where: { id: refId },
+        select: { teamId: true },
+      });
+      return s?.teamId;
+    }
+    default:
+      return undefined;
+  }
+}
 
 /**
  * Toggle Icare : marque (ou démarque) un événement de l'historique comme
@@ -48,6 +106,15 @@ export async function POST(req: Request) {
     );
   }
   const { refType, refId } = parsed.data;
+  // Cloisonnement : l'entité référencée doit être dans le périmètre de l'user
+  // (empêche un toggle Icare IDOR sur une donnée d'une autre équipe).
+  const refTeamId = await resolveRefTeamId(refType, refId);
+  if (refTeamId === undefined) {
+    return NextResponse.json({ error: "Référence inconnue" }, { status: 404 });
+  }
+  if (!assertTeamAccess(u, refTeamId)) {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
   const existing = await prisma.icareEntry.findUnique({
     where: { refType_refId: { refType, refId } },
     select: { id: true },

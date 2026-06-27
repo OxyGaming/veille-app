@@ -12,6 +12,7 @@
 
 import { teamScope, type SessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { expandActiveSiblingIds } from "@/lib/actions/group-expansion";
 
 export const BATCH_DELETE_MAX = 500;
 
@@ -48,6 +49,35 @@ export async function batchHardDeleteActions(
     where: { id: { in: requested }, ...teamScope(user) },
     select: {
       id: true,
+      teamId: true,
+      agentId: true,
+      siteId: true,
+      vehicleId: true,
+      dedupHash: true,
+      localStatus: true,
+    },
+  });
+  const seenIds = new Set(accessible.map((a) => a.id));
+  const forbidden = requested.filter((id) => !seenIds.has(id));
+
+  // Lot 4B-3 — expansion : on supprime aussi les occurrences ACTIVE du groupe
+  // logique de chaque ancre ACTIVE. Les ancres non-ACTIVE (obsolètes/validées/
+  // remplacées) restent supprimées telles quelles (pas d'expansion hors ACTIVE).
+  const expandedActiveIds = await expandActiveSiblingIds(
+    prisma,
+    accessible,
+    user,
+  );
+  const candidateIds = Array.from(
+    new Set([...accessible.map((a) => a.id), ...expandedActiveIds]),
+  );
+
+  // Re-charge l'ensemble complet (ancres + siblings) avec le compteur de
+  // validations + libellés pour l'audit.
+  const candidates = await prisma.importedAction.findMany({
+    where: { id: { in: candidateIds }, ...teamScope(user) },
+    select: {
+      id: true,
       externalId: true,
       keyPoint: true,
       comment: true,
@@ -57,12 +87,10 @@ export async function batchHardDeleteActions(
       _count: { select: { validations: true } },
     },
   });
-  const seenIds = new Set(accessible.map((a) => a.id));
-  const forbidden = requested.filter((id) => !seenIds.has(id));
 
   const blockedValidated: string[] = [];
-  const toDelete: typeof accessible = [];
-  for (const a of accessible) {
+  const toDelete: typeof candidates = [];
+  for (const a of candidates) {
     if (a._count.validations > 0) blockedValidated.push(a.id);
     else toDelete.push(a);
   }

@@ -9,6 +9,7 @@
 import { prisma } from "@/lib/prisma";
 import { teamScope, type SessionUser } from "@/lib/auth";
 import { parseTags } from "@/lib/tags";
+import { dedupActions, groupKeyOf } from "@/lib/actions/dedup";
 
 export type AdminActionStatus =
   | "ACTIVE"
@@ -41,12 +42,25 @@ export type AdminActionRow = {
   siteName: string | null;
   tags: string[];
   updatedAt: string;
+  /**
+   * Lot 4B-4 — nombre d'occurrences du groupe LOGIQUE de cette ligne, calculé
+   * sur le périmètre filtré courant (pas seulement la page). `1` = action seule.
+   * `> 1` ⇒ la ligne appartient à un groupe de plusieurs occurrences (badge ×N).
+   * Purement informatif : la ligne reste affichée brute, jamais fusionnée.
+   */
+  occurrenceCount: number;
 };
 
 export type AdminActionsPayload = {
   items: AdminActionRow[];
   nextCursor: string | null;
+  /** Total BRUT d'occurrences sur le périmètre filtré (inchangé). */
   total: number;
+  /**
+   * Lot 4B-4 — total d'actions LOGIQUES (groupes dédupliqués) sur le périmètre
+   * filtré courant. Compteur secondaire : `total` reste la référence primaire.
+   */
+  logicalTotal: number;
   filtersApplied: AdminActionsFilters;
   teamsAvailable: { id: string; name: string }[];
 };
@@ -149,7 +163,8 @@ export async function aggregateAdminActions(
   const limit = Math.max(1, Math.min(MAX_ADMIN_ACTIONS_LIMIT, rawLimit));
   const where = buildWhere(user, filters, now);
 
-  const [rows, total, teamsAvailable] = await Promise.all([
+  const [rows, total, teamsAvailable, keyRows] = await Promise.all([
+    // (1) Liste PAGINÉE en occurrences BRUTES — inchangée (pagination cursor).
     prisma.importedAction.findMany({
       where,
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -165,6 +180,9 @@ export async function aggregateAdminActions(
         teamId: true,
         agentId: true,
         siteId: true,
+        // Lot 4B-4 — nécessaires au calcul de la clé logique (groupKeyOf).
+        vehicleId: true,
+        dedupHash: true,
         tags: true,
         updatedAt: true,
         team: { select: { name: true } },
@@ -172,9 +190,33 @@ export async function aggregateAdminActions(
         site: { select: { name: true } },
       },
     }),
+    // (2) Total BRUT d'occurrences sur le périmètre filtré — inchangé.
     prisma.importedAction.count({ where }),
     getTeamsAvailable(user),
+    // (3) Lot 4B-4 — projection clé minimale sur TOUT le périmètre filtré (pas
+    // seulement la page) pour calculer les groupes logiques. Lecture seule, sans
+    // pagination : alimente le compteur secondaire + le badge ×N par ligne.
+    prisma.importedAction.findMany({
+      where,
+      select: {
+        id: true,
+        teamId: true,
+        agentId: true,
+        siteId: true,
+        vehicleId: true,
+        dedupHash: true,
+        localStatus: true,
+      },
+    }),
   ]);
+
+  // Groupes logiques du périmètre filtré (helper central Lot 4B-1). On en tire :
+  //  - `logicalTotal` = nombre de groupes (compteur secondaire) ;
+  //  - `occByKey` = nombre d'occurrences par clé (badge ×N par ligne).
+  const groups = dedupActions(keyRows);
+  const logicalTotal = groups.length;
+  const occByKey = new Map<string, number>();
+  for (const g of groups) occByKey.set(g.groupKey, g.occurrenceCount);
 
   const hasMore = rows.length > limit;
   const sliced = hasMore ? rows.slice(0, limit) : rows;
@@ -197,12 +239,15 @@ export async function aggregateAdminActions(
     siteName: r.site?.name ?? null,
     tags: parseTags(r.tags),
     updatedAt: r.updatedAt.toISOString(),
+    // Taille du groupe logique de la ligne dans le périmètre filtré (≥ 1).
+    occurrenceCount: occByKey.get(groupKeyOf(r)) ?? 1,
   }));
 
   return {
     items,
     nextCursor,
     total,
+    logicalTotal,
     filtersApplied: filters,
     teamsAvailable,
   };

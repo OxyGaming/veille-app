@@ -1,25 +1,21 @@
 import { NextResponse } from "next/server";
-import { requireRole } from "@/lib/auth";
+import { canActOnTeam, effectiveTeamIds, requireRole } from "@/lib/auth";
 import {
   commitPlanningImport,
   previewPlanningImport,
 } from "@/lib/planning/import";
 
 /**
- * POST /api/admin/planning/import — exécute l'import du planning.
+ * POST /api/admin/planning/import — importe le planning D'UNE ÉQUIPE.
  *
- * Pipeline :
- *  1. Auth ADMIN strict (USER/EDITOR → 403).
- *  2. Validation du fichier (taille, présence).
- *  3. Reparse complet du fichier (stateless — pas de cache entre /preview et /import).
- *  4. `commitPlanningImport()` : transaction unique
- *     `deleteMany shifts → deleteMany imports → create import → createMany shifts → AuditLog`.
- *  5. Renvoi des compteurs finaux + importId.
- *
- * **Aucune création** d'agent / d'équipe / de rattachement.
- * **Aucun code NPO** ne touche la base — filtre amont côté parser.
- *
- * Cf. memory/planning-import-rules.md pour les règles métier.
+ * Cloisonnement (cf. memory/planning-import-rules.md) :
+ *  1. ADMIN ou EDITOR (USER → 403, lecture seule).
+ *  2. Équipe cible explicite (champ `teamId`), dans le périmètre de l'acteur.
+ *     Multi-équipes / ADMIN GLOBAL → choix obligatoire ; mono-équipe → déduit.
+ *  3. L'import ÉCRASE uniquement le planning de l'équipe cible (per-team), pas
+ *     celui des autres équipes.
+ *  4. Seuls les agents appartenant à l'équipe cible sont résolus (les autres
+ *     matricules sont comptés inconnus). Aucune création d'agent.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -29,7 +25,7 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 export async function POST(req: Request) {
   let u;
   try {
-    u = await requireRole(["ADMIN"]);
+    u = await requireRole(["ADMIN", "EDITOR"]);
   } catch (r) {
     return r as Response;
   }
@@ -41,6 +37,33 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: "Requête invalide (multipart attendu)." },
       { status: 400 },
+    );
+  }
+
+  // Équipe cible : explicite, sinon déduite si l'acteur n'a qu'une équipe.
+  const eff = effectiveTeamIds(u);
+  const requestedTeamId = form.get("teamId");
+  let teamId =
+    typeof requestedTeamId === "string" && requestedTeamId
+      ? requestedTeamId
+      : null;
+  if (!teamId) {
+    if (eff !== null && eff.length === 1) {
+      teamId = eff[0];
+    } else {
+      return NextResponse.json(
+        {
+          error: "Sélectionnez l'équipe cible de l'import.",
+          code: "TEAM_REQUIRED",
+        },
+        { status: 400 },
+      );
+    }
+  }
+  if (!canActOnTeam(u, teamId)) {
+    return NextResponse.json(
+      { error: "Équipe cible hors de votre périmètre." },
+      { status: 403 },
     );
   }
 
@@ -68,7 +91,7 @@ export async function POST(req: Request) {
   const t0 = Date.now();
   let preview;
   try {
-    preview = await previewPlanningImport(buffer);
+    preview = await previewPlanningImport(buffer, teamId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erreur de parsing.";
     return NextResponse.json(
@@ -79,6 +102,7 @@ export async function POST(req: Request) {
 
   try {
     const result = await commitPlanningImport(preview, {
+      teamId,
       importedById: u.id,
       importedByEmail: u.email,
       fileName,

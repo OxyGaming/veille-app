@@ -10,7 +10,7 @@
  * pas de chargement global suivi d'un filtre JS.
  */
 import { prisma } from "@/lib/prisma";
-import { agentScope, type SessionUser } from "@/lib/auth";
+import { agentScope, teamScope, type SessionUser } from "@/lib/auth";
 
 /** Statut visuel d'un agent par rapport au moment courant. */
 export type DutyStatus = "IN_SERVICE" | "LATER" | "FINISHED";
@@ -136,6 +136,9 @@ export async function getAgentsOnDutyToday(
       where: {
         startsAt: { lt: dayEnd },
         endsAt: { gt: dayStart },
+        // Cloisonnement : shifts de l'équipe propriétaire (planning par équipe).
+        // Un agent partagé ne fait pas remonter le planning d'une autre équipe.
+        ...teamScope(user),
         agent: { isVisible: true, ...agentScope(user) },
       },
       select: {
@@ -167,7 +170,7 @@ export async function getAgentsOnDutyToday(
         },
       },
     }),
-    prisma.planningImport.count(),
+    prisma.planningImport.count({ where: teamScope(user) }),
   ]);
 
   // Sparkline activité 30 j — récupéré une seule fois pour les agents
@@ -348,16 +351,25 @@ export function formatPlanningHint(
 export async function getAgentsPlanningHints(
   agentIds: string[],
   now: Date,
+  /**
+   * Équipes du périmètre de l'utilisateur (cf. `effectiveTeamIds`). `null` =
+   * global (aucun filtre). Cloisonne le planning par équipe propriétaire : un
+   * agent partagé ne fait pas remonter le planning d'une autre équipe.
+   */
+  teamIds: string[] | null = null,
 ): Promise<Map<string, string>> {
   if (agentIds.length === 0) return new Map();
   const dayStart = startOfDay(now);
   const dayEnd = startOfNextDay(now);
+  const teamFilter =
+    teamIds && teamIds.length ? { teamId: { in: teamIds } } : {};
   const [shifts, importCount] = await Promise.all([
     prisma.planningShift.findMany({
       where: {
         agentId: { in: agentIds },
         startsAt: { lt: dayEnd },
         endsAt: { gt: dayStart },
+        ...teamFilter,
       },
       select: {
         agentId: true,
@@ -366,7 +378,7 @@ export async function getAgentsPlanningHints(
         jsNumber: true,
       },
     }),
-    prisma.planningImport.count(),
+    prisma.planningImport.count({ where: teamFilter }),
   ]);
 
   // Aucun planning en base : on renvoie rien pour ne pas polluer l'UI.

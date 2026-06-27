@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { canActOnTeam, requireRole } from "@/lib/auth";
 import { VEHICLE_TYPE_LIST } from "@/lib/vehicle-types";
 
 export async function GET() {
@@ -64,6 +64,14 @@ export async function POST(req: Request) {
   }
   const data = parsed.data;
   const teamId = data.teamId ?? u.teamId ?? null;
+  // Cloisonnement : un EDITOR / ADMIN scopé ne crée un véhicule que dans son
+  // propre périmètre (cohérent avec le PATCH/DELETE de [id]).
+  if (!canActOnTeam(u, teamId)) {
+    return NextResponse.json(
+      { error: "Équipe cible hors de votre périmètre." },
+      { status: 403 }
+    );
+  }
   try {
     const v = await prisma.vehicle.create({
       data: {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { canActOnTeam, requireRole } from "@/lib/auth";
 import { VEHICLE_TYPE_LIST } from "@/lib/vehicle-types";
 
 const patchSchema = z.object({
@@ -21,8 +21,9 @@ export async function PATCH(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  let u;
   try {
-    await requireRole(["ADMIN", "EDITOR"]);
+    u = await requireRole(["ADMIN", "EDITOR"]);
   } catch (r) {
     return r as Response;
   }
@@ -42,6 +43,22 @@ export async function PATCH(
   }
   const existing = await prisma.vehicle.findUnique({ where: { id } });
   if (!existing) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+  // Cloisonnement : seul un acteur dont le périmètre couvre l'équipe ACTUELLE
+  // du véhicule peut le modifier (empêche un EDITOR/ADMIN scopé de toucher un
+  // véhicule d'une autre équipe).
+  if (!canActOnTeam(u, existing.teamId)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
+  // Et la réaffectation ne peut viser qu'une équipe de son propre périmètre.
+  if (
+    parsed.data.teamId !== undefined &&
+    !canActOnTeam(u, parsed.data.teamId)
+  ) {
+    return NextResponse.json(
+      { error: "Équipe cible hors de votre périmètre." },
+      { status: 403 }
+    );
+  }
   try {
     await prisma.vehicle.update({
       where: { id },
@@ -74,8 +91,9 @@ export async function DELETE(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  let u;
   try {
-    await requireRole("ADMIN");
+    u = await requireRole("ADMIN");
   } catch (r) {
     return r as Response;
   }
@@ -84,6 +102,10 @@ export async function DELETE(
   const mode = url.searchParams.get("mode") ?? "soft";
   const vehicle = await prisma.vehicle.findUnique({ where: { id } });
   if (!vehicle) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+  // Cloisonnement : un ADMIN scopé ne supprime que les véhicules de son périmètre.
+  if (!canActOnTeam(u, vehicle.teamId)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
 
   if (mode === "soft") {
     await prisma.vehicle.update({ where: { id }, data: { isActive: false } });

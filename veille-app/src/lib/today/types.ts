@@ -113,8 +113,10 @@ export type UserPayload = {
 /** Bannière diagnostic EDITOR (cf. TODAY-V1.md §5.4 B). */
 export type EditorDiagnostic = {
   state: "green" | "yellow" | "red";
-  /** Actions ACTIVE dont la dueAt est dépassée de plus de 7 jours. */
-  lateActions7d: number;
+  /** Actions ACTIVE « En retard » : dueAt < aujourd'hui 00:00 (inclut les critiques). */
+  lateActions: number;
+  /** Sous-ensemble « En retard critique » : dueAt < aujourd'hui 00:00 − 7 j. */
+  lateActionsCritical: number;
   /** Sites sans visite trimestrielle depuis > 90 j (heuristique V1). */
   lateVisits: number;
   /** Équipements dont expirationDate &lt; today (déjà périmés). */

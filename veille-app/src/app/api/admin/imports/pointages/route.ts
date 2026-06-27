@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { hashPassword, requireRole } from "@/lib/auth";
+import {
+  canActOnTeam,
+  effectiveTeamIds,
+  hashPassword,
+  requireRole,
+} from "@/lib/auth";
 
 /**
  * Import historique des pointages (CSV) — version admin.
@@ -32,7 +37,7 @@ export async function POST(req: Request) {
   } catch (r) {
     return r as Response;
   }
-  let body: { csv?: string };
+  let body: { csv?: string; teamId?: string };
   try {
     body = await req.json();
   } catch {
@@ -41,6 +46,28 @@ export async function POST(req: Request) {
   const csv = body.csv ?? "";
   if (!csv.trim())
     return NextResponse.json({ error: "CSV vide" }, { status: 400 });
+
+  // Équipe cible : explicite, sinon déduite si l'acteur n'a qu'une équipe.
+  // Tout l'historique importé (sightings + users créés) est rattaché à elle.
+  const eff = effectiveTeamIds(u);
+  let targetTeamId =
+    typeof body.teamId === "string" && body.teamId ? body.teamId : null;
+  if (!targetTeamId) {
+    if (eff !== null && eff.length === 1) {
+      targetTeamId = eff[0];
+    } else {
+      return NextResponse.json(
+        { error: "Sélectionnez l'équipe cible de l'import.", code: "TEAM_REQUIRED" },
+        { status: 400 }
+      );
+    }
+  }
+  if (!canActOnTeam(u, targetTeamId)) {
+    return NextResponse.json(
+      { error: "Équipe cible hors de votre périmètre." },
+      { status: 403 }
+    );
+  }
 
   const rows = parseCSV(csv);
   if (rows.length < 2)
@@ -104,13 +131,22 @@ export async function POST(req: Request) {
     }),
   ]);
 
-  const defaultTeamId = teams[0]?.id;
-  if (!defaultTeamId) {
+  // L'équipe cible doit exister (canActOnTeam ne valide pas l'existence pour un
+  // ADMIN GLOBAL).
+  if (!teams.some((t) => t.id === targetTeamId)) {
     return NextResponse.json(
-      { error: "Aucune équipe en base — créez-en au moins une." },
+      { error: "Équipe cible inconnue." },
       { status: 400 }
     );
   }
+
+  /** Un agent/site n'est traité que s'il appartient à l'équipe cible. */
+  const inTargetTeam = (e: {
+    teamId: string | null;
+    memberships: { teamId: string }[];
+  }) =>
+    e.teamId === targetTeamId ||
+    e.memberships.some((m) => m.teamId === targetTeamId);
 
   const agentByKey = new Map<string, (typeof agents)[number]>();
   for (const a of agents) {
@@ -145,6 +181,8 @@ export async function POST(req: Request) {
     agentSightings: 0,
     siteSightings: 0,
     icareMarked: 0,
+    /** Lignes dont l'agent/site existe mais hors de l'équipe cible (ignorées). */
+    outOfScope: 0,
     usersCreated: [] as string[],
     agentMissing: [] as string[],
     siteMissing: [] as string[],
@@ -187,7 +225,8 @@ export async function POST(req: Request) {
         ? userByName.get(normalize(userName))
         : undefined;
       if (!observer && userName) {
-        // Crée un user import (USER, mot de passe random non communiqué).
+        // Crée un user import (USER) rattaché à l'ÉQUIPE CIBLE uniquement
+        // (jamais hors périmètre) — teamId legacy + membership UserTeam.
         const email = `${slug(userName)}@import.local`;
         const created = await prisma.user.create({
           data: {
@@ -197,7 +236,8 @@ export async function POST(req: Request) {
             password: hashPassword(
               "imported-" + Math.random().toString(36).slice(2)
             ),
-            teamId: defaultTeamId,
+            teamId: targetTeamId,
+            memberships: { create: { teamId: targetTeamId } },
           },
           select: { id: true, name: true, email: true },
         });
@@ -211,23 +251,30 @@ export async function POST(req: Request) {
       }
 
       const key = normalize(rawTitre);
-      const agent = agentByKey.get(key);
-      const site =
-        !agent &&
+      const matchedAgent = agentByKey.get(key);
+      const matchedSite =
+        !matchedAgent &&
         (siteByKey.get(key) ?? fuzzySiteMatch(siteByKey, key));
+
+      // Cloisonnement : on n'injecte un sighting que si l'agent/site appartient
+      // à l'équipe cible. Sinon la ligne est ignorée (comptée hors périmètre).
+      const agent =
+        matchedAgent && inTargetTeam(matchedAgent) ? matchedAgent : null;
+      const site =
+        matchedSite && inTargetTeam(matchedSite) ? matchedSite : null;
+      if ((matchedAgent && !agent) || (matchedSite && !site)) {
+        report.outOfScope++;
+        continue;
+      }
 
       const isShort = isShortComment(comment);
       const kind = isShort ? "SIGHT" : "NOTE";
 
       if (agent) {
-        const teamId =
-          agent.teamId ??
-          agent.memberships[0]?.teamId ??
-          defaultTeamId;
         await prisma.agentSighting.create({
           data: {
             agentId: agent.id,
-            teamId,
+            teamId: targetTeamId,
             observerId: observer.id,
             kind,
             comment: comment || null,
@@ -247,14 +294,10 @@ export async function POST(req: Request) {
           report.icareMarked++;
         }
       } else if (site) {
-        const teamId =
-          site.teamId ??
-          site.memberships[0]?.teamId ??
-          defaultTeamId;
         await prisma.siteSighting.create({
           data: {
             siteId: site.id,
-            teamId,
+            teamId: targetTeamId,
             observerId: observer.id,
             kind,
             comment: comment || null,

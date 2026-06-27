@@ -18,7 +18,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { agentScope, requireUser } from "@/lib/auth";
+import { agentScope, effectiveTeamIds, requireUser } from "@/lib/auth";
 import { aggregateAgentDevelopment } from "@/lib/agent-development-aggregator";
 
 const schema = z.object({
@@ -71,7 +71,7 @@ export async function POST(
 
   // Recalcule les compteurs serveur — le log doit refléter la réalité,
   // pas ce que le client veut bien raconter.
-  const summary = await aggregateAgentDevelopment(id, from, to);
+  const summary = await aggregateAgentDevelopment(id, from, to, effectiveTeamIds(u));
   if (!summary) {
     return NextResponse.json({ error: "Inconnu" }, { status: 404 });
   }

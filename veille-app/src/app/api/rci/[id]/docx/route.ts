@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import path from "path";
 import fs from "fs/promises";
-import { requireUser } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { assertTeamAccess, requireUser } from "@/lib/auth";
 import { renderRci } from "@/lib/rci/render";
 import type { RciPayload, RciPhotos } from "@/lib/rci/fields";
 
@@ -9,13 +10,25 @@ export async function POST(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  let u;
   try {
-    await requireUser();
+    u = await requireUser();
   } catch {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
 
   const { id } = await ctx.params;
+
+  // Cloisonnement : le RCI doit exister et être dans le périmètre de l'user
+  // (le brouillon est partagé par équipe — pas de génération cross-équipe).
+  const rci = await prisma.rci.findUnique({
+    where: { id },
+    select: { teamId: true },
+  });
+  if (!rci) return NextResponse.json({ error: "RCI introuvable" }, { status: 404 });
+  if (!assertTeamAccess(u, rci.teamId)) {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
 
   let payload: RciPayload;
   let photos: RciPhotos;

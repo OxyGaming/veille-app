@@ -31,6 +31,15 @@ export async function PATCH(
   });
   if (!visit) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
 
+  // Cloisonnement : la NC doit appartenir à la visite scopée. Sans cette
+  // corrélation, un `ncId` d'une visite d'une autre équipe pourrait être muté
+  // (IDOR) via un `visitId` que l'on possède.
+  const nc = await prisma.siteVisitNonConformity.findFirst({
+    where: { id: ncId, visitId },
+    select: { id: true },
+  });
+  if (!nc) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+
   let body: unknown;
   try {
     body = await req.json();
@@ -103,8 +112,10 @@ export async function DELETE(
     select: { id: true },
   });
   if (!visit) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
-  const nc = await prisma.siteVisitNonConformity.findUnique({
-    where: { id: ncId },
+  // Cloisonnement : la NC doit appartenir à la visite scopée (corrélation
+  // ncId + visitId) — empêche la suppression d'une NC d'une autre équipe.
+  const nc = await prisma.siteVisitNonConformity.findFirst({
+    where: { id: ncId, visitId },
   });
   if (!nc) return NextResponse.json({ ok: true });
   // Si une action a été générée, on la marque OBSOLETE plutôt que la supprimer

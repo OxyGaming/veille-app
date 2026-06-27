@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { canActOnAnyTeam, canActOnTeam, requireRole } from "@/lib/auth";
 
 const schema = z.object({
   isVisible: z.boolean().optional(),
@@ -14,8 +14,9 @@ export async function PATCH(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  let u;
   try {
-    await requireRole("ADMIN");
+    u = await requireRole("ADMIN");
   } catch (r) {
     return r as Response;
   }
@@ -34,8 +35,35 @@ export async function PATCH(
     );
   }
 
-  const existing = await prisma.agent.findUnique({ where: { id } });
+  const existing = await prisma.agent.findUnique({
+    where: { id },
+    include: { memberships: { select: { teamId: true } } },
+  });
   if (!existing) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+
+  // Cloisonnement : l'acteur doit partager une équipe avec l'agent.
+  const existingTeams = [
+    existing.teamId,
+    ...existing.memberships.map((m) => m.teamId),
+  ];
+  if (!canActOnAnyTeam(u, existingTeams)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
+  // Tout rattachement ajouté/retiré doit rester dans son périmètre.
+  if (parsed.data.teamIds) {
+    const wanted = new Set(parsed.data.teamIds);
+    const currentSet = new Set(existingTeams.filter((t): t is string => !!t));
+    const touched = [
+      ...parsed.data.teamIds.filter((t) => !currentSet.has(t)),
+      ...[...currentSet].filter((t) => !wanted.has(t)),
+    ];
+    if (touched.some((t) => !canActOnTeam(u, t))) {
+      return NextResponse.json(
+        { error: "Modification d'un rattachement d'équipe hors de votre périmètre." },
+        { status: 403 }
+      );
+    }
+  }
 
   await prisma.$transaction(async (tx) => {
     if (
@@ -82,16 +110,29 @@ export async function DELETE(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  let u;
   try {
-    await requireRole("ADMIN");
+    u = await requireRole("ADMIN");
   } catch (r) {
     return r as Response;
   }
   const { id } = await ctx.params;
   const url = new URL(req.url);
   const mode = url.searchParams.get("mode") ?? "soft";
-  const agent = await prisma.agent.findUnique({ where: { id } });
+  const agent = await prisma.agent.findUnique({
+    where: { id },
+    include: { memberships: { select: { teamId: true } } },
+  });
   if (!agent) return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+  // Cloisonnement : un ADMIN scopé ne supprime que les agents de son périmètre.
+  if (
+    !canActOnAnyTeam(u, [
+      agent.teamId,
+      ...agent.memberships.map((m) => m.teamId),
+    ])
+  ) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
 
   if (mode === "soft") {
     await prisma.agent.update({

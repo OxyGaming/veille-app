@@ -5,9 +5,10 @@
  * centralisée dans `obsoleteAction()` (cf. `@/lib/action-obsolete`).
  *
  * Sécurité :
- *  - USER → 403 (requireRole)
- *  - EDITOR/ADMIN hors scope → 404 (pas de fuite d'existence)
- *  - EDITOR/ADMIN scope OK → 200 (ou 409 si déjà validée)
+ *  - Tout utilisateur authentifié (création/remplacement/suppression d'actions
+ *    ouvertes aux USER), cloisonnement strict via `obsoleteAction` (teamScope).
+ *  - hors scope → 404 (pas de fuite d'existence)
+ *  - scope OK → 200 (ou 409 si déjà validée)
  *
  * Réponses :
  *  - 200 `{ok:true, actionId, previousStatus, newStatus:"OBSOLETE"}`
@@ -19,7 +20,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { requireRole } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { obsoleteAction } from "@/lib/action-obsolete";
 
 export async function POST(
@@ -28,7 +29,7 @@ export async function POST(
 ) {
   let user;
   try {
-    user = await requireRole(["ADMIN", "EDITOR"]);
+    user = await requireUser();
   } catch (r) {
     return r as Response;
   }

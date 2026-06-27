@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { canActOnTeam, requireRole } from "@/lib/auth";
 
 /**
  * Sprint 8 C3 — Gestion granulaire des rattachements équipe ↔ entité.
@@ -61,6 +61,12 @@ export async function POST(
     return NextResponse.json({ error: "Type inconnu", kind: rawKind }, { status: 400 });
   }
   const kind: Kind = rawKind;
+
+  // Cloisonnement : un ADMIN scopé ne peut rattacher une entité qu'à une de ses
+  // propres équipes (empêche l'auto-attribution et le rattachement cross-équipe).
+  if (!canActOnTeam(u, teamId)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
 
   const [team, entity] = await Promise.all([
     prisma.team.findUnique({ where: { id: teamId }, select: { id: true, name: true } }),
@@ -134,6 +140,11 @@ export async function DELETE(
     return NextResponse.json({ error: "Type inconnu", kind: rawKind }, { status: 400 });
   }
   const kind: Kind = rawKind;
+
+  // Cloisonnement : un ADMIN scopé ne peut détacher que dans ses propres équipes.
+  if (!canActOnTeam(u, teamId)) {
+    return NextResponse.json({ error: "Hors de votre périmètre." }, { status: 403 });
+  }
 
   const team = await prisma.team.findUnique({
     where: { id: teamId },

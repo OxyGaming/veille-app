@@ -9,6 +9,15 @@
  *  - `visit`            → `SiteVisit`         (cascade : participants,
  *                                              observations, non-conformités,
  *                                              reports, photos)
+ *                        OU `VehicleRound`    (tournée VS — cascade :
+ *                                              observations, non-conformités,
+ *                                              reports). L'historique conflate
+ *                                              les deux sous le type `visit`
+ *                                              (cf. /api/history, filtres,
+ *                                              Icare) : la suppression suit la
+ *                                              même convention et bascule sur
+ *                                              `VehicleRound` si l'id n'est pas
+ *                                              une `SiteVisit`.
  *  - `session`          → `VeilleSession`     (cascade : procedure observations,
  *                                              observation items, photos, reports)
  *  - `validation`       → `ActionValidation`  + reset de l'action liée
@@ -142,7 +151,10 @@ async function deleteVisit(
       },
     },
   });
-  if (!visit) return { kind: "not_found", type: "visit", entityId: id };
+  // L'id n'est pas une visite de site : l'historique range aussi les
+  // tournées véhicule (VehicleRound) sous le type `visit`. On bascule donc
+  // sur la suppression de tournée avant de conclure à `not_found`.
+  if (!visit) return deleteVehicleRound(user, id, reason);
 
   // Le modèle Photo n'a aucune relation directe avec SiteVisit /
   // SiteVisitObservation en V1 — donc pas de fichier orphelin lié à la
@@ -176,6 +188,94 @@ async function deleteVisit(
   ]);
 
   return { kind: "ok", type: "visit", entityId: visit.id };
+}
+
+// ─── vehicle-round (tournée VS) ───────────────────────────────────────────────
+//
+// Une tournée véhicule est rangée sous le type d'historique `visit` (cf.
+// /api/history). Sa suppression est déclenchée par `deleteVisit` en repli
+// lorsque l'id ne correspond à aucune `SiteVisit`. Le résultat est renvoyé
+// avec `type: "visit"` pour rester cohérent avec ce que l'UI a envoyé.
+//
+// Cascade Prisma (onDelete: Cascade sur le champ `round`) : observations,
+// non-conformités, reports. Les `ImportedAction` correctives générées par
+// les NC ne sont PAS supprimées (lien faible `generatedActionId` côté NC,
+// onDelete: SetNull) — même comportement que pour une visite de site.
+
+async function deleteVehicleRound(
+  user: SessionUser,
+  id: string,
+  reason: string,
+): Promise<HistoryDeleteOutcome> {
+  const round = await prisma.vehicleRound.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      vehicleId: true,
+      teamId: true,
+      observerId: true,
+      templateId: true,
+      roundDate: true,
+      status: true,
+      finishedAt: true,
+      generalComment: true,
+      vehicleType: true,
+      immatriculation: true,
+      createdAt: true,
+      vehicle: { select: { label: true } },
+      observer: { select: { name: true } },
+      template: { select: { name: true } },
+      _count: {
+        select: {
+          observations: true,
+          nonConformities: true,
+          reports: true,
+        },
+      },
+    },
+  });
+  if (!round) return { kind: "not_found", type: "visit", entityId: id };
+
+  // Les actions correctives générées (ImportedAction) survivent à la
+  // suppression de la tournée : on capture leurs ids dans le snapshot pour
+  // garder une trace du lien rompu.
+  const generatedActions = await prisma.vehicleRoundNonConformity.findMany({
+    where: { roundId: id, generatedActionId: { not: null } },
+    select: { generatedActionId: true },
+  });
+
+  const snapshot = {
+    type: "visit" as const,
+    entity: "VehicleRound" as const,
+    id: round.id,
+    vehicleId: round.vehicleId,
+    vehicleLabel: round.vehicle?.label ?? null,
+    immatriculation: round.immatriculation,
+    vehicleType: round.vehicleType,
+    teamId: round.teamId,
+    observerId: round.observerId,
+    observerName: round.observer?.name ?? null,
+    templateId: round.templateId,
+    templateName: round.template?.name ?? null,
+    roundDate: round.roundDate.toISOString(),
+    status: round.status,
+    finishedAt: round.finishedAt?.toISOString() ?? null,
+    generalComment: round.generalComment,
+    counts: round._count,
+    orphanedActionIds: generatedActions
+      .map((nc) => nc.generatedActionId)
+      .filter((x): x is string => x != null),
+    reason,
+  };
+
+  await prisma.$transaction([
+    prisma.auditLog.create({
+      data: auditPayload(user, "VehicleRound", round.id, snapshot),
+    }),
+    prisma.vehicleRound.delete({ where: { id: round.id } }),
+  ]);
+
+  return { kind: "ok", type: "visit", entityId: round.id };
 }
 
 // ─── session ────────────────────────────────────────────────────────────────

@@ -9,6 +9,8 @@
 #   4. npm ci (install reproductible).
 #   5. prisma migrate deploy + prisma generate
 #      → JAMAIS `db push` en prod, uniquement les migrations versionnées.
+#   5bis. npm run db:sync-templates (pose les modèles de visite en base —
+#      données, pas schéma ; idempotent, ne touche ni admin ni procédures).
 #   6. npm run build (build Next.js production).
 #   7. pm2 restart veille --update-env && pm2 save.
 #   8. Vérification finale : pm2 status veille + curl -I localhost:3004.
@@ -187,6 +189,16 @@ log "5/8  Prisma migrate deploy + generate…"
 npx prisma migrate deploy
 npx prisma generate
 ok "Migrations appliquées et client Prisma régénéré."
+
+# ── 5bis. Modèles de visite (données, pas schéma) ────────────────────────────
+# Les `SiteVisitTemplate` sont des DONNÉES : `migrate deploy` ne les crée pas.
+# Sans ce sync, une migration ajoutant un type de visite (ex. S6A7) laisse la
+# prod sans le modèle → invisible dans « Nouvelle visite ». Idempotent : ne
+# touche ni admin, ni procédures (contrairement au seed complet), et préserve
+# les sections éditées côté admin.
+log "5bis Synchronisation des modèles de visite (idempotent)…"
+npm run db:sync-templates
+ok "Modèles de visite synchronisés."
 
 # ── 6. Build ─────────────────────────────────────────────────────────────────
 if [[ $DO_BUILD -eq 1 ]]; then

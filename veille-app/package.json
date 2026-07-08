@@ -12,6 +12,7 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "db:sync-templates": "tsx prisma/sync-templates.ts",
     "db:seed:preprod": "tsx prisma/preprod/seed.ts",
     "db:seed:preprod:clean": "tsx prisma/preprod/cleanup.ts",
     "db:studio": "prisma studio",

@@ -12,8 +12,8 @@ import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
 import { hashPassword } from "../src/lib/auth";
 import { SEED_PROCEDURES } from "./seed-procedures";
-import { SEED_VISIT_TEMPLATES } from "./seed-visit-templates";
 import { SEED_VEHICLE_ROUND_TEMPLATES } from "./seed-vehicle-round-template";
+import { syncVisitTemplates } from "./sync-visit-templates";
 
 async function main() {
   // Upsert sur `code` (clé métier stable) et non sur `name` : les admins
@@ -90,66 +90,9 @@ async function main() {
     });
   }
 
-  // Templates de visite (idempotent : upsert par slug, on (re)crée les sections
-  // seulement si pas déjà présentes).
-  for (const t of SEED_VISIT_TEMPLATES) {
-    const existing = await prisma.siteVisitTemplate.findUnique({
-      where: { slug: t.slug },
-      include: { sections: { include: { items: true } } },
-    });
-    // Pour les templates CHECKLIST déjà présents avec leurs sections, on ne
-    // touche pas au contenu (préserve les éditions admin). Pour les templates
-    // pilotés par catalogue (INVENTORY, S6A7 ; toujours sans sections), on
-    // autorise la mise à jour des scalaires : kind, expectedFrequencyDays,
-    // description peuvent évoluer entre versions.
-    const isCatalogDriven = t.kind === "INVENTORY" || t.kind === "S6A7";
-    if (existing && !isCatalogDriven && existing.sections.length > 0) {
-      console.log(`Template ${t.slug} déjà présent (${existing.sections.length} sections) — on ne réécrase pas.`);
-      continue;
-    }
-    const tpl = existing
-      ? await prisma.siteVisitTemplate.update({
-          where: { slug: t.slug },
-          data: {
-            name: t.name,
-            description: t.description,
-            pdfLayout: t.pdfLayout,
-            kind: t.kind ?? "CHECKLIST",
-            expectedFrequencyDays: t.expectedFrequencyDays ?? null,
-          },
-        })
-      : await prisma.siteVisitTemplate.create({
-          data: {
-            slug: t.slug,
-            name: t.name,
-            description: t.description,
-            pdfLayout: t.pdfLayout,
-            kind: t.kind ?? "CHECKLIST",
-            expectedFrequencyDays: t.expectedFrequencyDays ?? null,
-          },
-        });
-    for (let i = 0; i < t.sections.length; i++) {
-      const s = t.sections[i];
-      const section = await prisma.siteVisitSection.create({
-        data: {
-          templateId: tpl.id,
-          title: s.title,
-          icon: s.icon,
-          evalMode: s.evalMode,
-          category: s.category,
-          sortOrder: i,
-        },
-      });
-      await prisma.siteVisitItem.createMany({
-        data: s.items.map((label, j) => ({
-          sectionId: section.id,
-          label,
-          sortOrder: j,
-        })),
-      });
-    }
-    console.log(`Template ${t.slug} créé (${t.sections.length} sections).`);
-  }
+  // Templates de visite (idempotent) — logique partagée avec le runner
+  // standalone `db:sync-templates` utilisé au déploiement.
+  await syncVisitTemplates();
 
   // Templates de tournée véhicule (idempotent : upsert par slug, on (re)crée
   // les sections seulement si pas déjà présentes — préserve les éditions admin).

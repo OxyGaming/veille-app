@@ -66,6 +66,7 @@ export type NcKind =
   | "INVENTORY"
   | "QUARTERLY"
   | "PLANNED"
+  | "S6A7"
   | "VEHICLE_ROUND"
   | "OTHER";
 
@@ -242,6 +243,7 @@ export function classifyNcKind(template: {
   slug: string | null | undefined;
 }): NcKind {
   if (template.kind === "INVENTORY") return "INVENTORY";
+  if (template.kind === "S6A7") return "S6A7";
   const slug = template.slug ?? "";
   if (slug.startsWith("trimestrielle")) return "QUARTERLY";
   if (slug.startsWith("planifiee")) return "PLANNED";
@@ -252,6 +254,7 @@ const NC_KIND_LABEL: Record<NcKind, string> = {
   INVENTORY: "Veille de site",
   QUARTERLY: "Trimestrielle",
   PLANNED: "Planifiée",
+  S6A7: "S6A7",
   VEHICLE_ROUND: "Tournée VS",
   OTHER: "Autre",
 };
@@ -553,6 +556,7 @@ export async function aggregateDashboard(
     INVENTORY: 0,
     QUARTERLY: 0,
     PLANNED: 0,
+    S6A7: 0,
     VEHICLE_ROUND: 0,
     OTHER: 0,
   };

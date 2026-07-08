@@ -16,8 +16,13 @@ import { SEED_VISIT_TEMPLATES } from "./seed-visit-templates";
 import { SEED_VEHICLE_ROUND_TEMPLATES } from "./seed-vehicle-round-template";
 
 async function main() {
+  // Upsert sur `code` (clé métier stable) et non sur `name` : les admins
+  // peuvent renommer l'équipe seed (ex. "EIC RHONE ALPES" → "Rive Droite
+  // Nord") tout en conservant son code. Matcher sur `name` ferait basculer
+  // l'upsert en création et violerait la contrainte unique sur `code`.
+  // `update: {}` préserve le nom éventuellement personnalisé par l'admin.
   const team = await prisma.team.upsert({
-    where: { name: "EIC RHONE ALPES" },
+    where: { code: "EIC-RA" },
     update: {},
     create: { name: "EIC RHONE ALPES", code: "EIC-RA" },
   });
@@ -94,11 +99,11 @@ async function main() {
     });
     // Pour les templates CHECKLIST déjà présents avec leurs sections, on ne
     // touche pas au contenu (préserve les éditions admin). Pour les templates
-    // INVENTORY (toujours sans sections), on autorise la mise à jour des
-    // scalaires : kind, expectedFrequencyDays, description peuvent évoluer
-    // entre versions.
-    const isInventory = t.kind === "INVENTORY";
-    if (existing && !isInventory && existing.sections.length > 0) {
+    // pilotés par catalogue (INVENTORY, S6A7 ; toujours sans sections), on
+    // autorise la mise à jour des scalaires : kind, expectedFrequencyDays,
+    // description peuvent évoluer entre versions.
+    const isCatalogDriven = t.kind === "INVENTORY" || t.kind === "S6A7";
+    if (existing && !isCatalogDriven && existing.sections.length > 0) {
       console.log(`Template ${t.slug} déjà présent (${existing.sections.length} sections) — on ne réécrase pas.`);
       continue;
     }

@@ -138,26 +138,49 @@ export async function POST(req: Request) {
     },
   });
 
-  // Snapshot eager pour les visites INVENTORY : on crée une observation par
-  // équipement actif du site, pré-remplie aux valeurs du catalogue. L'agent
-  // n'a plus qu'à modifier les écarts.
-  if (template.kind === "INVENTORY") {
+  // Snapshot eager pour les visites pilotées par catalogue (INVENTORY, S6A7) :
+  // une observation par élément actif du référentiel du site, pré-remplie aux
+  // valeurs du catalogue. L'agent n'a plus qu'à signaler les écarts.
+  //  - INVENTORY → catalogue veille de site (domain VEILLE_SITE).
+  //  - S6A7      → référentiel S6A7 (domain S6A7), deux familles :
+  //      · PHONE    : conformité par défaut BON (aucun écart/action possible) ;
+  //      · MATERIEL : logique trousse de secours identique à INVENTORY.
+  const catalogDomain =
+    template.kind === "S6A7"
+      ? "S6A7"
+      : template.kind === "INVENTORY"
+        ? "VEILLE_SITE"
+        : null;
+  if (catalogDomain) {
     const equipments = await prisma.siteEquipment.findMany({
-      where: { siteId: data.siteId, isActive: true },
+      where: { siteId: data.siteId, isActive: true, domain: catalogDomain },
       orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { label: "asc" }],
     });
     if (equipments.length > 0) {
       await prisma.siteVisitObservation.createMany({
-        data: equipments.map((eq) => ({
-          visitId: visit.id,
-          equipmentId: eq.id,
-          // sectionId / itemId restent null en mode INVENTORY.
-          present: true,
-          quantityObserved: eq.expectedQuantity,
-          expirationDateObserved: eq.expirationDate,
-          discrepancyType: null,
-          status: "OUI",
-        })),
+        data: equipments.map((eq) =>
+          eq.itemKind === "PHONE"
+            ? {
+                visitId: visit.id,
+                equipmentId: eq.id,
+                present: null,
+                quantityObserved: null,
+                expirationDateObserved: null,
+                discrepancyType: null,
+                phoneStatus: "BON",
+                status: "OUI",
+              }
+            : {
+                visitId: visit.id,
+                equipmentId: eq.id,
+                // sectionId / itemId restent null en mode catalogue.
+                present: true,
+                quantityObserved: eq.expectedQuantity,
+                expirationDateObserved: eq.expirationDate,
+                discrepancyType: null,
+                status: "OUI",
+              },
+        ),
       });
     }
   }

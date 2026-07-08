@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
 import { pdfFilename } from "@/lib/pdfFilename";
+import { PHONE_STATUS_LABEL, isPhoneOk, type PhoneStatus } from "@/lib/s6a7";
 
 type Item = { id: string; label: string };
 type Section = {
@@ -27,6 +28,8 @@ type Observation = {
   quantityObserved: number | null;
   expirationDateObserved: string | null;
   discrepancyType: string | null; // MISSING | EXPIRED | QUANTITY_LOW | DAMAGED | NONE
+  // Champ S6A7 téléphone (null hors téléphone).
+  phoneStatus: string | null; // BON | HS | DIFF_RECEPTION | DIFF_EMISSION
 };
 type NC = {
   description: string;
@@ -66,6 +69,7 @@ type Equipment = {
   id: string;
   label: string;
   category: string;
+  itemKind: "MATERIEL" | "PHONE";
   expectedQuantity: number | null;
   isPerishable: boolean;
   expirationDate: string | null;
@@ -200,6 +204,15 @@ export default function VisitReportClient({
   );
   const [generating, setGenerating] = useState(false);
   const isInventory = visit.template.kind === "INVENTORY";
+  const isS6A7 = visit.template.kind === "S6A7";
+  // Familles pilotées par catalogue : layout figé, pas de sections CHECKLIST.
+  const isCatalog = isInventory || isS6A7;
+  const phones = equipments.filter((e) => e.itemKind === "PHONE");
+  const materiels = equipments.filter((e) => e.itemKind === "MATERIEL");
+  const obsByEquipmentId = new Map<string, Observation>();
+  for (const o of visit.observations) {
+    if (o.equipmentId) obsByEquipmentId.set(o.equipmentId, o);
+  }
 
   function findObs(sectionId: string, itemId: string | null) {
     return visit.observations.find(
@@ -219,7 +232,9 @@ export default function VisitReportClient({
       const margin = 40;
       const usableW = PAGE_W - margin * 2;
 
-      if (isInventory) {
+      if (isS6A7) {
+        renderS6A7(doc, autoTable, visit, phones, materiels, obsByEquipmentId, margin, usableW, PAGE_H);
+      } else if (isInventory) {
         renderInventory(doc, autoTable, visit, equipments, margin, usableW, PAGE_H);
       } else if (layout === "SNCF" && visit.template.slug === "trimestrielle-incendie") {
         renderTrimestrielle(doc, autoTable, visit, findObs, margin, usableW, PAGE_H);
@@ -256,7 +271,7 @@ export default function VisitReportClient({
       </div>
 
       <div className="card mt-4 p-4 flex flex-wrap items-center gap-3">
-        {!isInventory && (
+        {!isCatalog && (
           <>
             <span className="text-xs font-medium text-slate-600">
               Layout PDF :
@@ -278,7 +293,7 @@ export default function VisitReportClient({
             </div>
           </>
         )}
-        {isInventory && (
+        {isCatalog && (
           <span className="text-xs font-medium text-slate-600">
             Fiche de suivi papier — composition théorique uniquement, date
             à remplir au stylo.
@@ -338,8 +353,107 @@ export default function VisitReportClient({
         </div>
       )}
 
+      {/* Aperçu S6A7 : téléphones (états) + petit matériel (inventaire) */}
+      {isS6A7 && (
+        <div className="mt-6 space-y-6">
+          <section>
+            <h2 className="text-sm font-bold mb-2 flex items-center gap-2">
+              <Icon.Phone className="w-4 h-4 text-sky-600" /> Téléphones de voie
+              <span className="text-[11px] font-mono text-slate-400">
+                {phones.length}
+              </span>
+            </h2>
+            {phones.length === 0 ? (
+              <div className="card p-3 text-xs text-slate-500">
+                Aucun téléphone au référentiel.
+              </div>
+            ) : (
+              <ul className="card divide-y divide-slate-100">
+                {phones.map((e) => {
+                  const o = obsByEquipmentId.get(e.id);
+                  const status = (o?.phoneStatus as PhoneStatus | null) ?? null;
+                  const ok = isPhoneOk(status);
+                  return (
+                    <li
+                      key={e.id}
+                      className="px-3 py-2 flex items-center gap-3 text-sm"
+                    >
+                      <span className="flex-1 font-medium">{e.label}</span>
+                      <span
+                        className={`text-[11px] font-mono font-semibold px-2 py-0.5 rounded border ${
+                          ok
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : status
+                              ? "bg-rose-50 text-rose-700 border-rose-200"
+                              : "bg-slate-50 text-slate-500 border-slate-200"
+                        }`}
+                      >
+                        {status ? PHONE_STATUS_LABEL[status] : "—"}
+                      </span>
+                      {o?.comment && (
+                        <span className="text-[11px] italic text-slate-500 max-w-[240px] truncate">
+                          « {o.comment} »
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+          <section>
+            <h2 className="text-sm font-bold mb-2 flex items-center gap-2">
+              <Icon.ClipboardCheck className="w-4 h-4 text-emerald-600" /> Petit
+              matériel
+              <span className="text-[11px] font-mono text-slate-400">
+                {materiels.length}
+              </span>
+            </h2>
+            <div className="grid gap-4 md:grid-cols-2 items-start">
+              {[...new Set(materiels.map((e) => e.category))].sort().map((cat) => {
+                const eqs = materiels.filter((e) => e.category === cat);
+                return (
+                  <section key={cat} className="card p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="text-sm font-bold">{cat}</div>
+                      <span className="ml-auto text-[10px] font-mono text-slate-400">
+                        {eqs.length} élément(s)
+                      </span>
+                    </div>
+                    <ul className="text-xs space-y-0.5">
+                      {eqs.map((e) => {
+                        const o = obsByEquipmentId.get(e.id);
+                        const ecart = hasDiscrepancy(o);
+                        return (
+                          <li
+                            key={e.id}
+                            className={`flex gap-2 items-center ${
+                              ecart ? "text-rose-700 font-semibold" : ""
+                            }`}
+                          >
+                            <span className="font-mono text-slate-400 w-10 text-right shrink-0">
+                              {e.expectedQuantity ?? "—"}
+                            </span>
+                            <span className="flex-1">{e.label}</span>
+                            {ecart && o && (
+                              <span className="text-[10px] font-mono">
+                                {describeDiscrepancy(o, e)}
+                              </span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      )}
+
       {/* Aperçu CHECKLIST : sections + items historiques */}
-      {!isInventory && (
+      {!isCatalog && (
       <div className="grid gap-4 md:grid-cols-2 mt-6 items-start">
         {visit.template.sections.map((s) => {
           const obs = s.items.map((it) => findObs(s.id, it.id)).filter(Boolean);
@@ -406,7 +520,7 @@ export default function VisitReportClient({
       </div>
       )}
 
-      {!isInventory && visit.nonConformities.length > 0 && (
+      {!isCatalog && visit.nonConformities.length > 0 && (
         <section className="card mt-6 p-4">
           <h2 className="text-sm font-bold mb-2">
             {visit.nonConformities.length} non-conformité(s)
@@ -1552,6 +1666,261 @@ function renderInventory(
   }
 
   // Pied de page sur chaque page (cohérent avec visite planifiée).
+  stampSimpleFooter(doc, pageH, margin);
+}
+
+/* ============================================================================
+ *  PDF — Visite S6A7 (design moderne)
+ *
+ *  Deux blocs :
+ *   - Téléphones de voie : Désignation / État / Commentaire. Les téléphones
+ *     non conformes (HS, difficultés) sont en rouge — mais ne génèrent
+ *     aucune action.
+ *   - Petit matériel : tables d'inventaire par catégorie (rouge sur écart)
+ *     + tableau récapitulatif « Non-conformités constatées ».
+ * ========================================================================== */
+
+function renderS6A7(
+  doc: import("jspdf").jsPDF,
+  autoTable: AutoTable,
+  visit: Visit,
+  phones: Equipment[],
+  materiels: Equipment[],
+  obsByEquipmentId: Map<string, Observation>,
+  margin: number,
+  usableW: number,
+  pageH: number
+) {
+  // En-tête
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(visit.template.name, margin, margin + 4);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(
+    `Site : ${visit.site.name}${visit.site.code ? ` (${visit.site.code})` : ""}`,
+    margin,
+    margin + 22
+  );
+  doc.text(
+    `Date de la visite : ${format(new Date(visit.visitDate), "PPP", { locale: fr })}`,
+    margin,
+    margin + 36
+  );
+  doc.text(`Vérifié par : ${visit.observer.name}`, margin, margin + 50);
+
+  let y = margin + 70;
+
+  // ── Téléphones de voie ──────────────────────────────────────────────────
+  if (phones.length > 0) {
+    autoTable(doc, {
+      startY: y,
+      head: [
+        [
+          {
+            content: "Téléphones de voie",
+            colSpan: 3,
+            styles: {
+              fillColor: [235, 240, 248],
+              textColor: [30, 30, 30],
+              fontStyle: "bold",
+              halign: "left",
+            },
+          },
+        ],
+        [
+          { content: "Désignation", styles: { fontStyle: "bold" } },
+          { content: "État", styles: { fontStyle: "bold" } },
+          { content: "Commentaire", styles: { fontStyle: "bold" } },
+        ],
+      ],
+      body: phones.map((e) => {
+        const o = obsByEquipmentId.get(e.id);
+        const status = (o?.phoneStatus as PhoneStatus | null) ?? null;
+        const stateLabel = status ? PHONE_STATUS_LABEL[status] : "—";
+        const degraded = status !== null && !isPhoneOk(status);
+        const style = degraded
+          ? { textColor: [192, 21, 47] as [number, number, number], fontStyle: "bold" as const }
+          : undefined;
+        const cell = (content: string) =>
+          style ? { content, styles: style } : content;
+        return [cell(e.label), cell(stateLabel), cell(o?.comment ?? "")];
+      }),
+      styles: {
+        fontSize: 9,
+        cellPadding: { top: 5, right: 6, bottom: 5, left: 6 },
+        lineColor: [120, 120, 120],
+        lineWidth: 0.4,
+        valign: "middle",
+        minCellHeight: 20,
+      },
+      headStyles: { fillColor: [248, 248, 248], textColor: [30, 30, 30], lineWidth: 0.4 },
+      columnStyles: {
+        0: { cellWidth: usableW * 0.4 },
+        1: { cellWidth: usableW * 0.25 },
+        2: { cellWidth: usableW * 0.35 },
+      },
+      margin: { left: margin, right: margin },
+      theme: "grid",
+    });
+    // @ts-expect-error lastAutoTable
+    y = doc.lastAutoTable.finalY + 14;
+  }
+
+  // ── Petit matériel ──────────────────────────────────────────────────────
+  const byCat = new Map<string, Equipment[]>();
+  for (const e of materiels) {
+    const arr = byCat.get(e.category) ?? [];
+    arr.push(e);
+    byCat.set(e.category, arr);
+  }
+  const cats = [...byCat.entries()].sort(([a], [b]) => a.localeCompare(b, "fr"));
+  const allNcRows: [string, string, string][] = [];
+
+  for (const [cat, eqs] of cats) {
+    if (y > pageH - 100) {
+      doc.addPage();
+      y = margin;
+    }
+    autoTable(doc, {
+      startY: y,
+      head: [
+        [
+          {
+            content: cat,
+            colSpan: 3,
+            styles: {
+              fillColor: [235, 235, 235],
+              textColor: [30, 30, 30],
+              fontStyle: "bold",
+              halign: "left",
+            },
+          },
+        ],
+        [
+          { content: "Désignation", styles: { fontStyle: "bold" } },
+          { content: "Qté", styles: { fontStyle: "bold", halign: "center" } },
+          {
+            content: dateColumnLabel(cat),
+            styles: { fontStyle: "bold", halign: "center" },
+          },
+        ],
+      ],
+      body: eqs.map((e) => {
+        const obs = obsByEquipmentId.get(e.id);
+        const cellStyle = hasDiscrepancy(obs)
+          ? { textColor: [192, 21, 47] as [number, number, number], fontStyle: "bold" as const }
+          : undefined;
+        const buildCell = (content: string) =>
+          cellStyle ? { content, styles: cellStyle } : content;
+        return [
+          buildCell(e.label),
+          buildCell(e.expectedQuantity != null ? String(e.expectedQuantity) : ""),
+          buildCell(
+            e.expirationDate
+              ? format(new Date(e.expirationDate), "dd/MM/yyyy")
+              : ""
+          ),
+        ];
+      }),
+      styles: {
+        fontSize: 9,
+        cellPadding: { top: 6, right: 6, bottom: 6, left: 6 },
+        lineColor: [120, 120, 120],
+        lineWidth: 0.4,
+        valign: "middle",
+        minCellHeight: 22,
+      },
+      headStyles: { fillColor: [248, 248, 248], textColor: [30, 30, 30], lineWidth: 0.4 },
+      columnStyles: {
+        0: { cellWidth: usableW * 0.62 },
+        1: { cellWidth: usableW * 0.13, halign: "center" },
+        2: { cellWidth: usableW * 0.25, halign: "center" },
+      },
+      margin: { left: margin, right: margin },
+      theme: "grid",
+      didDrawCell: (data: {
+        section: "head" | "body" | "foot";
+        cell: { x: number; y: number; width: number; height: number };
+        column: { index: number };
+        row: { index: number };
+      }) => {
+        // Case Date "non périssable" sans date pré-renseignée → noircie.
+        if (data.section !== "body") return;
+        if (data.column.index !== 2) return;
+        const eq = eqs[data.row.index];
+        if (!eq || eq.isPerishable || eq.expirationDate) return;
+        const pad = 0.6;
+        doc.setFillColor(0, 0, 0);
+        doc.rect(
+          data.cell.x + pad,
+          data.cell.y + pad,
+          data.cell.width - 2 * pad,
+          data.cell.height - 2 * pad,
+          "F"
+        );
+      },
+    });
+    // @ts-expect-error lastAutoTable
+    y = doc.lastAutoTable.finalY + 10;
+
+    for (const e of eqs) {
+      const obs = obsByEquipmentId.get(e.id);
+      const desc = obs ? describeDiscrepancy(obs, e) : null;
+      if (!desc) continue;
+      const comment = obs?.comment?.trim();
+      allNcRows.push([cat, e.label, comment ? `${desc} · ${comment}` : desc]);
+    }
+  }
+
+  if (allNcRows.length > 0) {
+    if (y > pageH - 100) {
+      doc.addPage();
+      y = margin;
+    } else {
+      y += 8;
+    }
+    autoTable(doc, {
+      startY: y,
+      head: [
+        [
+          {
+            content: "Non-conformités constatées (petit matériel)",
+            colSpan: 3,
+            styles: {
+              fillColor: [248, 215, 218],
+              textColor: [114, 28, 36],
+              fontStyle: "bold",
+              halign: "left",
+            },
+          },
+        ],
+        [
+          { content: "Catégorie", styles: { fontStyle: "bold" } },
+          { content: "Désignation", styles: { fontStyle: "bold" } },
+          { content: "Écart constaté", styles: { fontStyle: "bold" } },
+        ],
+      ],
+      body: allNcRows,
+      styles: {
+        fontSize: 9,
+        cellPadding: { top: 5, right: 6, bottom: 5, left: 6 },
+        lineColor: [192, 21, 47],
+        lineWidth: 0.4,
+        valign: "middle",
+        textColor: [114, 28, 36],
+      },
+      headStyles: { fillColor: [253, 237, 238], textColor: [114, 28, 36], lineWidth: 0.4 },
+      columnStyles: {
+        0: { cellWidth: usableW * 0.28 },
+        1: { cellWidth: usableW * 0.37, fontStyle: "bold" },
+        2: { cellWidth: usableW * 0.35 },
+      },
+      margin: { left: margin, right: margin },
+      theme: "grid",
+    });
+  }
+
   stampSimpleFooter(doc, pageH, margin);
 }
 

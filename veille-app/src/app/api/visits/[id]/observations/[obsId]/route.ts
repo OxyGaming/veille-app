@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser, teamScope } from "@/lib/auth";
+import { PHONE_STATUSES } from "@/lib/s6a7";
 
 /**
  * PATCH d'une observation existante.
@@ -33,7 +34,7 @@ const schema = z.object({
     ])
     .optional(),
   comment: z.string().nullable().optional(),
-  // Champs INVENTORY.
+  // Champs INVENTORY / petit matériel S6A7.
   present: z.boolean().nullable().optional(),
   quantityObserved: z.number().int().min(0).nullable().optional(),
   expirationDateObserved: z.string().datetime().nullable().optional(),
@@ -41,6 +42,8 @@ const schema = z.object({
     .enum(["MISSING", "EXPIRED", "QUANTITY_LOW", "DAMAGED", "NONE"])
     .nullable()
     .optional(),
+  // Champ téléphone de voie S6A7 (aucune action, même HS).
+  phoneStatus: z.enum(PHONE_STATUSES).nullable().optional(),
 });
 
 export async function PATCH(
@@ -79,7 +82,12 @@ export async function PATCH(
     where: { id: obsId, visitId },
     include: {
       equipment: {
-        select: { id: true, expectedQuantity: true, expirationDate: true },
+        select: {
+          id: true,
+          itemKind: true,
+          expectedQuantity: true,
+          expirationDate: true,
+        },
       },
     },
   });
@@ -115,14 +123,31 @@ export async function PATCH(
       ? new Date(data.expirationDateObserved)
       : null;
 
-  const isInventory = visit.template.kind === "INVENTORY";
+  // Familles :
+  //  - téléphone de voie (S6A7) : statut à 4 états, JAMAIS d'écart ni d'action ;
+  //  - petit matériel (INVENTORY ou S6A7) : logique trousse de secours.
+  const isPhone = existing.equipment?.itemKind === "PHONE";
+  const isCatalog =
+    visit.template.kind === "INVENTORY" || visit.template.kind === "S6A7";
+  const isMaterielInventory = isCatalog && !isPhone;
+
+  // phoneStatus : réservé aux téléphones ; conservé null ailleurs.
+  const phoneStatus = isPhone
+    ? data.phoneStatus === undefined
+      ? existing.phoneStatus
+      : data.phoneStatus
+    : existing.phoneStatus;
 
   // Calcul auto du discrepancyType si non explicitement fourni.
+  // Un téléphone n'a jamais d'écart : discrepancyType reste null (garantit
+  // qu'aucune action n'est générée, même pour un téléphone HS).
   let discrepancyType: string | null;
-  if (data.discrepancyType !== undefined) {
+  if (isPhone) {
+    discrepancyType = null;
+  } else if (data.discrepancyType !== undefined) {
     discrepancyType =
       data.discrepancyType === "NONE" ? null : data.discrepancyType;
-  } else if (isInventory) {
+  } else if (isMaterielInventory) {
     discrepancyType = computeDiscrepancy({
       present,
       quantityObserved,
@@ -134,10 +159,12 @@ export async function PATCH(
     discrepancyType = existing.discrepancyType;
   }
 
-  // Dérive le status pour les visites INVENTORY (compatibilité moteur
-  // existant — `status` reste source d'agrégation côté stats).
+  // Dérive le status (source d'agrégation côté stats).
   let status = data.status ?? existing.status;
-  if (isInventory) {
+  if (isPhone) {
+    // OK uniquement si BON ; HS / difficultés d'émission ou réception → NON.
+    status = phoneStatus === null || phoneStatus === "BON" ? "OUI" : "NON";
+  } else if (isMaterielInventory) {
     if (discrepancyType === null && present !== false) {
       status = "OUI";
     } else if (discrepancyType || present === false) {
@@ -156,6 +183,7 @@ export async function PATCH(
       quantityObserved,
       expirationDateObserved,
       discrepancyType,
+      phoneStatus,
       recordedAt: new Date(),
       recordedById: u.id,
     },

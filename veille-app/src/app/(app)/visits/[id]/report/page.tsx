@@ -36,19 +36,20 @@ export default async function VisitReportPage({
     },
   });
   if (!visit) notFound();
-  // En mode INVENTORY le rendu PDF s'appuie sur le catalogue d'équipements
-  // (pas sur les observations / NC). On le pré-charge ici.
-  const equipments =
-    visit.template.kind === "INVENTORY"
-      ? await prisma.siteEquipment.findMany({
-          where: { siteId: visit.siteId, isActive: true },
-          orderBy: [
-            { category: "asc" },
-            { sortOrder: "asc" },
-            { label: "asc" },
-          ],
-        })
-      : [];
+  // Les visites pilotées par catalogue (INVENTORY, S6A7) s'appuient sur le
+  // catalogue d'équipements pour le rendu. On le pré-charge selon le domaine.
+  const catalogDomain =
+    visit.template.kind === "S6A7"
+      ? "S6A7"
+      : visit.template.kind === "INVENTORY"
+        ? "VEILLE_SITE"
+        : null;
+  const equipments = catalogDomain
+    ? await prisma.siteEquipment.findMany({
+        where: { siteId: visit.siteId, isActive: true, domain: catalogDomain },
+        orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { label: "asc" }],
+      })
+    : [];
   return (
     <VisitReportClient
       visit={JSON.parse(JSON.stringify(visit))}

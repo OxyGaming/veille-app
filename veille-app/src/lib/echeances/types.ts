@@ -16,6 +16,7 @@
 export type EcheanceKind =
   | "VISIT_QUARTERLY"
   | "VISIT_PLANNED"
+  | "VISIT_S6A7"
   | "VEHICLE_ROUND"
   | "EQUIPMENT_EXPIRING"
   | "ACTION_OVERDUE";

@@ -17,6 +17,7 @@ import { prisma } from "@/lib/prisma";
 import {
   classifyVisitTemplateSlug,
   visitFrequencyDays,
+  S6A7_TOLERANCE_DAYS,
 } from "@/lib/today/constants";
 import { log } from "@/lib/logger";
 import { isCriticalEcheance } from "./criticality";
@@ -58,20 +59,41 @@ function diffDaysFloor(target: Date, now: Date): number {
  * `lastVisitDate = null` → jamais visité, dueAt = null, daysToDue = null.
  */
 function buildVisitEcheance(
-  kind: "VISIT_QUARTERLY" | "VISIT_PLANNED",
+  kind: "VISIT_QUARTERLY" | "VISIT_PLANNED" | "VISIT_S6A7",
   site: { id: string; name: string; isOccupied: boolean; teamIds: string[] },
   lastVisitDate: Date | null,
   now: Date,
 ): EcheanceItem {
-  const cadence = kind === "VISIT_QUARTERLY" ? "quarterly" : "planned";
+  const cadence =
+    kind === "VISIT_QUARTERLY"
+      ? "quarterly"
+      : kind === "VISIT_PLANNED"
+        ? "planned"
+        : "s6a7";
   const frequencyDays = visitFrequencyDays(cadence, site.isOccupied);
   const dueAt = lastVisitDate
     ? new Date(lastVisitDate.getTime() + frequencyDays * DAY_MS)
     : null;
   const daysToDue = dueAt ? diffDaysFloor(dueAt, now) : null;
-  const urgency = classifyEcheanceUrgency(daysToDue);
+  let urgency = classifyEcheanceUrgency(daysToDue);
+  // Tolérance S6A7 ± 2 mois : tant que le retard reste dans la tolérance après
+  // l'échéance annuelle, la visite n'est pas « en retard » — on la signale
+  // « à réaliser » (today). Au-delà de la tolérance, le classement redevient
+  // « late » standard (et critique via isCriticalEcheance).
+  if (
+    kind === "VISIT_S6A7" &&
+    daysToDue !== null &&
+    daysToDue < 0 &&
+    daysToDue >= -S6A7_TOLERANCE_DAYS
+  ) {
+    urgency = "today";
+  }
   const title =
-    kind === "VISIT_QUARTERLY" ? "Visite trimestrielle" : "Visite planifiée";
+    kind === "VISIT_QUARTERLY"
+      ? "Visite trimestrielle"
+      : kind === "VISIT_PLANNED"
+        ? "Visite planifiée"
+        : "Visite S6A7";
   const subtitle = site.name;
   return {
     id: `${kind}:${site.id}`,
@@ -254,6 +276,14 @@ export async function getVisitEcheances(
           template: { select: { slug: true } },
         },
       },
+      // Présence d'un référentiel S6A7 : la cadence S6A7 ne s'applique qu'aux
+      // sites qui ont au moins un élément S6A7 configuré (sinon on flaggerait
+      // tous les sites « jamais fait »).
+      equipments: {
+        where: { domain: "S6A7", isActive: true },
+        select: { id: true },
+        take: 1,
+      },
     },
     take: VISIT_SITES_MAX,
   });
@@ -267,11 +297,13 @@ export async function getVisitEcheances(
     const teamIds = s.memberships.map((m) => m.teamId);
     let lastQuarterly: Date | null = null;
     let lastPlanned: Date | null = null;
+    let lastS6a7: Date | null = null;
     for (const v of s.visits) {
       if (!v.finishedAt) continue;
       const cadence = classifyVisitTemplateSlug(v.template.slug);
       if (cadence === "quarterly" && !lastQuarterly) lastQuarterly = v.finishedAt;
       else if (cadence === "planned" && !lastPlanned) lastPlanned = v.finishedAt;
+      else if (cadence === "s6a7" && !lastS6a7) lastS6a7 = v.finishedAt;
     }
     items.push(
       buildVisitEcheance(
@@ -287,6 +319,17 @@ export async function getVisitEcheances(
         now,
       ),
     );
+    // Échéance S6A7 uniquement pour les sites dotés d'un référentiel S6A7.
+    if ((s.equipments?.length ?? 0) > 0) {
+      items.push(
+        buildVisitEcheance(
+          "VISIT_S6A7",
+          { id: s.id, name: s.name, isOccupied: s.isOccupied, teamIds },
+          lastS6a7,
+          now,
+        ),
+      );
+    }
   }
   return items;
 }

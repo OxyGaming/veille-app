@@ -35,7 +35,8 @@ export function ctaForEcheance(input: CtaInput): EcheanceCta {
 
   switch (kind) {
     case "VISIT_QUARTERLY":
-    case "VISIT_PLANNED": {
+    case "VISIT_PLANNED":
+    case "VISIT_S6A7": {
       const href = siteId ? `/sites/${siteId}` : "/today";
       return { label: "Ouvrir le site", href };
     }

@@ -20,6 +20,7 @@
  *  - futurs dashboards V2+.
  */
 
+import { S6A7_TOLERANCE_DAYS } from "@/lib/today/constants";
 import type { EcheanceItem, EcheanceKind } from "./types";
 
 /** Seuil critique en jours pour les actions ouvertes (D13). */
@@ -51,6 +52,13 @@ export function isCriticalEcheance(
       // « Jamais contrôlé » est critique par convention (cf. memory).
       if (daysToDue === null) return true;
       return daysToDue < -VISIT_CRITICAL_THRESHOLD_DAYS;
+
+    case "VISIT_S6A7":
+      // Cadence annuelle avec tolérance ± 2 mois : « jamais contrôlé » est
+      // critique ; sinon on ne devient critique qu'au-delà de la tolérance
+      // ET du seuil de retard visite (tolérance + 30 j).
+      if (daysToDue === null) return true;
+      return daysToDue < -(S6A7_TOLERANCE_DAYS + VISIT_CRITICAL_THRESHOLD_DAYS);
 
     case "EQUIPMENT_EXPIRING":
       // « Pas d'expiration » (équipement non périssable) = non critique.
@@ -86,6 +94,7 @@ export function isKnownEcheanceKind(value: string): value is EcheanceKind {
   return (
     value === "VISIT_QUARTERLY" ||
     value === "VISIT_PLANNED" ||
+    value === "VISIT_S6A7" ||
     value === "VEHICLE_ROUND" ||
     value === "EQUIPMENT_EXPIRING" ||
     value === "ACTION_OVERDUE"

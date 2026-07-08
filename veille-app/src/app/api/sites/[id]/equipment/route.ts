@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser, siteScope } from "@/lib/auth";
+import { EQUIPMENT_DOMAINS, ITEM_KINDS } from "@/lib/s6a7";
 import {
   defaultMessageFor,
   formatQuotedSnippet,
@@ -11,9 +12,11 @@ import {
 
 /**
  * Catalogue d'équipements d'un site (référentiel pour les visites de type
- * INVENTORY).
+ * INVENTORY et S6A7).
  *
- *  - GET  : tous rôles (lecture seule pour USER).
+ *  - GET  : tous rôles (lecture seule pour USER). Filtré par `?domain=`
+ *           (défaut VEILLE_SITE) pour ne pas mélanger les référentiels
+ *           veille de site et S6A7.
  *  - POST : ADMIN/EDITOR (création d'un équipement).
  *
  * Le scope team est vérifié côté Site (l'utilisateur doit avoir accès au
@@ -22,6 +25,8 @@ import {
 const createSchema = z.object({
   label: z.string().min(1).max(200),
   category: z.string().min(1).max(100),
+  itemKind: z.enum(ITEM_KINDS).default("MATERIEL"),
+  domain: z.enum(EQUIPMENT_DOMAINS).default("VEILLE_SITE"),
   expectedQuantity: z.number().int().min(0).nullable().optional(),
   isPerishable: z.boolean().default(false),
   expirationDate: z.string().datetime().nullable().optional(),
@@ -30,7 +35,7 @@ const createSchema = z.object({
 });
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
   let u;
@@ -47,8 +52,17 @@ export async function GET(
   if (!site)
     return NextResponse.json({ error: "Site introuvable" }, { status: 404 });
 
+  // Filtre par domaine (défaut VEILLE_SITE) : le catalogue veille de site et
+  // le référentiel S6A7 vivent dans la même table mais ne se mélangent pas.
+  const domainParam = new URL(req.url).searchParams.get("domain");
+  const domain = EQUIPMENT_DOMAINS.includes(
+    domainParam as (typeof EQUIPMENT_DOMAINS)[number],
+  )
+    ? (domainParam as (typeof EQUIPMENT_DOMAINS)[number])
+    : "VEILLE_SITE";
+
   const equipments = await prisma.siteEquipment.findMany({
-    where: { siteId, isActive: true },
+    where: { siteId, isActive: true, domain },
     orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { label: "asc" }],
   });
   return NextResponse.json(equipments);
@@ -94,6 +108,8 @@ export async function POST(
       siteId,
       label: data.label.trim(),
       category: data.category.trim(),
+      itemKind: data.itemKind,
+      domain: data.domain,
       expectedQuantity: data.expectedQuantity ?? null,
       isPerishable: data.isPerishable,
       expirationDate: data.expirationDate ? new Date(data.expirationDate) : null,

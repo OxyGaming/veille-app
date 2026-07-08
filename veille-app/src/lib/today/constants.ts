@@ -42,6 +42,16 @@ export const OCCUPIED_PLANNED_VISIT_DAYS = 180;
 /** Visite planifiée d'un site inoccupé — 1 visite par an. */
 export const UNOCCUPIED_PLANNED_VISIT_DAYS = 365;
 
+/** Visite S6A7 — cadence annuelle (1 visite par an). */
+export const S6A7_VISIT_DAYS = 365;
+
+/**
+ * Tolérance de la visite S6A7 : ± 2 mois autour de l'échéance annuelle.
+ * Tant que le retard reste dans cette tolérance, la visite n'est pas comptée
+ * « en retard » — juste « à réaliser ». Au-delà, retard réel (puis critique).
+ */
+export const S6A7_TOLERANCE_DAYS = 60;
+
 /**
  * Fréquence par défaut utilisée par l'agrégateur V1 pour détecter « sites
  * sans visite récente ». Calque la cadence trimestrielle (plus contraignante)
@@ -92,9 +102,10 @@ export const URGENCY_THRESHOLDS = {
  * dans Today et le futur Hub Échéances.
  *  - `quarterly` : 90 j pour TOUS les sites (cadence trimestrielle).
  *  - `planned`   : 180 j si occupé, 365 j si inoccupé.
+ *  - `s6a7`      : 365 j (annuel), tolérance ± 2 mois.
  *  - `other`     : autres modèles (INVENTORY, etc.) — non suivis ici.
  */
-export type VisitCadenceType = "quarterly" | "planned" | "other";
+export type VisitCadenceType = "quarterly" | "planned" | "s6a7" | "other";
 
 /**
  * Convention de nommage actuelle des templates seedés :
@@ -110,6 +121,7 @@ export function classifyVisitTemplateSlug(slug: string): VisitCadenceType {
   const s = slug.toLowerCase();
   if (s.startsWith("trimestrielle")) return "quarterly";
   if (s.startsWith("planifiee") || s.startsWith("planifi")) return "planned";
+  if (s.startsWith("s6a7")) return "s6a7";
   return "other";
 }
 
@@ -128,5 +140,6 @@ export function visitFrequencyDays(
       ? OCCUPIED_PLANNED_VISIT_DAYS
       : UNOCCUPIED_PLANNED_VISIT_DAYS;
   }
+  if (cadence === "s6a7") return S6A7_VISIT_DAYS;
   return DEFAULT_VISIT_FREQUENCY_DAYS;
 }

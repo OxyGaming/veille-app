@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireUser, siteScope } from "@/lib/auth";
+import { ITEM_KINDS } from "@/lib/s6a7";
 
 /**
  * Édition / suppression d'un équipement du catalogue site.
@@ -17,6 +18,7 @@ import { requireUser, siteScope } from "@/lib/auth";
 const patchSchema = z.object({
   label: z.string().min(1).max(200).optional(),
   category: z.string().min(1).max(100).optional(),
+  itemKind: z.enum(ITEM_KINDS).optional(),
   expectedQuantity: z.number().int().min(0).nullable().optional(),
   isPerishable: z.boolean().optional(),
   expirationDate: z.string().datetime().nullable().optional(),
@@ -72,6 +74,7 @@ export async function PATCH(
     data: {
       label: data.label?.trim(),
       category: data.category?.trim(),
+      itemKind: data.itemKind,
       expectedQuantity:
         data.expectedQuantity === undefined
           ? undefined

@@ -18,8 +18,9 @@ export type SeedTemplate = {
    * Type de moteur :
    *  - CHECKLIST  : items définis par le template (sections + items)
    *  - INVENTORY  : items générés depuis le catalogue SiteEquipment du site
+   *  - S6A7       : variante INVENTORY à deux familles (téléphones + petit matériel)
    */
-  kind?: "CHECKLIST" | "INVENTORY";
+  kind?: "CHECKLIST" | "INVENTORY" | "S6A7";
   /** Périodicité attendue en jours (null = libre). */
   expectedFrequencyDays?: number;
   sections: SeedSection[];
@@ -574,8 +575,35 @@ export const TEMPLATE_VEILLE_SITE: SeedTemplate = {
   sections: [],
 };
 
+/**
+ * Visite S6A7 (mode S6A7 — variante INVENTORY à deux familles).
+ *
+ * Deux familles d'éléments, toutes deux issues du catalogue `SiteEquipment`
+ * du site filtré sur `domain = "S6A7"` :
+ *  - Téléphones de voie (`itemKind = "PHONE"`) : statut de fonctionnement à
+ *    4 états (BON / HS / DIFF_RECEPTION / DIFF_EMISSION) + commentaire.
+ *    Ne génère JAMAIS d'action, même HS.
+ *  - Petit matériel (`itemKind = "MATERIEL"`, catégories "Dispositifs
+ *    d'attention…" ou "Matériel divers") : logique trousse de secours
+ *    (présence / quantité / péremption). Un écart génère une action site.
+ *
+ * Cadence annuelle (365 j) avec tolérance ± 2 mois — la tolérance est gérée
+ * côté hub Échéances (voir src/lib/echeances), pas ici.
+ */
+export const TEMPLATE_S6A7: SeedTemplate = {
+  slug: "s6a7",
+  name: "Visite S6A7",
+  description:
+    "Contrôle S6A7 d'un site : vérification des téléphones de voie (constat de bon fonctionnement, sans génération d'action) et inventaire du petit matériel (dispositifs d'attention, spéciaux et de réflexion ; matériel divers). Les éléments proviennent du référentiel S6A7 de l'établissement. Un écart sur le petit matériel génère une action ; les téléphones n'en génèrent jamais.",
+  pdfLayout: "VEILLE",
+  kind: "S6A7",
+  expectedFrequencyDays: 365,
+  sections: [],
+};
+
 export const SEED_VISIT_TEMPLATES: SeedTemplate[] = [
   TEMPLATE_TRIMESTRIELLE,
   TEMPLATE_PLANIFIEE,
   TEMPLATE_VEILLE_SITE,
+  TEMPLATE_S6A7,
 ];

@@ -327,8 +327,18 @@ model SiteEquipment {
   /// Libellé visible (ex. "Extincteur N°4 (CO2 2kg)", "Plan d'évacuation").
   label            String
   /// Catégorie pour regrouper dans l'UI et le PDF
-  /// (ex. "Trousse de secours", "Extincteurs", "Affichage").
+  /// (ex. "Trousse de secours", "Extincteurs", "Affichage" ;
+  ///  pour S6A7 : "Dispositifs d'attention…" | "Matériel divers").
   category         String
+  /// Famille d'élément :
+  ///  - MATERIEL : petit matériel / équipement inventorié (comportement
+  ///               trousse de secours : présence, quantité, péremption → écart → action).
+  ///  - PHONE    : téléphone de voie (visite S6A7) — statut de fonctionnement
+  ///               à 4 états, NE génère jamais d'action.
+  itemKind         String    @default("MATERIEL")
+  /// Modèle de visite auquel ce catalogue est rattaché, pour ne pas mélanger
+  /// les référentiels : VEILLE_SITE (veille de site) | S6A7 (visite S6A7).
+  domain           String    @default("VEILLE_SITE")
   /// Quantité attendue (null si non quantifiable, ex. plan, registre).
   expectedQuantity Int?
   /// True si l'élément a une date de péremption à suivre.
@@ -349,6 +359,8 @@ model SiteEquipment {
   @@index([siteId])
   @@index([category])
   @@index([isActive])
+  @@index([domain])
+  @@index([itemKind])
 }
 
 /// Lien many-to-many site ↔ équipe.
@@ -382,6 +394,9 @@ model SiteVisitTemplate {
   ///  - INVENTORY  : items générés depuis le catalogue SiteEquipment du site
   ///                 visité. La saisie suit la logique "conformité par défaut" :
   ///                 l'agent ne pointe que les écarts.
+  ///  - S6A7       : variante INVENTORY à deux familles (téléphones de voie +
+  ///                 petit matériel). Catalogue filtré sur SiteEquipment.domain=S6A7.
+  ///                 Les téléphones ne génèrent jamais d'action.
   kind                  String   @default("CHECKLIST")
   /// Périodicité attendue en jours (null = libre). Sert à identifier les
   /// visites en retard et alimenter un futur tableau de bord conformité.
@@ -513,8 +528,13 @@ model SiteVisitObservation {
   ///  PER_SECTION : CONFORME | NON_CONFORME | SANS_OBJET
   ///  INVENTORY   : dérivé de `present` et `discrepancyType` —
   ///                OUI si conforme, NON si écart, SANS_OBJET si non applicable
+  ///  S6A7        : petit matériel identique à INVENTORY ; téléphones = voir `phoneStatus`.
   status                 String    @default("PENDING")
   comment                String?
+  /// Statut de fonctionnement d'un téléphone de voie (visite S6A7 uniquement,
+  /// NULL sinon) : BON | HS | DIFF_RECEPTION | DIFF_EMISSION.
+  /// Aucun de ces statuts ne génère d'action, même HS.
+  phoneStatus            String?
   /// Champs INVENTORY (nullable en mode CHECKLIST).
   ///
   /// Source de vérité du constat de présence en mode INVENTORY :

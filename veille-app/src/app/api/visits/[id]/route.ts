@@ -212,15 +212,22 @@ export async function PATCH(
     });
   }
 
-  // Génération auto des NC + actions à la clôture d'une visite INVENTORY.
-  // Idempotent : on saute les observations qui ont déjà généré une NC
-  // (clé externalRef nc-inv-{observationId}).
+  // Génération auto des NC + actions à la clôture d'une visite pilotée par
+  // catalogue (INVENTORY ou S6A7). Idempotent : on saute les observations qui
+  // ont déjà généré une NC (clé externalRef nc-inv-{observationId}).
+  // Pour S6A7, seul le petit matériel est concerné — les téléphones de voie
+  // n'ont jamais de discrepancyType et sont donc exclus.
   if (
     data.status === "completed" &&
-    existing.template.kind === "INVENTORY" &&
+    (existing.template.kind === "INVENTORY" ||
+      existing.template.kind === "S6A7") &&
     existing.status !== "completed"
   ) {
-    await generateInventoryNonConformities(updated.id, existing.teamId);
+    await generateInventoryNonConformities(
+      updated.id,
+      existing.teamId,
+      existing.template.kind,
+    );
   }
 
   // Flux d'activité équipe — uniquement à la transition vers `completed`.
@@ -296,12 +303,21 @@ export async function PATCH(
  *  - Échéance par défaut : J+30
  *  - externalId stable `nc-inv-{observationId}` → idempotent
  */
-async function generateInventoryNonConformities(visitId: string, teamId: string) {
+async function generateInventoryNonConformities(
+  visitId: string,
+  teamId: string,
+  templateKind: string,
+) {
+  // Tag de source pour tracer l'origine de l'action (filtrage / stats).
+  const sourceTag = templateKind === "S6A7" ? "s6a7" : "veille de site";
   const obs = await prisma.siteVisitObservation.findMany({
     where: {
       visitId,
       discrepancyType: { not: null },
       equipmentId: { not: null },
+      // Défensif : un téléphone de voie n'a jamais de discrepancyType, mais on
+      // exclut explicitement la famille PHONE pour garantir « aucune action ».
+      equipment: { is: { itemKind: "MATERIEL" } },
     },
     include: {
       equipment: {
@@ -342,7 +358,7 @@ async function generateInventoryNonConformities(visitId: string, teamId: string)
       TAG_VEILLE_LEGALE,
       TAG_OBLIGATOIRE,
       "site",
-      "veille de site",
+      sourceTag,
       tagForDiscrepancy(o.discrepancyType),
     ].filter(Boolean) as string[];
     const dedupHash = createHash("sha1")

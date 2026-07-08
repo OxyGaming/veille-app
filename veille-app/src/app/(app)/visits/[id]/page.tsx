@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser, siteScope } from "@/lib/auth";
 import VisitClient from "./VisitClient";
 import VisitInventoryClient from "./VisitInventoryClient";
+import VisitS6A7Client from "./VisitS6A7Client";
 
 export const dynamic = "force-dynamic";
 
@@ -40,14 +41,27 @@ export default async function VisitPage({
     },
   });
   if (!visit) notFound();
-  // Bascule de moteur côté serveur : INVENTORY a son rendu dédié.
+  // Bascule de moteur côté serveur : INVENTORY et S6A7 ont leur rendu dédié,
+  // alimenté par le catalogue SiteEquipment du domaine correspondant.
   if (visit.template.kind === "INVENTORY") {
     const equipments = await prisma.siteEquipment.findMany({
-      where: { siteId: visit.siteId },
+      where: { siteId: visit.siteId, domain: "VEILLE_SITE" },
       orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { label: "asc" }],
     });
     return (
       <VisitInventoryClient
+        visit={JSON.parse(JSON.stringify(visit))}
+        equipments={JSON.parse(JSON.stringify(equipments))}
+      />
+    );
+  }
+  if (visit.template.kind === "S6A7") {
+    const equipments = await prisma.siteEquipment.findMany({
+      where: { siteId: visit.siteId, domain: "S6A7" },
+      orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { label: "asc" }],
+    });
+    return (
+      <VisitS6A7Client
         visit={JSON.parse(JSON.stringify(visit))}
         equipments={JSON.parse(JSON.stringify(equipments))}
       />

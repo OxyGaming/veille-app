@@ -34,6 +34,7 @@ const SECTIONS: Section[] = [
   { href: "/admin/vehicles", label: "Véhicules", icon: Icon.Truck, roles: ["ADMIN", "EDITOR"] },
   { href: "/admin/vehicle-round-templates", label: "Grille tournée VS", icon: Icon.FileEdit, roles: ["ADMIN", "EDITOR"] },
   { href: "/admin/visit-templates", label: "Modèles de visite", icon: Icon.FileText, roles: ["ADMIN", "EDITOR"] },
+  { href: "/admin/s6a7", label: "Visites S6A7", icon: Icon.Phone, roles: ["ADMIN", "EDITOR"] },
   { href: "/admin/links", label: "Liens utiles", icon: Icon.Link, roles: ["ADMIN", "EDITOR"] },
   { href: "/admin/contacts", label: "Contacts", icon: Icon.Phone, roles: ["ADMIN", "EDITOR"] },
   { href: "/admin/audit", label: "Audit", icon: Icon.Shield, roles: ["ADMIN"] },

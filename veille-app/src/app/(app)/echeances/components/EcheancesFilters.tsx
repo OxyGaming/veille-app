@@ -22,6 +22,7 @@ const URGENCY_OPTIONS: { value: EcheanceUrgency | "critical"; label: string }[] 
 const TYPE_OPTIONS: { value: EcheanceKind; label: string }[] = [
   { value: "VISIT_QUARTERLY", label: "Trimestrielle" },
   { value: "VISIT_PLANNED", label: "Planifiée" },
+  { value: "VISIT_S6A7", label: "S6A7" },
   { value: "VEHICLE_ROUND", label: "Tournée VS" },
   { value: "EQUIPMENT_EXPIRING", label: "Équipement" },
   { value: "ACTION_OVERDUE", label: "Action" },

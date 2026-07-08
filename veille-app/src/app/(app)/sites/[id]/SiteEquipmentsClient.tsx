@@ -4,11 +4,20 @@ import { useMemo, useState } from "react";
 import { format, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Icon } from "@/components/icons";
+import {
+  PHONE_CATEGORY,
+  S6A7_MATERIEL_CATEGORIES,
+  type ItemKind,
+} from "@/lib/s6a7";
+
+type Domain = "VEILLE_SITE" | "S6A7";
 
 type Equipment = {
   id: string;
   label: string;
   category: string;
+  itemKind: ItemKind;
+  domain: string;
   expectedQuantity: number | null;
   isPerishable: boolean;
   expirationDate: string | null;
@@ -17,12 +26,19 @@ type Equipment = {
   isActive: boolean;
 };
 
+const DOMAIN_TABS: { value: Domain; label: string }[] = [
+  { value: "VEILLE_SITE", label: "Veille de site" },
+  { value: "S6A7", label: "S6A7" },
+];
+
 /**
- * Onglet « Équipements » sur la fiche site.
- *  - USER : lecture seule, groupé par catégorie, indicateurs visuels
- *    péremption.
- *  - ADMIN/EDITOR : ajout, édition inline via modale, suppression,
- *    import CSV.
+ * Onglet « Équipements » sur la fiche site — point d'entrée unique pour les
+ * deux référentiels (même table SiteEquipment, distingués par `domain`) :
+ *  - Veille de site : catalogue classique (trousses, extincteurs, affichages…).
+ *  - S6A7 : téléphones de voie + petit matériel.
+ *
+ * USER : lecture seule. ADMIN/EDITOR : ajout/édition/suppression, import CSV
+ * (veille de site uniquement).
  */
 export default function SiteEquipmentsClient({
   siteId,
@@ -35,11 +51,40 @@ export default function SiteEquipmentsClient({
   initial: Equipment[];
   canEdit: boolean;
 }) {
-  const [list, setList] = useState<Equipment[]>(initial);
+  const [domain, setDomain] = useState<Domain>("VEILLE_SITE");
+  // Cache par domaine : VEILLE_SITE pré-chargé (SSR), S6A7 chargé à la demande.
+  const [cache, setCache] = useState<Record<Domain, Equipment[] | null>>({
+    VEILLE_SITE: initial,
+    S6A7: null,
+  });
+  const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<Equipment | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const list = cache[domain] ?? [];
+
+  async function switchDomain(next: Domain) {
+    setDomain(next);
+    setError(null);
+    if (cache[next] !== null) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/sites/${siteId}/equipment?domain=${next}`);
+      if (!res.ok) throw new Error("Chargement impossible");
+      const data: Equipment[] = await res.json();
+      setCache((c) => ({ ...c, [next]: data }));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function setDomainList(updater: (arr: Equipment[]) => Equipment[]) {
+    setCache((c) => ({ ...c, [domain]: updater(c[domain] ?? []) }));
+  }
 
   const grouped = useMemo(() => {
     const map = new Map<string, Equipment[]>();
@@ -51,10 +96,10 @@ export default function SiteEquipmentsClient({
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b, "fr"));
   }, [list]);
 
-  // Catégories existantes — alimente l'autocomplete des modales.
+  // Catégories existantes — alimente l'autocomplete des modales (veille de site).
   const categories = useMemo(
     () => [...new Set(list.map((e) => e.category))].sort(),
-    [list]
+    [list],
   );
 
   async function saveCreate(payload: Partial<Equipment>) {
@@ -62,7 +107,7 @@ export default function SiteEquipmentsClient({
     const res = await fetch(`/api/sites/${siteId}/equipment`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, domain }),
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
@@ -70,7 +115,7 @@ export default function SiteEquipmentsClient({
       return;
     }
     const created = await res.json();
-    setList((arr) => [...arr, created]);
+    setDomainList((arr) => [...arr, created]);
     setCreating(false);
   }
 
@@ -87,7 +132,7 @@ export default function SiteEquipmentsClient({
       return;
     }
     const updated = await res.json();
-    setList((arr) => arr.map((x) => (x.id === eqId ? updated : x)));
+    setDomainList((arr) => arr.map((x) => (x.id === eqId ? updated : x)));
     setEditing(null);
   }
 
@@ -96,20 +141,22 @@ export default function SiteEquipmentsClient({
       `Supprimer « ${e.label} » du catalogue ?\n\n` +
         `Les observations historiques perdront leur lien (mais resteront ` +
         `visibles dans le rapport de visite). Préfère la désactivation si ` +
-        `tu n'es pas sûr.`
+        `tu n'es pas sûr.`,
     );
     if (!ok) return;
     const res = await fetch(
       `/api/sites/${siteId}/equipment/${e.id}?mode=hard`,
-      { method: "DELETE" }
+      { method: "DELETE" },
     );
     if (res.ok) {
-      setList((arr) => arr.filter((x) => x.id !== e.id));
+      setDomainList((arr) => arr.filter((x) => x.id !== e.id));
     } else {
       const j = await res.json().catch(() => ({}));
       setError(j.error || "Suppression refusée");
     }
   }
+
+  const addLabel = domain === "S6A7" ? "Ajouter un élément S6A7" : "Ajouter";
 
   return (
     <section className="lg:col-span-2">
@@ -123,20 +170,39 @@ export default function SiteEquipmentsClient({
         </h2>
         {canEdit && (
           <div className="flex gap-2">
-            <button
-              onClick={() => setImporting(true)}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded-lg"
-            >
-              <Icon.Upload className="w-3.5 h-3.5" /> Importer CSV
-            </button>
+            {domain === "VEILLE_SITE" && (
+              <button
+                onClick={() => setImporting(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded-lg"
+              >
+                <Icon.Upload className="w-3.5 h-3.5" /> Importer CSV
+              </button>
+            )}
             <button
               onClick={() => setCreating(true)}
               className="inline-flex items-center gap-1.5 text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white px-2.5 py-1.5 rounded-lg"
             >
-              <Icon.Plus className="w-3.5 h-3.5" /> Ajouter
+              <Icon.Plus className="w-3.5 h-3.5" /> {addLabel}
             </button>
           </div>
         )}
+      </div>
+
+      {/* Sélecteur de domaine — un seul endroit pour les deux référentiels. */}
+      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 mb-3">
+        {DOMAIN_TABS.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => switchDomain(t.value)}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
+              domain === t.value
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {error && (
@@ -145,10 +211,16 @@ export default function SiteEquipmentsClient({
         </div>
       )}
 
-      {grouped.length === 0 ? (
+      {loading ? (
         <div className="card px-4 py-6 text-center text-xs text-slate-500">
-          Aucun équipement défini.
-          {canEdit && " Importe un CSV ou clique « Ajouter »."}
+          Chargement…
+        </div>
+      ) : grouped.length === 0 ? (
+        <div className="card px-4 py-6 text-center text-xs text-slate-500">
+          {domain === "S6A7"
+            ? "Aucun élément S6A7 défini."
+            : "Aucun équipement défini."}
+          {canEdit && ` Clique « ${addLabel} ».`}
         </div>
       ) : (
         <div className="grid gap-3">
@@ -180,6 +252,7 @@ export default function SiteEquipmentsClient({
 
       {creating && (
         <EquipmentModal
+          domain={domain}
           initial={null}
           categories={categories}
           onCancel={() => setCreating(false)}
@@ -188,6 +261,7 @@ export default function SiteEquipmentsClient({
       )}
       {editing && (
         <EquipmentModal
+          domain={domain}
           initial={editing}
           categories={categories}
           onCancel={() => setEditing(null)}
@@ -200,7 +274,7 @@ export default function SiteEquipmentsClient({
           siteName={siteName}
           onCancel={() => setImporting(false)}
           onDone={(newList) => {
-            setList(newList);
+            setCache((c) => ({ ...c, VEILLE_SITE: newList }));
             setImporting(false);
           }}
         />
@@ -227,8 +301,12 @@ function EquipmentRow({
   // Badge péremption : 🔴 si déjà périmé, 🟡 si <30 jours, sinon discret.
   const exp = eq.expirationDate ? new Date(eq.expirationDate) : null;
   const daysUntil = exp ? differenceInDays(exp, new Date()) : null;
+  const isPhone = eq.itemKind === "PHONE";
   return (
     <li className="px-3 py-2.5 flex items-center gap-3 hover:bg-slate-50/60">
+      {isPhone && (
+        <Icon.Phone className="w-4 h-4 text-slate-300 shrink-0" />
+      )}
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold text-slate-900 truncate">
           {eq.label}
@@ -243,8 +321,8 @@ function EquipmentRow({
                 daysUntil != null && daysUntil < 0
                   ? "text-rose-700 font-semibold"
                   : daysUntil != null && daysUntil < 30
-                  ? "text-amber-700 font-semibold"
-                  : "text-slate-500"
+                    ? "text-amber-700 font-semibold"
+                    : "text-slate-500"
               }`}
             >
               <Icon.AlertTriangle className="w-3 h-3" />
@@ -291,31 +369,51 @@ function EquipmentRow({
 }
 
 /* ============================================================================
- *  Modale add/édit équipement
+ *  Modale add/édit équipement — adaptée au domaine actif.
+ *   - Veille de site : libellé + catégorie libre + qté + péremption + notes.
+ *   - S6A7 : choix téléphone / petit matériel.
+ *       · Téléphone      → libellé + notes (catégorie figée, sans action).
+ *       · Petit matériel → libellé + type (2 catégories) + qté + péremption.
  * ========================================================================== */
 
 function EquipmentModal({
+  domain,
   initial,
   categories,
   onCancel,
   onSave,
 }: {
+  domain: Domain;
   initial: Equipment | null;
   categories: string[];
   onCancel: () => void;
   onSave: (payload: Partial<Equipment>) => void;
 }) {
-  const [label, setLabel] = useState(initial?.label ?? "");
-  const [category, setCategory] = useState(initial?.category ?? "");
-  const [expectedQuantity, setExpectedQuantity] = useState<string>(
-    initial?.expectedQuantity != null ? String(initial.expectedQuantity) : ""
+  const isS6A7 = domain === "S6A7";
+  const [itemKind, setItemKind] = useState<ItemKind>(
+    initial?.itemKind ?? "MATERIEL",
   );
-  const [isPerishable, setIsPerishable] = useState(initial?.isPerishable ?? false);
+  const isPhone = isS6A7 && itemKind === "PHONE";
+
+  const [label, setLabel] = useState(initial?.label ?? "");
+  const [category, setCategory] = useState(
+    initial?.category ??
+      (isS6A7 ? S6A7_MATERIEL_CATEGORIES[0] : ""),
+  );
+  const [expectedQuantity, setExpectedQuantity] = useState<string>(
+    initial?.expectedQuantity != null ? String(initial.expectedQuantity) : "",
+  );
+  const [isPerishable, setIsPerishable] = useState(
+    initial?.isPerishable ?? false,
+  );
   const [expirationDate, setExpirationDate] = useState(
-    initial?.expirationDate?.slice(0, 10) ?? ""
+    initial?.expirationDate?.slice(0, 10) ?? "",
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
-  const valid = label.trim().length > 0 && category.trim().length > 0;
+
+  // Veille de site : catégorie obligatoire. S6A7 : gérée par le type.
+  const valid =
+    label.trim().length > 0 && (isS6A7 || category.trim().length > 0);
 
   const matchedCategories = useMemo(() => {
     const q = category.trim().toLowerCase();
@@ -323,16 +421,42 @@ function EquipmentModal({
     return categories.filter((c) => c.toLowerCase().includes(q)).slice(0, 8);
   }, [category, categories]);
 
+  function submit() {
+    if (!valid) return;
+    if (isPhone) {
+      onSave({
+        label: label.trim(),
+        category: PHONE_CATEGORY,
+        itemKind: "PHONE",
+        expectedQuantity: null,
+        isPerishable: false,
+        expirationDate: null,
+        notes: notes.trim() || null,
+      });
+      return;
+    }
+    onSave({
+      label: label.trim(),
+      category: category.trim(),
+      itemKind: "MATERIEL",
+      expectedQuantity: expectedQuantity ? Number(expectedQuantity) : null,
+      isPerishable,
+      expirationDate:
+        isPerishable && expirationDate
+          ? new Date(expirationDate + "T00:00:00").toISOString()
+          : null,
+      notes: notes.trim() || null,
+    });
+  }
+
   return (
     <>
-      <div
-        className="fixed inset-0 bg-slate-900/50 z-40"
-        onClick={onCancel}
-      />
+      <div className="fixed inset-0 bg-slate-900/50 z-40" onClick={onCancel} />
       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] overflow-auto">
         <header className="px-5 py-4 border-b border-slate-100 flex items-center">
           <h3 className="font-bold">
-            {initial ? "Modifier l'équipement" : "Nouvel équipement"}
+            {initial ? "Modifier" : "Ajouter"}
+            {isS6A7 ? " — S6A7" : ""}
           </h3>
           <button
             onClick={onCancel}
@@ -342,6 +466,32 @@ function EquipmentModal({
           </button>
         </header>
         <div className="p-5 space-y-3">
+          {/* S6A7 : choix de la famille (verrouillé en édition). */}
+          {isS6A7 && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Famille
+              </label>
+              <div className="inline-flex rounded-lg border border-slate-200 p-0.5">
+                {(["PHONE", "MATERIEL"] as ItemKind[]).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    disabled={!!initial}
+                    onClick={() => setItemKind(k)}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors disabled:opacity-50 ${
+                      itemKind === k
+                        ? "bg-slate-900 text-white"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {k === "PHONE" ? "Téléphone de voie" : "Petit matériel"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
               Libellé <span className="text-rose-600">*</span>
@@ -349,62 +499,92 @@ function EquipmentModal({
             <input
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="Ex. Extincteur N°1, Pansement compressif 10×12"
+              placeholder={
+                isPhone
+                  ? "Ex. C9, Cv54, Transmetteur X7, Poste B"
+                  : "Ex. Extincteur N°1, Pansement compressif 10×12"
+              }
               className="w-full border-2 border-indigo-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none"
               autoFocus
             />
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Catégorie <span className="text-rose-600">*</span>
-            </label>
-            <input
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="Trousse de secours, Extincteurs, Affichage…"
-              list="equipment-categories"
-              className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none"
-            />
-            <datalist id="equipment-categories">
-              {matchedCategories.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+
+          {/* Catégorie : masquée pour un téléphone (figée). */}
+          {!isPhone && (
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Quantité attendue
+                {isS6A7 ? "Type de matériel" : "Catégorie"}{" "}
+                {!isS6A7 && <span className="text-rose-600">*</span>}
               </label>
-              <input
-                type="number"
-                min={0}
-                value={expectedQuantity}
-                onChange={(e) => setExpectedQuantity(e.target.value)}
-                placeholder="(vide = non quantifiable)"
-                className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none"
-              />
-            </div>
-            <div>
-              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 mb-1 mt-2">
-                <input
-                  type="checkbox"
-                  checked={isPerishable}
-                  onChange={(e) => setIsPerishable(e.target.checked)}
-                  className="w-4 h-4 accent-indigo-600"
-                />
-                Périssable (a une date)
-              </label>
-              {isPerishable && (
-                <input
-                  type="date"
-                  value={expirationDate}
-                  onChange={(e) => setExpirationDate(e.target.value)}
-                  className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none mt-1"
-                />
+              {isS6A7 ? (
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none"
+                >
+                  {S6A7_MATERIEL_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <>
+                  <input
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    placeholder="Trousse de secours, Extincteurs, Affichage…"
+                    list="equipment-categories"
+                    className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none"
+                  />
+                  <datalist id="equipment-categories">
+                    {matchedCategories.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+                </>
               )}
             </div>
-          </div>
+          )}
+
+          {/* Qté + péremption : pas pour un téléphone. */}
+          {!isPhone && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Quantité attendue
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={expectedQuantity}
+                  onChange={(e) => setExpectedQuantity(e.target.value)}
+                  placeholder="(vide = non quantifiable)"
+                  className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 mb-1 mt-2">
+                  <input
+                    type="checkbox"
+                    checked={isPerishable}
+                    onChange={(e) => setIsPerishable(e.target.checked)}
+                    className="w-4 h-4 accent-indigo-600"
+                  />
+                  {isS6A7 ? "Date de péremption" : "Périssable (a une date)"}
+                </label>
+                {isPerishable && (
+                  <input
+                    type="date"
+                    value={expirationDate}
+                    onChange={(e) => setExpirationDate(e.target.value)}
+                    className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none mt-1"
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
               Notes
@@ -425,22 +605,7 @@ function EquipmentModal({
             Annuler
           </button>
           <button
-            onClick={() =>
-              valid &&
-              onSave({
-                label: label.trim(),
-                category: category.trim(),
-                expectedQuantity: expectedQuantity
-                  ? Number(expectedQuantity)
-                  : null,
-                isPerishable,
-                expirationDate:
-                  isPerishable && expirationDate
-                    ? new Date(expirationDate + "T00:00:00").toISOString()
-                    : null,
-                notes: notes.trim() || null,
-              })
-            }
+            onClick={submit}
             disabled={!valid}
             className="text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg"
           >
@@ -453,7 +618,7 @@ function EquipmentModal({
 }
 
 /* ============================================================================
- *  Modale import CSV
+ *  Modale import CSV (veille de site uniquement)
  * ========================================================================== */
 
 function ImportModal({
@@ -498,10 +663,10 @@ function ImportModal({
         return;
       }
       setReport(j);
-      // Recharge la liste à jour
-      const fresh = await fetch(`/api/sites/${siteId}/equipment`).then((r) =>
-        r.json()
-      );
+      // Recharge la liste veille de site à jour.
+      const fresh = await fetch(
+        `/api/sites/${siteId}/equipment?domain=VEILLE_SITE`,
+      ).then((r) => r.json());
       onDone(fresh);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -588,11 +753,7 @@ function ImportModal({
                 value={report.created}
                 color="text-emerald-700"
               />
-              <Stat
-                label="MAJ"
-                value={report.updated}
-                color="text-amber-700"
-              />
+              <Stat label="MAJ" value={report.updated} color="text-amber-700" />
             </div>
           )}
           {report && report.skippedOtherSite > 0 && (

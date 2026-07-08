@@ -76,8 +76,11 @@ export default async function SitePage({
       photos: { select: { id: true, storagePath: true, legend: true } },
     },
   });
+  // Chargement initial = catalogue veille de site (onglet par défaut). Le
+  // référentiel S6A7 (domain=S6A7) est chargé à la demande côté client quand
+  // l'utilisateur bascule d'onglet.
   const equipments = await prisma.siteEquipment.findMany({
-    where: { siteId: id, isActive: true },
+    where: { siteId: id, isActive: true, domain: "VEILLE_SITE" },
     orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { label: "asc" }],
   });
   const canEdit = u.role === "ADMIN" || u.role === "EDITOR";
@@ -220,6 +223,8 @@ export default async function SitePage({
             id: e.id,
             label: e.label,
             category: e.category,
+            itemKind: e.itemKind as "MATERIEL" | "PHONE",
+            domain: e.domain,
             expectedQuantity: e.expectedQuantity,
             isPerishable: e.isPerishable,
             expirationDate: e.expirationDate?.toISOString() ?? null,

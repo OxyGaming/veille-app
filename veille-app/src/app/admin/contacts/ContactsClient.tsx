@@ -5,6 +5,11 @@ import { toast } from "sonner";
 import { Icon } from "@/components/icons";
 import { matchesQuery } from "@/components/SearchInput";
 import { useConfirmDialog } from "@/components/ConfirmDialog";
+import {
+  ContactForm,
+  isContactFormValid,
+  type ContactFormValues,
+} from "@/components/ContactForm";
 
 type Contact = {
   id: string;
@@ -223,6 +228,17 @@ export default function ContactsClient({
  *  Modale contact
  * ========================================================================== */
 
+function toFormValues(c: Contact): ContactFormValues {
+  return {
+    name: c.name,
+    role: c.role ?? "",
+    phone: c.phone ?? "",
+    email: c.email ?? "",
+    notes: c.notes ?? "",
+    teamId: c.teamId,
+  };
+}
+
 function ContactModal({
   initial,
   teams,
@@ -234,8 +250,8 @@ function ContactModal({
   onCancel: () => void;
   onSave: (c: Contact) => void;
 }) {
-  const [c, setC] = useState(initial);
-  const valid = c.name.trim().length > 0;
+  const [form, setForm] = useState<ContactFormValues>(toFormValues(initial));
+  const valid = isContactFormValid(form);
   return (
     <>
       <div
@@ -259,98 +275,19 @@ function ContactModal({
           {/* Aperçu */}
           <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
             <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-semibold grid place-items-center shrink-0 shadow-sm">
-              {initialsOf(c.name || "?")}
+              {initialsOf(form.name || "?")}
             </div>
             <div className="min-w-0">
               <div className="text-sm font-bold truncate">
-                {c.name || "Nouveau contact"}
+                {form.name || "Nouveau contact"}
               </div>
               <div className="text-[11px] text-slate-500 truncate">
-                {c.role || "—"}
+                {form.role || "—"}
               </div>
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Nom <span className="text-rose-600">*</span>
-            </label>
-            <input
-              autoFocus
-              value={c.name}
-              onChange={(e) => setC({ ...c, name: e.target.value })}
-              placeholder="Prénom Nom"
-              className="w-full border-2 border-indigo-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Rôle
-              </label>
-              <input
-                value={c.role ?? ""}
-                onChange={(e) => setC({ ...c, role: e.target.value })}
-                placeholder="DPX, RSST, COSEC…"
-                className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Équipe
-              </label>
-              <select
-                value={c.teamId ?? ""}
-                onChange={(e) =>
-                  setC({ ...c, teamId: e.target.value || null })
-                }
-                className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none"
-              >
-                <option value="">— Aucune —</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Téléphone
-              </label>
-              <input
-                value={c.phone ?? ""}
-                onChange={(e) => setC({ ...c, phone: e.target.value })}
-                placeholder="06 12 34 56 78"
-                className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Email
-              </label>
-              <input
-                type="email"
-                value={c.email ?? ""}
-                onChange={(e) => setC({ ...c, email: e.target.value })}
-                placeholder="prenom.nom@sncf.fr"
-                className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none font-mono"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Notes
-            </label>
-            <textarea
-              value={c.notes ?? ""}
-              onChange={(e) => setC({ ...c, notes: e.target.value })}
-              placeholder="Astreinte semaine impaire, joindre sur Mattermost…"
-              className="w-full border border-slate-200 focus:border-indigo-500 rounded-lg px-3 py-2 text-sm outline-none min-h-[80px] resize-y"
-            />
-          </div>
+          <ContactForm value={form} onChange={setForm} teams={teams} />
         </div>
 
         <footer className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
@@ -361,7 +298,18 @@ function ContactModal({
             Annuler
           </button>
           <button
-            onClick={() => valid && onSave(c)}
+            onClick={() =>
+              valid &&
+              onSave({
+                id: initial.id,
+                name: form.name,
+                role: form.role || null,
+                phone: form.phone || null,
+                email: form.email || null,
+                notes: form.notes || null,
+                teamId: form.teamId,
+              })
+            }
             disabled={!valid}
             className="text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg"
           >

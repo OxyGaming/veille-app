@@ -9,6 +9,7 @@ import type { SessionUser } from "@/lib/auth";
 import { after } from "next/server";
 import { getCriticalEcheancesItems } from "@/lib/echeances/aggregator";
 import { notifyEcheancesCriticalForUser } from "@/lib/notifications-generators";
+import { parisDateStr, parisDayBounds, isTodayParis } from "./date-nav";
 import { getAgentsOnDutyToday } from "./planning";
 import { topItems } from "./priority";
 import {
@@ -41,13 +42,15 @@ const TODO_LIMIT = 5;
 export async function aggregateUser(
   user: SessionUser,
   now: Date,
+  viewedDateStr: string = parisDateStr(now),
 ): Promise<UserPayload> {
+  const dayWindow = parisDayBounds(viewedDateStr);
   const [current, openActions, staleDrafts, expiring, recent] = await Promise.all([
     getCurrentWorkForUser(user, now),
     getOpenActions(user, now),
     getStaleDrafts(user, now),
     getExpiringEquipments(user, now),
-    getRecentActivityForUser(user, now),
+    getRecentActivityForUser(user, now, dayWindow),
   ]);
 
   const allItems = [...openActions, ...staleDrafts, ...expiring];
@@ -57,6 +60,8 @@ export async function aggregateUser(
   return {
     role: "USER",
     now: now.toISOString(),
+    viewedDate: viewedDateStr,
+    isToday: isTodayParis(viewedDateStr, now),
     greeting: {
       name: user.name,
       teamName: null, // résolu côté UI ou enrichi V2 (multi-équipes)
@@ -72,7 +77,9 @@ export async function aggregateUser(
 export async function aggregateEditor(
   user: SessionUser,
   now: Date,
+  viewedDateStr: string = parisDateStr(now),
 ): Promise<EditorPayload> {
+  const dayWindow = parisDayBounds(viewedDateStr);
   // Échéances critiques fetchées une seule fois (items + count) puis
   // diffusées dans :
   //  - le payload (criticalEcheancesCount, badge Today),
@@ -93,9 +100,9 @@ export async function aggregateEditor(
     getEditorWeekCounters(user, now),
     getAgentsToReview(user, now),
     getSitesWithoutVisit(user, now),
-    getTeamActivity(user, now, 8),
+    getTeamActivity(user, dayWindow, 8),
     getCriticalEcheancesItems(user, now),
-    getAgentsOnDutyToday(user, now),
+    getAgentsOnDutyToday(user, now, dayWindow),
   ]);
   const criticalEcheancesCount = criticalEcheancesItems.length;
 
@@ -110,6 +117,8 @@ export async function aggregateEditor(
   return {
     role: "EDITOR",
     now: now.toISOString(),
+    viewedDate: viewedDateStr,
+    isToday: isTodayParis(viewedDateStr, now),
     tour: { perimeter },
     diagnostic,
     weekCounters,
@@ -128,14 +137,16 @@ export async function aggregateEditor(
 export async function aggregateAdmin(
   user: SessionUser,
   now: Date,
+  viewedDateStr: string = parisDateStr(now),
 ): Promise<AdminPayload> {
+  const dayWindow = parisDayBounds(viewedDateStr);
   const [systemStatus, alerts, usage7d, recentActivity, onDuty] =
     await Promise.all([
       getAdminSystemStatus(now),
       getAdminAlerts(now),
       getAdminUsage7d(now),
-      getAdminRecentActivity(now),
-      getAgentsOnDutyToday(user, now),
+      getAdminRecentActivity(now, dayWindow),
+      getAgentsOnDutyToday(user, now, dayWindow),
     ]);
 
   // Sprint 6 C7 — Notifications critiques de l'ADMIN GLOBAL.
@@ -158,6 +169,8 @@ export async function aggregateAdmin(
   return {
     role: "ADMIN",
     now: now.toISOString(),
+    viewedDate: viewedDateStr,
+    isToday: isTodayParis(viewedDateStr, now),
     systemStatus,
     alerts,
     usage7d,
@@ -180,16 +193,18 @@ export async function aggregateAdmin(
 export async function aggregateToday(
   user: SessionUser,
   now: Date = new Date(),
+  /** Jour consulté (`?date=YYYY-MM-DD`) — défaut : aujourd'hui (Europe/Paris). */
+  viewedDateStr?: string,
 ): Promise<TodayPayload> {
   if (user.role === "ADMIN") {
     if (
       user.adminScopeMode === "MY_TEAMS" ||
       user.adminScopeMode === "TEAM"
     ) {
-      return aggregateEditor(user, now);
+      return aggregateEditor(user, now, viewedDateStr);
     }
-    return aggregateAdmin(user, now);
+    return aggregateAdmin(user, now, viewedDateStr);
   }
-  if (user.role === "EDITOR") return aggregateEditor(user, now);
-  return aggregateUser(user, now);
+  if (user.role === "EDITOR") return aggregateEditor(user, now, viewedDateStr);
+  return aggregateUser(user, now, viewedDateStr);
 }

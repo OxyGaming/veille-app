@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
 import { matchesQuery } from "@/components/SearchInput";
+import ContactCreateModal from "@/components/ContactCreateModal";
 
 type Contact = {
   id: string;
@@ -49,11 +50,24 @@ function initialsOf(name: string): string {
 }
 
 export default function ContactsListClient({
-  contacts,
+  contacts: initialContacts,
+  myTeams,
+  lockedTeamId,
 }: {
   contacts: Contact[];
+  /** Équipes de l'utilisateur — proposées dans la modale "Ajouter un contact". */
+  myTeams: { id: string; name: string }[];
+  /** Mono-équipe : équipe imposée (pas de sélecteur dans la modale). */
+  lockedTeamId: string | null;
 }) {
+  const [contacts, setContacts] = useState(initialContacts);
   const [q, setQ] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+
+  const teamById = useMemo(
+    () => new Map(myTeams.map((t) => [t.id, t.name])),
+    [myTeams],
+  );
 
   const filtered = useMemo(() => {
     if (!q.trim()) return contacts;
@@ -89,12 +103,25 @@ export default function ContactsListClient({
       {/* Bannière hero — même langage que /links */}
       <header className="bg-gradient-to-br from-slate-900 to-indigo-900 text-white px-4 lg:px-8 py-6 lg:py-8 rounded-xl mx-4 lg:mx-8 mt-4 lg:mt-6">
         <div className="max-w-5xl mx-auto">
-          <h1 className="text-xl lg:text-2xl font-bold tracking-tight">
-            Contacts
-          </h1>
-          <p className="text-sm text-indigo-200 mt-1">
-            Carnet d&apos;adresses — DPX, RSST, COSEC, astreintes et utiles.
-          </p>
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <h1 className="text-xl lg:text-2xl font-bold tracking-tight">
+                Contacts
+              </h1>
+              <p className="text-sm text-indigo-200 mt-1">
+                Carnet d&apos;adresses — DPX, RSST, COSEC, astreintes et utiles.
+              </p>
+            </div>
+            {myTeams.length > 0 && (
+              <button
+                onClick={() => setShowCreate(true)}
+                className="inline-flex items-center gap-1.5 text-sm font-semibold bg-white text-indigo-900 hover:bg-indigo-50 px-3 py-2 rounded-lg shrink-0"
+              >
+                <Icon.Plus className="w-4 h-4" />
+                Ajouter un contact
+              </button>
+            )}
+          </div>
           <div className="mt-4 relative">
             <Icon.Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
@@ -204,11 +231,33 @@ export default function ContactsListClient({
         {!grouped.length && (
           <div className="text-center py-16 text-slate-500 text-sm">
             {contacts.length === 0
-              ? "Aucun contact. Ajoutez-en depuis le back-office."
+              ? "Aucun contact. Cliquez « Ajouter un contact »."
               : "Aucun contact ne correspond à votre recherche."}
           </div>
         )}
       </div>
+
+      {showCreate && (
+        <ContactCreateModal
+          teams={myTeams}
+          lockedTeamId={lockedTeamId}
+          onClose={() => setShowCreate(false)}
+          onCreated={(created) => {
+            setContacts((prev) =>
+              [
+                ...prev,
+                {
+                  ...created,
+                  teamName: created.teamId
+                    ? teamById.get(created.teamId) ?? null
+                    : null,
+                },
+              ].sort((a, b) => a.name.localeCompare(b.name)),
+            );
+            setShowCreate(false);
+          }}
+        />
+      )}
     </div>
   );
 }

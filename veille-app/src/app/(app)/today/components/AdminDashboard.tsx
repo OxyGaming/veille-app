@@ -1,4 +1,5 @@
 import type { AdminPayload } from "@/lib/today/types";
+import { formatFrenchDayLabel } from "@/lib/today/date-nav";
 import { AgentsOnDutySection } from "./AgentsOnDutySection";
 import { DiagnosticBanner, type DiagnosticState } from "./DiagnosticBanner";
 import { KpiCard } from "./KpiCard";
@@ -16,6 +17,9 @@ type Props = { payload: AdminPayload };
 export function AdminDashboard({ payload }: Props) {
   const s = payload.systemStatus;
   const u = payload.usage7d;
+  const dayLabel = payload.isToday
+    ? "aujourd'hui"
+    : `le ${formatFrenchDayLabel(payload.viewedDate)}`;
 
   return (
     <>
@@ -38,11 +42,19 @@ export function AdminDashboard({ payload }: Props) {
         items={payload.agentsOnDutyToday}
         hasPlanningImport={payload.hasPlanningImport}
         canImportPlanning
+        title={`Agents en service ${dayLabel}`}
+        emptyTitle={`Aucun agent en service ${dayLabel}`}
+        emptyDescription={`Aucun agent n'a de journée de service prévue ${dayLabel}.`}
       />
 
       <RecentActivitySection
         items={payload.recentActivity}
-        title="Activité système"
+        title={
+          payload.isToday
+            ? "Activité système"
+            : `Activité système — ${formatFrenchDayLabel(payload.viewedDate)}`
+        }
+        emptyMessage={payload.isToday ? undefined : "Aucune activité ce jour-là."}
       />
     </>
   );

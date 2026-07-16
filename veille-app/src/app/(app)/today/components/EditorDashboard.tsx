@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { EditorPayload, WatchlistItem } from "@/lib/today/types";
+import { formatFrenchDayLabel } from "@/lib/today/date-nav";
 import { Icon } from "@/components/icons";
 import { ActivityFeedSection } from "./ActivityFeedSection";
 import { AgentsOnDutySection } from "./AgentsOnDutySection";
@@ -27,6 +28,9 @@ export function EditorDashboard({ payload, canImportPlanning }: Props) {
   const equipmentTotal = d.expiredEquipments + d.expiringEquipments;
 
   const diagnosticLines = buildDiagnosticLines(payload);
+  const dayLabel = payload.isToday
+    ? "aujourd'hui"
+    : `le ${formatFrenchDayLabel(payload.viewedDate)}`;
 
   return (
     <>
@@ -89,6 +93,9 @@ export function EditorDashboard({ payload, canImportPlanning }: Props) {
         items={payload.agentsOnDutyToday}
         hasPlanningImport={payload.hasPlanningImport}
         canImportPlanning={canImportPlanning}
+        title={`Agents en service ${dayLabel}`}
+        emptyTitle={`Aucun agent en service ${dayLabel}`}
+        emptyDescription={`Aucun agent de votre périmètre n'a de journée de service prévue ${dayLabel}.`}
       />
 
       <WatchlistSection
@@ -133,7 +140,20 @@ export function EditorDashboard({ payload, canImportPlanning }: Props) {
         </Link>
       </div>
 
-      <ActivityFeedSection items={payload.activityFeed} now={payload.now} />
+      <ActivityFeedSection
+        items={payload.activityFeed}
+        now={payload.now}
+        title={
+          payload.isToday
+            ? "Activité récente de l'équipe"
+            : `Activité de l'équipe — ${formatFrenchDayLabel(payload.viewedDate)}`
+        }
+        emptyMessage={
+          payload.isToday
+            ? "Aucune activité enregistrée pour le moment."
+            : "Aucune activité ce jour-là."
+        }
+      />
     </>
   );
 }

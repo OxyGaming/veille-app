@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { canActOnTeam, requireRole, teamScope } from "@/lib/auth";
+import { createContact } from "@/lib/contacts";
 
 export async function GET() {
   let u;
@@ -49,30 +50,39 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  // Cloisonnement : un contact rattaché à une équipe doit l'être à une équipe
-  // du périmètre (teamId null = contact commun, autorisé).
+  // Création : mutualisée avec le front-office (`/api/contacts`) via
+  // `createContact()` — même validation, même contrôle de doublon, mêmes
+  // messages d'erreur.
+  if (!parsed.data.id) {
+    const result = await createContact(u, parsed.data);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.message }, { status: result.status });
+    }
+    return NextResponse.json(result.contact);
+  }
+
+  // Édition : cloisonnement propre au back-office (ADMIN/EDITOR uniquement,
+  // cf. `requireRole` ci-dessus) — vérifier l'accès à l'équipe cible ET au
+  // contact existant.
   if (parsed.data.teamId && !canActOnTeam(u, parsed.data.teamId)) {
     return NextResponse.json(
       { error: "Équipe hors de votre périmètre." },
       { status: 403 }
     );
   }
-  // Édition : vérifier aussi l'accès au contact existant (et à sa cible).
-  if (parsed.data.id) {
-    const existing = await prisma.contact.findUnique({
-      where: { id: parsed.data.id },
-      select: { teamId: true },
-    });
-    if (!existing) {
-      return NextResponse.json({ error: "Inconnu" }, { status: 404 });
-    }
-    // Un contact commun (teamId null) n'est éditable que par un ADMIN global.
-    if (!canActOnTeam(u, existing.teamId)) {
-      return NextResponse.json(
-        { error: "Contact hors de votre périmètre." },
-        { status: 403 }
-      );
-    }
+  const existing = await prisma.contact.findUnique({
+    where: { id: parsed.data.id },
+    select: { teamId: true },
+  });
+  if (!existing) {
+    return NextResponse.json({ error: "Inconnu" }, { status: 404 });
+  }
+  // Un contact commun (teamId null) n'est éditable que par un ADMIN global.
+  if (!canActOnTeam(u, existing.teamId)) {
+    return NextResponse.json(
+      { error: "Contact hors de votre périmètre." },
+      { status: 403 }
+    );
   }
   const data = {
     name: parsed.data.name,
@@ -82,12 +92,11 @@ export async function POST(req: Request) {
     notes: parsed.data.notes ?? null,
     teamId: parsed.data.teamId ?? null,
   };
-  if (parsed.data.id) {
-    const u = await prisma.contact.update({ where: { id: parsed.data.id }, data });
-    return NextResponse.json(u);
-  }
-  const c = await prisma.contact.create({ data });
-  return NextResponse.json(c);
+  const updated = await prisma.contact.update({
+    where: { id: parsed.data.id },
+    data,
+  });
+  return NextResponse.json(updated);
 }
 
 export async function DELETE(req: Request) {

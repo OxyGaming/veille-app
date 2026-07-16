@@ -99,6 +99,10 @@ export type UserPayload = {
   role: "USER";
   /** ISO 8601 — `now` côté serveur, utilisé par l'UI pour l'emoji et la date. */
   now: string;
+  /** Jour consulté (`?date=YYYY-MM-DD`) — navigation par jour de /today. */
+  viewedDate: string;
+  /** `true` si `viewedDate` est le jour calendaire réel (Europe/Paris). */
+  isToday: boolean;
   greeting: {
     name: string;
     teamName: string | null;
@@ -190,6 +194,10 @@ export type TeamActivityEvent = {
 export type EditorPayload = {
   role: "EDITOR";
   now: string;
+  /** Jour consulté (`?date=YYYY-MM-DD`) — navigation par jour de /today. */
+  viewedDate: string;
+  /** `true` si `viewedDate` est le jour calendaire réel (Europe/Paris). */
+  isToday: boolean;
   tour: {
     perimeter: {
       teamsCount: number;
@@ -242,6 +250,10 @@ export type AdminUsage = {
 export type AdminPayload = {
   role: "ADMIN";
   now: string;
+  /** Jour consulté (`?date=YYYY-MM-DD`) — navigation par jour de /today. */
+  viewedDate: string;
+  /** `true` si `viewedDate` est le jour calendaire réel (Europe/Paris). */
+  isToday: boolean;
   systemStatus: {
     state: "ok" | "degraded" | "incident";
     usersCount: number;

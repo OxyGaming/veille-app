@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { toast } from "sonner";
@@ -39,6 +39,16 @@ const FILTERS = [
   { v: "validation", label: "Validations", color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   { v: "sighting", label: "Vu / Notes", color: "bg-slate-50 text-slate-700 border-slate-200" },
 ];
+
+type IcareFilter = "all" | "true" | "false";
+
+const ICARE_OPTIONS: { v: IcareFilter; label: string }[] = [
+  { v: "all", label: "Tous" },
+  { v: "true", label: "Avec Icare" },
+  { v: "false", label: "Sans Icare" },
+];
+
+const PAGE_SIZE = 30;
 
 const ICON: Record<Entry["type"], React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
   visit: Icon.FileText,
@@ -161,6 +171,7 @@ function commentEditEndpoint(e: Entry): string | null {
 
 export default function HistoryClient({ userRole }: { userRole: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const isAdmin = userRole === "ADMIN";
   const canEditComments = userRole === "ADMIN" || userRole === "EDITOR";
   const [entries, setEntries] = useState<Entry[] | null>(null);
@@ -178,8 +189,18 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
   const [observerId, setObserverId] = useState("");
   const [agentId, setAgentId] = useState("");
   const [siteId, setSiteId] = useState("");
+  const [icare, setIcare] = useState<IcareFilter>(() => {
+    const v = searchParams.get("icare");
+    return v === "true" || v === "false" ? v : "all";
+  });
   const [meta, setMeta] = useState<FilterMeta | null>(null);
+  // `loading` = chargement du premier lot (reset de filtre) ; `loadingMore` =
+  // chargement d'un lot supplémentaire (scroll infini / bouton de repli).
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Recherche : `query` est la valeur affichée à l'écran (frappe instantanée,
   // input contrôlé). `qDebounced` est ce qui déclenche réellement le fetch
   // côté serveur — recopié 250 ms après la dernière frappe. Deux états
@@ -187,6 +208,12 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
   // par caractère.
   const [query, setQuery] = useState("");
   const [qDebounced, setQDebounced] = useState("");
+
+  // Garde anti-course : incrémenté à chaque nouveau chargement (premier lot
+  // ou lot suivant). Une réponse dont le jeton ne correspond plus au jeton
+  // courant est ignorée (filtre changé / nouveau chargement lancé entre
+  // temps) — évite d'appliquer une page devenue obsolète.
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     const t = setTimeout(() => setQDebounced(query.trim()), 250);
@@ -200,31 +227,118 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
       .catch(() => setMeta({ users: [], agents: [], sites: [] }));
   }, []);
 
-  async function load() {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      params.set("type", [...types].join(","));
-      if (from) params.set("from", new Date(from + "T00:00:00").toISOString());
-      if (to) params.set("to", new Date(to + "T23:59:59").toISOString());
-      if (observerId) params.set("observerId", observerId);
-      if (agentId) params.set("agentId", agentId);
-      if (siteId) params.set("siteId", siteId);
-      if (qDebounced && qDebounced.length >= 2) params.set("q", qDebounced);
-      const res = await fetch(`/api/history?${params}`);
-      if (res.ok) {
-        const j = await res.json();
-        setEntries(j.entries);
-      }
-    } finally {
-      setLoading(false);
-    }
+  function setIcareAndSyncUrl(next: IcareFilter) {
+    setIcare(next);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "all") params.delete("icare");
+    else params.set("icare", next);
+    const qs = params.toString();
+    router.replace(qs ? `/history?${qs}` : "/history", { scroll: false });
   }
 
-  useEffect(() => {
-    load();
+  function buildParams(cursorValue: string | null) {
+    const params = new URLSearchParams();
+    params.set("type", [...types].join(","));
+    if (from) params.set("from", new Date(from + "T00:00:00").toISOString());
+    if (to) params.set("to", new Date(to + "T23:59:59").toISOString());
+    if (observerId) params.set("observerId", observerId);
+    if (agentId) params.set("agentId", agentId);
+    if (siteId) params.set("siteId", siteId);
+    if (qDebounced && qDebounced.length >= 2) params.set("q", qDebounced);
+    if (icare !== "all") params.set("icare", icare);
+    params.set("take", String(PAGE_SIZE));
+    if (cursorValue) params.set("cursor", cursorValue);
+    return params;
+  }
+
+  /** Premier lot — appelé à chaque changement de filtre (reset complet). */
+  const loadFirstPage = useCallback(async () => {
+    const myReq = ++requestSeq.current;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const params = buildParams(null);
+      const res = await fetch(`/api/history?${params}`);
+      if (myReq !== requestSeq.current) return; // filtre déjà changé entre-temps
+      if (!res.ok) {
+        setLoadError("Impossible de charger l'historique.");
+        setEntries([]);
+        setHasMore(false);
+        setCursor(null);
+        return;
+      }
+      const j = await res.json();
+      setEntries(j.entries);
+      setCursor(j.nextCursor ?? null);
+      setHasMore(!!j.hasMore);
+    } catch {
+      if (myReq !== requestSeq.current) return;
+      setLoadError("Erreur réseau — réessayez.");
+      setEntries([]);
+      setHasMore(false);
+      setCursor(null);
+    } finally {
+      if (myReq === requestSeq.current) setLoading(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [types, from, to, observerId, agentId, siteId, qDebounced]);
+  }, [types, from, to, observerId, agentId, siteId, qDebounced, icare]);
+
+  /** Lot suivant — accumule à la suite, ne remplace jamais les entrées déjà chargées. */
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMore || loading) return;
+    const myReq = ++requestSeq.current;
+    setLoadingMore(true);
+    setLoadError(null);
+    try {
+      const params = buildParams(cursor);
+      const res = await fetch(`/api/history?${params}`);
+      if (myReq !== requestSeq.current) return;
+      if (!res.ok) {
+        setLoadError("Impossible de charger les éléments suivants.");
+        return;
+      }
+      const j = await res.json();
+      setEntries((prev) => {
+        const existing = new Set((prev ?? []).map((e) => `${e.type}:${e.id}`));
+        const fresh = (j.entries as Entry[]).filter(
+          (e) => !existing.has(`${e.type}:${e.id}`),
+        );
+        return [...(prev ?? []), ...fresh];
+      });
+      setCursor(j.nextCursor ?? null);
+      setHasMore(!!j.hasMore);
+    } catch {
+      if (myReq !== requestSeq.current) return;
+      setLoadError("Erreur réseau — réessayez.");
+    } finally {
+      if (myReq === requestSeq.current) setLoadingMore(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasMore, loadingMore, loading, cursor, types, from, to, observerId, agentId, siteId, qDebounced, icare]);
+
+  useEffect(() => {
+    loadFirstPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [types, from, to, observerId, agentId, siteId, qDebounced, icare]);
+
+  // IntersectionObserver — charge automatiquement le lot suivant quand la
+  // sentinelle approche du viewport. Repli : bouton "Charger les éléments
+  // antérieurs" toujours rendu tant que `hasMore` (accessible clavier, et
+  // fonctionne même si l'IntersectionObserver n'est pas disponible).
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!hasMore || loadError) return;
+    const el = sentinelRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (obs) => {
+        if (obs.some((o) => o.isIntersecting)) loadMore();
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loadError, loadMore]);
 
   function toggleType(t: string) {
     setTypes((s) => {
@@ -390,6 +504,27 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
               </button>
             );
           })}
+          <div
+            role="group"
+            aria-label="Filtre Icare"
+            className="inline-flex rounded-md border border-slate-200 overflow-hidden text-xs font-mono"
+          >
+            {ICARE_OPTIONS.map((opt) => (
+              <button
+                key={opt.v}
+                type="button"
+                aria-pressed={icare === opt.v}
+                onClick={() => setIcareAndSyncUrl(opt.v)}
+                className={`px-2.5 py-1.5 transition-colors ${
+                  icare === opt.v
+                    ? "bg-emerald-600 text-white"
+                    : "bg-white text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           <div className="ml-auto flex gap-2 items-center text-xs">
             <span className="text-slate-500">Du</span>
             <input
@@ -492,7 +627,20 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
         </div>
       )}
 
-      {entries && !loading && entries.length === 0 && (
+      {!loading && loadError && (!entries || entries.length === 0) && (
+        <div className="card text-center py-12 text-sm space-y-3">
+          <p className="text-rose-600">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => loadFirstPage()}
+            className="text-sm font-semibold px-3 py-1.5 rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50"
+          >
+            Réessayer
+          </button>
+        </div>
+      )}
+
+      {!loading && !loadError && entries && entries.length === 0 && (
         <div className="card text-center py-12 text-sm text-slate-500">
           Aucune entrée pour ces filtres.
         </div>
@@ -763,6 +911,48 @@ export default function HistoryClient({ userRole }: { userRole: string }) {
           </section>
         ))}
       </div>
+
+      {/* Pagination — sentinelle IntersectionObserver + bouton de repli
+          (accessible clavier, fonctionne aussi si l'IO échoue). */}
+      {entries && entries.length > 0 && (
+        <div ref={sentinelRef} className="mt-4">
+          {loadError && (
+            <div className="flex flex-col items-center gap-2 py-4 text-center">
+              <p className="text-sm text-rose-600">{loadError}</p>
+              <button
+                type="button"
+                onClick={() => loadMore()}
+                className="text-sm font-semibold px-3 py-1.5 rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50"
+              >
+                Réessayer
+              </button>
+            </div>
+          )}
+          {!loadError && hasMore && (
+            <div className="flex justify-center py-2">
+              <button
+                type="button"
+                onClick={() => loadMore()}
+                disabled={loadingMore}
+                className="text-sm font-medium px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {loadingMore && (
+                  <span
+                    aria-hidden="true"
+                    className="w-3.5 h-3.5 rounded-full border-2 border-slate-300 border-t-indigo-500 animate-spin"
+                  />
+                )}
+                {loadingMore ? "Chargement…" : "Charger les éléments antérieurs"}
+              </button>
+            </div>
+          )}
+          {!loadError && !hasMore && (
+            <p className="text-center text-xs text-slate-400 py-4">
+              Aucun élément plus ancien.
+            </p>
+          )}
+        </div>
+      )}
 
       {deleteTarget && (
         <DeleteEntryDialog

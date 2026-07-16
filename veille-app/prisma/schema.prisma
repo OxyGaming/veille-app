@@ -241,6 +241,8 @@ model AgentSighting {
   @@index([teamId])
   @@index([sightedAt])
   @@index([kind])
+  /// Curseur composite de l'historique (/api/history) : tri (teamId, sightedAt desc, id desc).
+  @@index([teamId, sightedAt, id])
 }
 
 /// Pendant de AgentSighting pour un Site (poste d'aiguillage, gare…).
@@ -266,6 +268,8 @@ model SiteSighting {
   @@index([teamId])
   @@index([sightedAt])
   @@index([kind])
+  /// Curseur composite de l'historique (/api/history) : tri (teamId, sightedAt desc, id desc).
+  @@index([teamId, sightedAt, id])
 }
 
 // ─── Sites (postes d'aiguillage, gares, dépôts…) ────────────────────────────
@@ -492,6 +496,8 @@ model SiteVisit {
   /// `status=completed AND finishedAt >= windowStart` utilisé par
   /// Today week counters et Dashboard tendance visites.
   @@index([status, finishedAt])
+  /// Curseur composite de l'historique (/api/history) : tri (teamId, visitDate desc, id desc).
+  @@index([teamId, visitDate, id])
 }
 
 model SiteVisitParticipant {
@@ -763,6 +769,8 @@ model VeilleSession {
   @@index([agentId])
   @@index([status])
   @@index([startedAt])
+  /// Curseur composite de l'historique (/api/history) : tri (teamId, startedAt desc, id desc).
+  @@index([teamId, startedAt, id])
 }
 
 /// Lien session ↔ procédure : permet d'observer plusieurs procédures dans une seule session.
@@ -1063,6 +1071,8 @@ model ActionValidation {
   /// Index Sprint 5 C9 — accélère la tendance dashboard
   /// "actions validées sur N jours" (filtre createdAt range).
   @@index([createdAt])
+  /// Curseur composite de l'historique (/api/history) : tri (teamId, realizedAt desc, id desc).
+  @@index([teamId, realizedAt, id])
 }
 
 // ─── Liens utiles ─────────────────────────────────────────────────────────────
@@ -1516,6 +1526,8 @@ model VehicleRound {
   @@index([status])
   @@index([roundDate])
   @@index([status, finishedAt])
+  /// Curseur composite de l'historique (/api/history) : tri (teamId, roundDate desc, id desc).
+  @@index([teamId, roundDate, id])
 }
 
 /// Observation au niveau item.

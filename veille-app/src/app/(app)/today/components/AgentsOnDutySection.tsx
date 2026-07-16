@@ -9,6 +9,11 @@ type Props = {
   hasPlanningImport: boolean;
   /** Vrai si l'utilisateur peut importer un planning (ADMIN uniquement). */
   canImportPlanning: boolean;
+  /** Titre de section — par défaut "Agents en service aujourd'hui". */
+  title?: string;
+  /** Titre de l'état vide (scope OK, aucun agent ce jour-là). */
+  emptyTitle?: string;
+  emptyDescription?: string;
 };
 
 /**
@@ -27,12 +32,15 @@ export function AgentsOnDutySection({
   items,
   hasPlanningImport,
   canImportPlanning,
+  title = "Agents en service aujourd'hui",
+  emptyTitle = "Aucun agent en service aujourd'hui",
+  emptyDescription = "Aucun agent de votre périmètre n'a de journée de service prévue aujourd'hui.",
 }: Props) {
   return (
     <section className="px-4 lg:px-8 mt-6">
       <div className="flex items-baseline justify-between mb-2">
         <h2 className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
-          Agents en service aujourd&apos;hui
+          {title}
           {items.length > 0 && (
             <span className="ml-1.5 normal-case font-sans text-slate-700 font-semibold">
               ({items.length})
@@ -61,8 +69,8 @@ export function AgentsOnDutySection({
       ) : items.length === 0 ? (
         <EmptyState
           icon={<Icon.User className="w-5 h-5 text-slate-400" aria-hidden />}
-          title="Aucun agent en service aujourd'hui"
-          description="Aucun agent de votre périmètre n'a de journée de service prévue aujourd'hui."
+          title={emptyTitle}
+          description={emptyDescription}
         />
       ) : (
         <ul className="grid gap-2.5">

@@ -461,6 +461,56 @@ describe("getAgentsOnDutyToday — items renvoyés", () => {
   });
 });
 
+// ─── getAgentsOnDutyToday — dayWindow explicite (navigation par date) ───────
+
+describe("getAgentsOnDutyToday — dayWindow explicite", () => {
+  it("utilise dayWindow (et non le jour de now) pour la fenêtre de shifts", async () => {
+    findManyShift.mockResolvedValue([]);
+    countImports.mockResolvedValue(1);
+
+    const dayWindow = {
+      start: new Date("2026-06-01T00:00:00Z"),
+      end: new Date("2026-06-02T00:00:00Z"),
+    };
+    await getAgentsOnDutyToday(EDITOR, NOW, dayWindow);
+
+    const args = findManyShift.mock.calls[0][0];
+    expect(args.where.startsAt.lt).toEqual(dayWindow.end);
+    expect(args.where.endsAt.gt).toEqual(dayWindow.start);
+  });
+
+  it("sans dayWindow, retombe sur le jour calendaire de now (comportement historique)", async () => {
+    findManyShift.mockResolvedValue([]);
+    countImports.mockResolvedValue(1);
+
+    await getAgentsOnDutyToday(EDITOR, NOW);
+
+    const args = findManyShift.mock.calls[0][0];
+    expect(args.where.startsAt.lt).toEqual(new Date("2026-06-10T00:00:00"));
+    expect(args.where.endsAt.gt).toEqual(new Date("2026-06-09T00:00:00"));
+  });
+
+  it("le statut (IN_SERVICE/LATER/FINISHED) reste calculé sur `now` réel même avec un dayWindow passé", async () => {
+    // Shift le 2026-06-01 (jour consulté), mais `now` réel reste le 9 juin
+    // 14:00 → le shift est forcément FINISHED, peu importe le jour consulté.
+    findManyShift.mockResolvedValue([
+      shift({
+        agentId: "a-past",
+        startsAt: new Date("2026-06-01T08:00:00"),
+        endsAt: new Date("2026-06-01T16:00:00"),
+      }),
+    ]);
+    countImports.mockResolvedValue(1);
+
+    const dayWindow = {
+      start: new Date("2026-06-01T00:00:00"),
+      end: new Date("2026-06-02T00:00:00"),
+    };
+    const { items } = await getAgentsOnDutyToday(EDITOR, NOW, dayWindow);
+    expect(items[0].status).toBe("FINISHED");
+  });
+});
+
 // ─── formatPlanningHint (helper pur) ─────────────────────────────────────────
 
 describe("formatPlanningHint", () => {

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { isTodayEnabled } from "@/lib/featureFlags";
 import { aggregateToday } from "@/lib/today/aggregator";
+import { formatFrenchDayLabel, parseDateParam } from "@/lib/today/date-nav";
 import { TodayHeader } from "./components/TodayHeader";
 import { CurrentWorkCard } from "./components/CurrentWorkCard";
 import { TodoSection } from "./components/TodoSection";
@@ -13,12 +14,18 @@ import { TodayAutoRefresh } from "./components/TodayAutoRefresh";
 
 export const dynamic = "force-dynamic";
 
-export default async function TodayPage() {
+export default async function TodayPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ date?: string }>;
+}) {
   if (!isTodayEnabled()) redirect("/procedures");
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const payload = await aggregateToday(user);
+  const { date } = await searchParams;
+  const viewedDateStr = parseDateParam(date);
+  const payload = await aggregateToday(user, new Date(), viewedDateStr);
 
   return (
     <div className="pb-8 max-w-5xl mx-auto">
@@ -29,7 +36,17 @@ export default async function TodayPage() {
           <CurrentWorkCard current={payload.current} />
           <TodoSection items={payload.todoList} total={payload.todoTotal} />
           <UserShortcuts />
-          <RecentActivitySection items={payload.recent} />
+          <RecentActivitySection
+            items={payload.recent}
+            title={
+              payload.isToday
+                ? "Dernières activités"
+                : `Activité du ${formatFrenchDayLabel(payload.viewedDate)}`
+            }
+            emptyMessage={
+              payload.isToday ? undefined : "Aucune activité ce jour-là."
+            }
+          />
         </>
       )}
 

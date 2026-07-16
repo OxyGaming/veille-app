@@ -117,9 +117,17 @@ const STATUS_ORDER: Record<DutyStatus, number> = {
 export async function getAgentsOnDutyToday(
   user: SessionUser,
   now: Date,
+  /**
+   * Fenêtre de jour explicite (navigation par date de /today, cf.
+   * lib/today/date-nav.ts) — remplace le jour calendaire de `now` pour la
+   * requête de shifts et l'ancrage de la sparkline. `now` reste la
+   * référence de `getDutyStatus` (IN_SERVICE/LATER/FINISHED restent
+   * cohérents même en consultant un jour passé ou futur).
+   */
+  dayWindow?: { start: Date; end: Date },
 ): Promise<AgentsOnDutyResult> {
-  const dayStart = startOfDay(now);
-  const dayEnd = startOfNextDay(now);
+  const dayStart = dayWindow?.start ?? startOfDay(now);
+  const dayEnd = dayWindow?.end ?? startOfNextDay(now);
 
   // Sparkline 30 jours — fenêtre [now-29j 00:00 → now 23:59]. Aligné sur
   // le pattern de src/app/api/agents/sparklines/route.ts.

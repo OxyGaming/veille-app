@@ -6,6 +6,8 @@ type Props = {
   items: TeamActivityEvent[];
   /** ISO de `now` pour calculer la date relative. */
   now: string;
+  title?: string;
+  emptyMessage?: string;
 };
 
 const TYPE_LABEL: Record<TeamActivityEvent["type"], string> = {
@@ -37,13 +39,18 @@ const TYPE_DOT: Record<TeamActivityEvent["type"], string> = {
  * Affichage compact : pastille couleur par type, message principal,
  * petite ligne (acteur + type + date relative).
  */
-export function ActivityFeedSection({ items, now }: Props) {
+export function ActivityFeedSection({
+  items,
+  now,
+  title = "Activité récente de l'équipe",
+  emptyMessage = "Aucune activité enregistrée pour le moment.",
+}: Props) {
   const nowDate = new Date(now);
   return (
     <section className="px-4 lg:px-8 mt-6">
       <header className="flex items-baseline justify-between gap-2 mb-2">
         <h2 className="text-[11px] font-mono uppercase tracking-wider text-slate-500">
-          Activité récente de l&apos;équipe
+          {title}
         </h2>
         {items.length > 0 && (
           <span className="text-[11px] font-mono text-slate-500">
@@ -53,7 +60,7 @@ export function ActivityFeedSection({ items, now }: Props) {
       </header>
       {items.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
-          Aucune activité enregistrée pour le moment.
+          {emptyMessage}
         </div>
       ) : (
         <ul className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">

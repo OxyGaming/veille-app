@@ -270,16 +270,24 @@ export async function getExpiringEquipments(
 }
 
 /**
- * 3 dernières activités de l'utilisateur, toutes sources confondues.
+ * Activité de l'utilisateur pour un jour donné (navigation par date de
+ * /today), toutes sources confondues. `now` reste la référence réelle pour
+ * le libellé relatif ("il y a X") ; `dayWindow` borne la requête au jour
+ * consulté (par défaut le jour calendaire de `now`).
  */
 export async function getRecentActivityForUser(
   user: SessionUser,
   now: Date,
-  limit = 3,
+  dayWindow: { start: Date; end: Date },
+  limit = 20,
 ): Promise<RecentActivityItem[]> {
   const [sessions, visits, validations, sightings] = await Promise.all([
     prisma.veilleSession.findMany({
-      where: { observerId: user.id, status: "completed", finishedAt: { not: null } },
+      where: {
+        observerId: user.id,
+        status: "completed",
+        finishedAt: { gte: dayWindow.start, lt: dayWindow.end },
+      },
       orderBy: { finishedAt: "desc" },
       take: limit,
       select: {
@@ -289,7 +297,11 @@ export async function getRecentActivityForUser(
       },
     }),
     prisma.siteVisit.findMany({
-      where: { observerId: user.id, status: "completed", finishedAt: { not: null } },
+      where: {
+        observerId: user.id,
+        status: "completed",
+        finishedAt: { gte: dayWindow.start, lt: dayWindow.end },
+      },
       orderBy: { finishedAt: "desc" },
       take: limit,
       select: {
@@ -299,7 +311,10 @@ export async function getRecentActivityForUser(
       },
     }),
     prisma.actionValidation.findMany({
-      where: { validatedById: user.id },
+      where: {
+        validatedById: user.id,
+        createdAt: { gte: dayWindow.start, lt: dayWindow.end },
+      },
       orderBy: { createdAt: "desc" },
       take: limit,
       select: {
@@ -309,7 +324,10 @@ export async function getRecentActivityForUser(
       },
     }),
     prisma.agentSighting.findMany({
-      where: { observerId: user.id },
+      where: {
+        observerId: user.id,
+        createdAt: { gte: dayWindow.start, lt: dayWindow.end },
+      },
       orderBy: { createdAt: "desc" },
       take: limit,
       select: {
@@ -768,16 +786,22 @@ async function countEquipmentAlertsForSites(
  *
  * Limite documentée : si un même `entityId` est touché 2 fois la même
  * seconde, ces deux events seront fusionnés. Acceptable V1.
+ *
+ * `dayWindow` borne le flux au jour consulté sur /today (navigation par
+ * date, cf. lib/today/date-nav.ts) — par défaut le jour calendaire réel.
  */
 export async function getTeamActivity(
   user: SessionUser,
-  _now: Date,
+  dayWindow: { start: Date; end: Date },
   limit = 8,
 ): Promise<TeamActivityEvent[]> {
   // ADMIN sans équipe propre : on renvoie vide côté EDITOR variant.
   if (user.teamIds.length === 0) return [];
   const rows = await prisma.teamActivity.findMany({
-    where: { teamId: { in: user.teamIds } },
+    where: {
+      teamId: { in: user.teamIds },
+      createdAt: { gte: dayWindow.start, lt: dayWindow.end },
+    },
     orderBy: { createdAt: "desc" },
     take: limit * 3,
     select: {
@@ -960,13 +984,17 @@ export async function getAdminUsage7d(now: Date): Promise<AdminUsage> {
 }
 
 /**
- * 5 dernières entrées AuditLog (activité système).
+ * Entrées AuditLog (activité système) du jour consulté sur /today.
+ * `now` reste la référence réelle pour le libellé relatif ; `dayWindow`
+ * borne la requête au jour affiché (par défaut aujourd'hui).
  */
 export async function getAdminRecentActivity(
   now: Date,
-  limit = 5,
+  dayWindow: { start: Date; end: Date },
+  limit = 20,
 ): Promise<RecentActivityItem[]> {
   const logs = await prisma.auditLog.findMany({
+    where: { createdAt: { gte: dayWindow.start, lt: dayWindow.end } },
     orderBy: { createdAt: "desc" },
     take: limit,
     select: {

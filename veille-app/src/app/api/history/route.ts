@@ -6,8 +6,104 @@ import { requireUser, teamScope } from "@/lib/auth";
  * Historique transverse : agrège visites de site, sessions de veille,
  * validations d'actions et « Vu » agent dans un flux chronologique unique.
  *
- * Filtres : ?type=visit,session,validation,sighting&agentId&siteId&from&to&take
+ * Filtres : ?type=visit,session,validation,sighting&agentId&siteId&from&to&q
+ *           &icare=all|true|false&cursor=&take=
+ *
+ * Pagination par curseur composite `(at, id)` — chaque source est requêtée
+ * avec `take = pageSize + 1` pour détecter `hasMore` sans requête
+ * supplémentaire. Le filtre Icare est poussé en SQL (`id IN/NOT IN` les
+ * refId marqués dans `IcareEntry`) plutôt que filtré après coup, pour rester
+ * compatible avec la pagination.
  */
+
+type IcareFilter = "all" | "true" | "false";
+
+const MIN_TAKE = 20;
+const MAX_TAKE = 50;
+const DEFAULT_TAKE = 30;
+
+function clampTake(raw: string | null): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_TAKE;
+  return Math.min(Math.max(Math.round(n), MIN_TAKE), MAX_TAKE);
+}
+
+type Cursor = { at: string; id: string };
+
+function decodeCursor(raw: string | null): Cursor | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(raw, "base64url").toString("utf8"),
+    ) as { at?: unknown; id?: unknown };
+    if (typeof parsed.at === "string" && typeof parsed.id === "string") {
+      return { at: parsed.at, id: parsed.id };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function encodeCursor(at: string, id: string): string {
+  return Buffer.from(JSON.stringify({ at, id }), "utf8").toString("base64url");
+}
+
+/** Curseur composite `(dateField, id) < (cursor.at, cursor.id)`, tri desc. */
+function cursorClause(
+  dateField: string,
+  cursor: Cursor | null,
+): Record<string, unknown> {
+  if (!cursor) return {};
+  const at = new Date(cursor.at);
+  return {
+    OR: [{ [dateField]: { lt: at } }, { [dateField]: at, id: { lt: cursor.id } }],
+  };
+}
+
+/** Filtre Icare simple : un refType == un type d'entrée (visit/session/validation). */
+function icareClauseSimple(
+  ids: Set<string> | undefined,
+  icare: IcareFilter,
+): Record<string, unknown> {
+  if (icare === "all" || !ids) return {};
+  const arr = [...ids];
+  return icare === "true" ? { id: { in: arr } } : { id: { notIn: arr } };
+}
+
+/**
+ * Filtre Icare pour les sources dont le refType dépend de `kind`
+ * (AgentSighting → sighting/note ; SiteSighting → site-sighting/site-note).
+ */
+function icareClauseSplitByKind(
+  otherIds: Set<string>,
+  noteIds: Set<string>,
+  icare: IcareFilter,
+): Record<string, unknown> {
+  if (icare === "all") return {};
+  const op = icare === "true" ? "in" : "notIn";
+  return {
+    OR: [
+      { kind: "NOTE", id: { [op]: [...noteIds] } },
+      { kind: { not: "NOTE" }, id: { [op]: [...otherIds] } },
+    ],
+  };
+}
+
+/** Charge les refId marqués Icare pour les refTypes demandés. */
+async function fetchIcareIds(
+  refTypes: string[],
+): Promise<Map<string, Set<string>>> {
+  const map = new Map<string, Set<string>>(refTypes.map((rt) => [rt, new Set()]));
+  if (!refTypes.length) return map;
+  const rows = await prisma.icareEntry.findMany({
+    where: { refType: { in: refTypes } },
+    select: { refType: true, refId: true },
+  });
+  for (const r of rows) map.get(r.refType)?.add(r.refId);
+  return map;
+}
+
 export async function GET(req: Request) {
   let u;
   try {
@@ -31,16 +127,18 @@ export async function GET(req: Request) {
   const to = url.searchParams.get("to")
     ? new Date(url.searchParams.get("to")!)
     : undefined;
+  const icareRaw = url.searchParams.get("icare");
+  const icare: IcareFilter =
+    icareRaw === "true" || icareRaw === "false" ? icareRaw : "all";
+  const cursor = decodeCursor(url.searchParams.get("cursor"));
+  const take = clampTake(url.searchParams.get("take"));
+  const sourceTake = take + 1;
   // Recherche libre — trim + ignore les requêtes très courtes (1 caractère
   // ramènerait quasi tout le dataset et coûterait cher en SQL). Le seuil
   // de 2 caractères est aligné sur le pattern qu'on utilise sur les
   // autres barres de recherche du projet.
   const qRaw = (url.searchParams.get("q") ?? "").trim();
   const q = qRaw.length >= 2 ? qRaw : "";
-  const take = Math.min(
-    Number(url.searchParams.get("take") ?? 100) || 100,
-    300
-  );
 
   const scope = teamScope(u);
 
@@ -120,6 +218,35 @@ export async function GET(req: Request) {
       }
     : {};
 
+  // RefId marqués Icare — un seul aller-retour, uniquement pour les refTypes
+  // couverts par les types actifs (évite de charger IcareEntry en entier).
+  const neededRefTypes: string[] = [];
+  if (icare !== "all") {
+    if (types.has("visit")) neededRefTypes.push("visit");
+    if (types.has("session")) neededRefTypes.push("session");
+    if (types.has("validation")) neededRefTypes.push("validation");
+    if (types.has("sighting")) {
+      neededRefTypes.push("sighting", "note", "site-sighting", "site-note");
+    }
+  }
+  const icareIds = await fetchIcareIds(neededRefTypes);
+  const visitIcareClause = icareClauseSimple(icareIds.get("visit"), icare);
+  const sessionIcareClause = icareClauseSimple(icareIds.get("session"), icare);
+  const validationIcareClause = icareClauseSimple(
+    icareIds.get("validation"),
+    icare,
+  );
+  const agentSightingIcareClause = icareClauseSplitByKind(
+    icareIds.get("sighting") ?? new Set(),
+    icareIds.get("note") ?? new Set(),
+    icare,
+  );
+  const siteSightingIcareClause = icareClauseSplitByKind(
+    icareIds.get("site-sighting") ?? new Set(),
+    icareIds.get("site-note") ?? new Set(),
+    icare,
+  );
+
   const [
     visits,
     sessions,
@@ -135,10 +262,14 @@ export async function GET(req: Request) {
             ...(siteId ? { siteId } : {}),
             ...(observerId ? { observerId } : {}),
             ...dateWhere("visitDate"),
-            ...qVisitWhere,
+            ...visitIcareClause,
+            AND: [
+              ...(q ? [qVisitWhere] : []),
+              cursorClause("visitDate", cursor),
+            ],
           },
           orderBy: { visitDate: "desc" },
-          take,
+          take: sourceTake,
           include: {
             template: { select: { name: true, slug: true } },
             site: { select: { id: true, name: true, code: true } },
@@ -154,10 +285,14 @@ export async function GET(req: Request) {
             ...(agentId ? { agentId } : {}),
             ...(observerId ? { observerId } : {}),
             ...dateWhere("startedAt"),
-            ...qSessionWhere,
+            ...sessionIcareClause,
+            AND: [
+              ...(q ? [qSessionWhere] : []),
+              cursorClause("startedAt", cursor),
+            ],
           },
           orderBy: { startedAt: "desc" },
-          take,
+          take: sourceTake,
           include: {
             agent: { select: { id: true, firstName: true, lastName: true } },
             observer: { select: { name: true } },
@@ -175,10 +310,14 @@ export async function GET(req: Request) {
             ...(siteId ? { siteId } : {}),
             ...(observerId ? { validatedById: observerId } : {}),
             ...dateWhere("realizedAt"),
-            ...qValidationWhere,
+            ...validationIcareClause,
+            AND: [
+              ...(q ? [qValidationWhere] : []),
+              cursorClause("realizedAt", cursor),
+            ],
           },
           orderBy: { realizedAt: "desc" },
-          take,
+          take: sourceTake,
           include: {
             action: {
               select: {
@@ -203,10 +342,14 @@ export async function GET(req: Request) {
             ...(agentId ? { agentId } : {}),
             ...(observerId ? { observerId } : {}),
             ...dateWhere("sightedAt"),
-            ...qAgentSightingWhere,
+            AND: [
+              ...(q ? [qAgentSightingWhere] : []),
+              agentSightingIcareClause,
+              cursorClause("sightedAt", cursor),
+            ],
           },
           orderBy: { sightedAt: "desc" },
-          take,
+          take: sourceTake,
           include: {
             agent: { select: { id: true, firstName: true, lastName: true } },
             observer: { select: { name: true } },
@@ -222,10 +365,14 @@ export async function GET(req: Request) {
             ...(siteId ? { siteId } : {}),
             ...(observerId ? { observerId } : {}),
             ...dateWhere("sightedAt"),
-            ...qSiteSightingWhere,
+            AND: [
+              ...(q ? [qSiteSightingWhere] : []),
+              siteSightingIcareClause,
+              cursorClause("sightedAt", cursor),
+            ],
           },
           orderBy: { sightedAt: "desc" },
-          take,
+          take: sourceTake,
           include: {
             site: { select: { id: true, name: true, code: true } },
             observer: { select: { name: true } },
@@ -241,10 +388,14 @@ export async function GET(req: Request) {
             ...scope,
             ...(observerId ? { observerId } : {}),
             ...dateWhere("roundDate"),
-            ...qVehicleRoundWhere,
+            ...visitIcareClause,
+            AND: [
+              ...(q ? [qVehicleRoundWhere] : []),
+              cursorClause("roundDate", cursor),
+            ],
           },
           orderBy: { roundDate: "desc" },
-          take,
+          take: sourceTake,
           include: {
             template: { select: { name: true, slug: true } },
             vehicle: { select: { label: true } },
@@ -441,10 +592,21 @@ export async function GET(req: Request) {
     });
   }
 
-  entries.sort((a, b) => (a.at < b.at ? 1 : -1));
-  const sliced = entries.slice(0, take);
+  // Tri stable (at desc, id desc) — cohérent avec le curseur composite.
+  entries.sort((a, b) => {
+    if (a.at !== b.at) return a.at < b.at ? 1 : -1;
+    return a.id < b.id ? 1 : -1;
+  });
 
-  // Hydrate le flag Icare en une seule requête (couples (refType, refId)).
+  // Chaque source a été sur-lue de 1 (sourceTake = take + 1) : si le total
+  // fusionné dépasse `take`, il reste au moins un élément plus ancien.
+  const hasMore = entries.length > take;
+  const sliced = entries.slice(0, take);
+  const last = sliced[sliced.length - 1];
+  const nextCursor = hasMore && last ? encodeCursor(last.at, last.id) : null;
+
+  // Hydrate le flag Icare sur la page retournée (indépendant du filtre —
+  // même quand icare=all, l'UI a besoin de savoir quelles lignes sont faites).
   if (sliced.length > 0) {
     const marks = await prisma.icareEntry.findMany({
       where: {
@@ -458,5 +620,5 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ entries: sliced });
+  return NextResponse.json({ entries: sliced, nextCursor, hasMore });
 }

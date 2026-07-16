@@ -1,17 +1,24 @@
 import type { TodayPayload } from "@/lib/today/types";
+import { formatFrenchDayLabel } from "@/lib/today/date-nav";
+import { TodayDateNav } from "./TodayDateNav";
 
 type Props = { payload: TodayPayload };
 
 /**
  * En-tête de l'écran Aujourd'hui — varie selon le rôle.
- * Server component pur (pas d'interaction). Le `now` vient du payload pour
- * rester cohérent avec ce que l'agrégateur a calculé.
+ * Server component (la navigation par jour est un petit Client Component
+ * imbriqué, `TodayDateNav`). La date affichée est celle CONSULTÉE
+ * (`payload.viewedDate`), pas forcément le jour réel — l'emoji de salutation
+ * USER reste lui basé sur l'heure réelle (`payload.now`).
  */
 export function TodayHeader({ payload }: Props) {
-  const now = new Date(payload.now);
-  const dateLabel = formatFrenchDate(now);
+  const dateLabel = formatFrenchDayLabel(payload.viewedDate);
+  const nav = (
+    <TodayDateNav viewedDate={payload.viewedDate} isToday={payload.isToday} />
+  );
 
   if (payload.role === "USER") {
+    const now = new Date(payload.now);
     const firstName = payload.greeting.name.split(" ")[0] || payload.greeting.name;
     const emoji = parisHourIsDaylight(now) ? "☀️" : "🌙";
     return (
@@ -23,6 +30,7 @@ export function TodayHeader({ payload }: Props) {
           {dateLabel}
           {payload.greeting.teamName ? ` · ${payload.greeting.teamName}` : ""}
         </p>
+        {nav}
       </header>
     );
   }
@@ -41,6 +49,7 @@ export function TodayHeader({ payload }: Props) {
           {pluralize(teamsCount, "équipe")} · {pluralize(sitesCount, "site")} ·{" "}
           {pluralize(agentsCount, "agent")}
         </p>
+        {nav}
       </header>
     );
   }
@@ -54,22 +63,12 @@ export function TodayHeader({ payload }: Props) {
       <h1 className="mt-1 text-2xl lg:text-3xl font-bold text-slate-900">
         {dateLabel}
       </h1>
+      {nav}
     </header>
   );
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function formatFrenchDate(date: Date): string {
-  // Locale fr-FR + timeZone Paris pour un rendu déterministe quel que soit
-  // le fuseau du serveur.
-  return new Intl.DateTimeFormat("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    timeZone: "Europe/Paris",
-  }).format(date);
-}
 
 function parisHourIsDaylight(date: Date): boolean {
   // Récupère l'heure (0-23) en Europe/Paris pour choisir l'emoji.

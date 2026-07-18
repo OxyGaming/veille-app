@@ -57,6 +57,8 @@ model User {
   planningImports        PlanningImport[]
   /// RCI rédigés par l'utilisateur.
   rcis                   Rci[]
+  /// Incidents Livret CIL créés par l'utilisateur.
+  cilIncidents           CilIncident[]
   /// Abonnements push (1 par appareil / navigateur installé).
   /// Sprint Push V1 — cf. PushSubscription.
   pushSubscriptions      PushSubscription[]
@@ -157,6 +159,7 @@ model Team {
   vehicleRounds    VehicleRound[]
   planningImports  PlanningImport[]
   planningShifts   PlanningShift[]
+  cilIncidents     CilIncident[]
 }
 
 // ─── Référentiel métier (commun à toutes les équipes) ─────────────────────────
@@ -1602,4 +1605,194 @@ model VehicleRoundNonConformity {
 
   @@index([roundId])
   @@index([redressedDate])
+}
+
+// ─── Livret CIL (Chef d'Incident Local) ───────────────────────────────────────
+//
+// Assistant métier guidant le CIL pendant un incident, puis générant le
+// livret officiel PDF. Le cœur est la CHRONOLOGIE (CilEvent) ; les dépêches,
+// intervenants et signatures portent les données métier liées. Le PDF est une
+// représentation des données enregistrées (superposition sur le fond officiel).
+// Cf. plan Livret CIL. Convention JSON : `metadata` = String JSON (comme
+// TeamActivity.metadata), pas de type Json natif (cohérence + SQLite).
+
+/// Un incident géré par un Chef d'Incident Local. Cloisonné par équipe.
+model CilIncident {
+  id       String @id @default(cuid())
+  teamId   String
+  authorId String
+  /// Cycle de vie dur : OPEN | CLOSED. Réouverture réservée EDITOR/ADMIN.
+  status   String @default("OPEN")
+  /// Référence normée auto (JJMMAAHHMM-Lieu), non unique (comme Rci.dossierNumber).
+  reference String?
+  /// INCENDIE | ACCIDENT_PERSONNE | OBSTACLE | AUTRE
+  type      String
+  typeLibre String?
+  /// Horodatage de l'incident (date + heure).
+  occurredAt DateTime
+  lieu       String
+  poste      String?
+  voie       String?
+  observations String?
+  /// Localisation choisie UNE FOIS pour tout le livret (imprimé : « entre les
+  /// gares de … et de … » OU « en gare de … », mutuellement exclusifs).
+  /// gareMode ∈ { UNIQUE, BETWEEN }.
+  gareMode   String?
+  gareUnique String?
+  gareA      String?
+  gareB      String?
+  /// Éléments de géométrie saisis UNE fois et repris par défaut dans chaque
+  /// dépêche (modifiables ponctuellement depuis la fiche incident).
+  voies      String?
+  km         String?
+  acLabel    String?
+  motif      String?
+  /// En-tête CIL (imprimé officiel).
+  cilNom          String?
+  cilPrenom       String?
+  /// EIC_RAL | INFP_RH | INFP_LGV (cases de l'imprimé).
+  cilEtablissement String?
+  /// Heure « Désigné(e) à ».
+  designatedAt    DateTime?
+  /// Arrivée sur site → bascule responsabilité protections CRC→CIL.
+  arrivedOnSiteAt DateTime?
+  closedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  team          Team              @relation(fields: [teamId], references: [id])
+  author        User              @relation(fields: [authorId], references: [id])
+  events        CilEvent[]
+  depeches      CilDepeche[]
+  intervenants  CilIntervenant[]
+  signatures    CilSignature[]
+
+  @@index([teamId, status])
+  @@index([authorId])
+}
+
+/// Chronologie append-only — colonne vertébrale. Chaque action crée un event.
+/// Le TEMPS d'une action vit ici (source unique éditable) ; `seq` garantit un
+/// tri stable en cas d'égalité d'heure. `refType`/`refId` lient l'entité métier.
+model CilEvent {
+  id         String   @id @default(cuid())
+  incidentId String
+  /// INCIDENT_CREATED | MISSION_CIL | ARRIVAL_ON_SITE | DEPECHE |
+  /// INTERVENANT_ARRIVAL | INTERVENANT_DEPARTURE | REPRISE_PARTIELLE_CIRCULATION |
+  /// REPRISE_CIRCULATION | RETABLISSEMENT_PARTIEL_TENSION | RETABLISSEMENT_TENSION |
+  /// CHANGEMENT_CIL | CLOSURE | NOTE
+  type       String
+  occurredAt DateTime
+  /// Ordre de saisie (tie-breaker) : max(seq)+1 par incident dans la transaction.
+  seq        Int
+  label      String
+  note       String?
+  /// Auteur figé (survit à la suppression/renommage).
+  actorId    String?
+  actorName  String?
+  /// Lien vers l'entité métier : DEPECHE | INTERVENANT (id dans refId).
+  refType    String?
+  refId      String?
+  /// Données structurées additionnelles (JSON string). Ex. autorisation reprise.
+  metadata   String?
+  createdAt  DateTime @default(now())
+
+  incident CilIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, occurredAt, seq])
+}
+
+/// Dépêche — porte les paramètres de protection/reprise/rétablissement ou un
+/// message libre. Le `subtype` détermine la plage de numéros, le type
+/// d'événement, le cadre PDF et le template. Numéro CIL unique par incident.
+model CilDepeche {
+  id         String @id @default(cuid())
+  incidentId String
+  /// L'événement DEPECHE créé avec cette dépêche (le temps y vit).
+  eventId    String @unique
+  /// PROTECTION_CIRCULATION | PROTECTION_ELECTRIQUE | REPRISE_PARTIELLE |
+  /// REPRISE_NORMALE | RETABLISSEMENT_PARTIEL | RETABLISSEMENT_NORMAL | LIBRE
+  subtype    String
+  /// Destinataire numéroté de la dépêche (imprimé 2024) : CRC | RSS | AC | LIBRE.
+  /// Une protection donne 2 dépêches (CRC + RSS pour l'électrique / CRC + AC
+  /// pour la circulation) ; reprises/rétablissements = CRC ; carnet = LIBRE.
+  interlocutor String?
+  /// RECU | EXPEDIE (dépêches libres uniquement).
+  sens       String?
+  texte      String
+  /// Numéro donné par le CIL (réservé dans la plage du subtype). Unique/incident.
+  numeroDonne Int
+  numeroRecu  String?
+  collationne Boolean @default(false)
+  /// Horodatages d'avis (imprimé officiel — protections/reprises/rétablissements).
+  avisCrcAt   DateTime?
+  avisCosAt   DateTime?
+  avisOpjAt   DateTime?
+  /// Rétablissement : départ effectif constaté.
+  departEffectifAt DateTime?
+  /// ACCORD_COS | ACCORD_OPJ | TOUS_PARTIS (reprises/rétablissements).
+  repriseAuthorization String?
+  /// Géométrie non temporelle (JSON string) : voies, km, gareA, gareB,
+  /// gareUnique, motif, marcheInterdite, marchePrudente, marcheNormale.
+  metadata    String?
+  createdAt   DateTime @default(now())
+
+  incident      CilIncident              @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  destinataires CilDepecheDestinataire[]
+
+  @@unique([incidentId, numeroDonne])
+  @@index([incidentId, subtype])
+}
+
+/// Destinataire d'une dépêche libre expédiée à plusieurs (une ligne par
+/// destinataire au PDF). `numeroRecu` propre à chaque destinataire.
+model CilDepecheDestinataire {
+  id         String  @id @default(cuid())
+  depecheId  String
+  label      String
+  numeroRecu String?
+
+  depeche CilDepeche @relation(fields: [depecheId], references: [id], onDelete: Cascade)
+
+  @@index([depecheId])
+}
+
+/// Intervenant présent sur l'incident. Arrivée/départ créent les events
+/// INTERVENANT_* (dont l'`occurredAt` porte l'heure). Pompes Funèbres → départ
+/// obligatoire (validé serveur + UI).
+model CilIntervenant {
+  id         String @id @default(cuid())
+  incidentId String
+  /// COS | OPJ | POMPES_FUNEBRES | EIC | EF | INFRAPOLE | INFP | AUTRE
+  type       String
+  typeLibre  String?
+  nom        String?
+  tel        String?
+  arrivedAt  DateTime?
+  departedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  incident CilIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+}
+
+/// Signature électronique polymorphe — réutilise le SignaturePad du RCI
+/// (base64 PNG sans préfixe). Rattachable à n'importe quel élément.
+model CilSignature {
+  id         String @id @default(cuid())
+  incidentId String
+  /// INCIDENT | EVENT | DEPECHE | INTERVENANT
+  ownerType  String
+  ownerId    String
+  signerName String?
+  signerRole String?
+  /// PNG base64 (sans préfixe data:), comme les signatures RCI.
+  imageB64   String
+  createdAt  DateTime @default(now())
+
+  incident CilIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+  @@index([ownerType, ownerId])
 }

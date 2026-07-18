@@ -8,7 +8,9 @@ import {
   missingRequirementsMessage,
   pendingReminders,
   protectionLane,
+  protectionTransmission,
   repriseAllowed,
+  requiresAuthorization,
   type IntervenantPresence,
   type MachineContext,
 } from "./machine";
@@ -205,6 +207,47 @@ describe("repriseAllowed (garde-fou autorisations + signatures)", () => {
   });
 });
 
+describe("protectionTransmission (2 envois successifs)", () => {
+  const dep = (subtype: DepecheSubtype, interlocutor: string | null) => ({ subtype, interlocutor });
+
+  it("aucune dépêche → rien de commencé, donc rien d'incomplet", () => {
+    const t = protectionTransmission("CIRCULATION", []);
+    expect(t).toMatchObject({ crcDone: false, secondDone: false, incomplete: false });
+  });
+
+  it("CRC seul → incomplet, il reste l'AC (circulation)", () => {
+    const t = protectionTransmission("CIRCULATION", [dep("PROTECTION_CIRCULATION", "CRC")]);
+    expect(t).toMatchObject({ crcDone: true, secondDone: false, incomplete: true, secondInterlocutor: "AC" });
+  });
+
+  it("AC seul → incomplet, il reste le CRC", () => {
+    const t = protectionTransmission("CIRCULATION", [dep("PROTECTION_CIRCULATION", "AC")]);
+    expect(t).toMatchObject({ crcDone: false, secondDone: true, incomplete: true });
+  });
+
+  it("les deux → complet", () => {
+    const t = protectionTransmission("CIRCULATION", [
+      dep("PROTECTION_CIRCULATION", "CRC"),
+      dep("PROTECTION_CIRCULATION", "AC"),
+    ]);
+    expect(t.incomplete).toBe(false);
+  });
+
+  it("électrique : le second interlocuteur est le RSS, pas l'AC", () => {
+    const t = protectionTransmission("ELECTRIQUE", [dep("PROTECTION_ELECTRIQUE", "CRC")]);
+    expect(t.secondInterlocutor).toBe("RSS");
+    expect(t.incomplete).toBe(true);
+  });
+
+  it("ne confond pas les deux protections entre elles", () => {
+    const t = protectionTransmission("ELECTRIQUE", [
+      dep("PROTECTION_CIRCULATION", "CRC"),
+      dep("PROTECTION_CIRCULATION", "AC"),
+    ]);
+    expect(t).toMatchObject({ crcDone: false, secondDone: false, incomplete: false });
+  });
+});
+
 describe("protectionLane (fils de protection)", () => {
   it("circulation : created → active → levée par reprise normale", () => {
     expect(protectionLane("CIRCULATION", ctx()).created).toBe(false);
@@ -272,6 +315,25 @@ describe("pendingReminders (avis obligatoires)", () => {
     expect(r).toEqual([]);
   });
 
+  it("nomme la dépêche concernée dans le message (n° compris)", () => {
+    const r = pendingReminders({
+      depeches: [
+        {
+          id: "a",
+          subtype: "REPRISE_NORMALE",
+          interlocutor: "CRC",
+          numeroDonne: 34,
+          avisCrcAt: null,
+          avisCosAt: null,
+          avisOpjAt: null,
+        },
+      ],
+      intervenants: [],
+    });
+    expect(r[0].message).toContain("Reprise de la circulation (n° 34)");
+    expect(r[0].message).toContain("CRC de Lyon");
+  });
+
   it("rappelle l'avis au CRC après une reprise sans heure", () => {
     const base = { interlocutor: "CRC", avisCrcAt: null, avisCosAt: null, avisOpjAt: null };
     const r = pendingReminders({
@@ -283,6 +345,25 @@ describe("pendingReminders (avis obligatoires)", () => {
     });
     expect(r).toHaveLength(1);
     expect(r[0]).toMatchObject({ targetId: "a", field: "avisCrcAt" });
+  });
+});
+
+describe("requiresAuthorization", () => {
+  it("n'exige RIEN pour poser une protection (responsabilité du seul CIL)", () => {
+    expect(requiresAuthorization("PROTECTION_CIRCULATION")).toBe(false);
+    expect(requiresAuthorization("PROTECTION_ELECTRIQUE")).toBe(false);
+    expect(requiresAuthorization("LIBRE")).toBe(false);
+  });
+
+  it("exige une autorisation pour LEVER une protection, partielle ou totale", () => {
+    for (const s of [
+      "REPRISE_PARTIELLE",
+      "REPRISE_NORMALE",
+      "RETABLISSEMENT_PARTIEL",
+      "RETABLISSEMENT_NORMAL",
+    ] as DepecheSubtype[]) {
+      expect(requiresAuthorization(s)).toBe(true);
+    }
   });
 });
 

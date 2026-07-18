@@ -4,6 +4,7 @@ const requireUser = vi.fn();
 const assertTeamAccess = vi.fn();
 const findUniqueIncident = vi.fn();
 const usedNumbers = vi.fn();
+const findFirstDepeche = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
   requireUser: (...a: unknown[]) => requireUser(...a),
@@ -12,6 +13,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     cilIncident: { findUnique: (...a: unknown[]) => findUniqueIncident(...a) },
+    cilDepeche: { findFirst: (...a: unknown[]) => findFirstDepeche(...a) },
   },
 }));
 vi.mock("@/lib/cil/repo", async () => {
@@ -29,10 +31,19 @@ function req(body: unknown) {
   });
 }
 const ctx = { params: Promise.resolve({ id: "inc1" }) };
-const base = { kind: "ELECTRIQUE", occurredAt: "2026-07-16T12:35:00.000Z", texte: "…" };
+// Une dépêche = un envoi : interlocuteur et n° reçu sont obligatoires.
+const base = {
+  kind: "ELECTRIQUE",
+  interlocutor: "CRC",
+  occurredAt: "2026-07-16T12:35:00.000Z",
+  texte: "…",
+  numeroRecu: "27",
+};
 
 beforeEach(() => {
-  for (const m of [requireUser, assertTeamAccess, findUniqueIncident, usedNumbers]) m.mockReset();
+  for (const m of [requireUser, assertTeamAccess, findUniqueIncident, usedNumbers, findFirstDepeche])
+    m.mockReset();
+  findFirstDepeche.mockResolvedValue(null);
   requireUser.mockResolvedValue({ id: "u1", name: "Obs", role: "USER", teamIds: ["tA"] });
   assertTeamAccess.mockReturnValue(true);
   findUniqueIncident.mockResolvedValue({ id: "inc1", teamId: "tA", status: "OPEN" });
@@ -53,11 +64,30 @@ describe("POST protections — gardes", () => {
     expect((await POST(req({ ...base, kind: "AUTRE" }), ctx)).status).toBe(400);
   });
 
-  it("pas assez de numéros (1 seul libre) → 409", async () => {
-    // 10-28 pris → il ne reste que 29 : impossible de réserver 2 numéros.
-    usedNumbers.mockResolvedValue(Array.from({ length: 19 }, (_, i) => 10 + i));
+  it("plage épuisée → 409", async () => {
+    usedNumbers.mockResolvedValue(Array.from({ length: 20 }, (_, i) => 10 + i));
     const res = await POST(req(base), ctx);
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toMatch(/numéros disponibles/i);
+    expect((await res.json()).error).toMatch(/épuisée/i);
+  });
+
+  it("refuse un n° reçu absent → 400 (collationnement obligatoire)", async () => {
+    const { numeroRecu: _omis, ...sansNumero } = base;
+    expect((await POST(req(sansNumero), ctx)).status).toBe(400);
+    expect((await POST(req({ ...base, numeroRecu: "" }), ctx)).status).toBe(400);
+  });
+
+  it("refuse un interlocuteur incohérent avec la nature → 400", async () => {
+    // Protection électrique → CRC ou RSS, jamais AC.
+    const res = await POST(req({ ...base, interlocutor: "AC" }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/attendu CRC ou RSS/i);
+  });
+
+  it("refuse une seconde transmission au même interlocuteur → 409", async () => {
+    findFirstDepeche.mockResolvedValue({ id: "d1", numeroDonne: 14 });
+    const res = await POST(req(base), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/déjà été transmise au CRC/i);
   });
 });

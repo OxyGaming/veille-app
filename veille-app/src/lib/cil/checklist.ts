@@ -68,7 +68,6 @@ export function computeChecklists(
     .map((d) => {
       const items: ChecklistItem[] = [
         { label: "Dépêche passée", done: d.texte.trim().length > 0 },
-        { label: "Collationnement effectué", done: d.collationne },
         { label: "Numéro attribué", done: d.numeroDonne > 0 },
         { label: "Numéro reçu", done: !!d.numeroRecu && d.numeroRecu.trim() !== "" },
       ];

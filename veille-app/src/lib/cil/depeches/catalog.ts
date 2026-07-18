@@ -35,6 +35,11 @@ const V = {
   km: { name: "km", label: "Kilomètre", required: false },
   motif: { name: "motif", label: "Motif", required: false },
   ac: { name: "ac", label: "AC de", required: false },
+  destinataire: {
+    name: "destinataire",
+    label: "Destinataire de cet envoi (CRC de Lyon, RSS de Lyon, AC de …)",
+    required: false,
+  },
   localisation: {
     name: "localisation",
     label: "Localisation (en gare de… / entre les gares de… et de…)",
@@ -63,7 +68,7 @@ export const DEPECHE_TEMPLATES: DepecheTemplate[] = [
     subtype: "PROTECTION_CIRCULATION",
     label: "Protection vis-à-vis de la circulation des trains",
     text:
-      "M. {{cil}}, CIL, à CRC de Lyon :\n" +
+      "M. {{cil}}, CIL, à {{destinataire}} :\n" +
       "Je reprends à mon compte les mesures de protection suite à (l'événement) {{evenement}} sur voie(s) {{voies}} au km {{km}} {{localisation}}.\n" +
       "Voies n° {{voiesInterdites}} interdites à la circulation,\n" +
       "Voies n° {{voiesPrudente}} circulation en marche prudente,\n" +
@@ -74,6 +79,7 @@ export const DEPECHE_TEMPLATES: DepecheTemplate[] = [
       V.evenement,
       V.voies,
       V.km,
+      V.destinataire,
       V.localisation,
       V.voiesInterdites,
       V.voiesPrudente,
@@ -86,10 +92,10 @@ export const DEPECHE_TEMPLATES: DepecheTemplate[] = [
     subtype: "PROTECTION_ELECTRIQUE",
     label: "Protection vis-à-vis des risques électriques",
     text:
-      "M. {{cil}}, CIL, à CRC de Lyon :\n" +
+      "M. {{cil}}, CIL, à {{destinataire}} :\n" +
       "Je reprends à mon compte la coupure d'urgence demandée suite à (l'événement) {{evenement}} sur voie(s) {{voies}} au kilomètre {{km}} {{localisation}}.\n" +
       "Motif : {{motif}}",
-    variables: [V.cil, V.evenement, V.voies, V.km, V.localisation, V.motif],
+    variables: [V.cil, V.evenement, V.voies, V.km, V.destinataire, V.localisation, V.motif],
   },
   {
     id: "reprise-partielle",

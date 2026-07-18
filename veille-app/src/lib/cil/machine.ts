@@ -244,6 +244,8 @@ export type ReminderDepeche = {
   id: string;
   subtype: DepecheSubtype;
   interlocutor: string | null;
+  /** Numéro donné — cité dans le rappel pour lever toute ambiguïté. */
+  numeroDonne?: number;
   avisCrcAt: string | null;
   avisCosAt: string | null;
   avisOpjAt: string | null;
@@ -265,12 +267,40 @@ export type PendingReminder = {
   message: string;
 };
 
+/** Libellés courts employés dans les rappels (« de quoi parle-t-on ? »). */
+const DEPECHE_LIBELLES: Record<DepecheSubtype, string> = {
+  PROTECTION_CIRCULATION: "Protection circulation",
+  PROTECTION_ELECTRIQUE: "Protection électrique",
+  REPRISE_PARTIELLE: "Reprise partielle de la circulation",
+  REPRISE_NORMALE: "Reprise de la circulation",
+  RETABLISSEMENT_PARTIEL: "Rétablissement partiel de la tension",
+  RETABLISSEMENT_NORMAL: "Rétablissement de la tension",
+  LIBRE: "Dépêche libre",
+};
+
+/** « Reprise de la circulation (n° 34) » — objet explicite du rappel. */
+function objet(d: ReminderDepeche): string {
+  const libelle = DEPECHE_LIBELLES[d.subtype];
+  return d.numeroDonne ? `${libelle} (n° ${d.numeroDonne})` : libelle;
+}
+
 const REPRISE_SUBTYPES: DepecheSubtype[] = [
   "REPRISE_PARTIELLE",
   "REPRISE_NORMALE",
   "RETABLISSEMENT_PARTIEL",
   "RETABLISSEMENT_NORMAL",
 ];
+
+/**
+ * Une autorisation COS/OPJ n'est exigée que pour LEVER une protection (reprise
+ * ou rétablissement, partiel ou total).
+ *
+ * La POSER relève de la seule responsabilité du CIL : le protéger ne demande
+ * l'accord de personne, c'est le retour à la normale qui l'exige.
+ */
+export function requiresAuthorization(subtype: DepecheSubtype): boolean {
+  return REPRISE_SUBTYPES.includes(subtype);
+}
 
 /**
  * Avis obligatoires encore à recueillir. L'imprimé réserve une case « Avis
@@ -302,7 +332,7 @@ export function pendingReminders(input: {
         target: "DEPECHE",
         targetId: d.id,
         field,
-        message: `Avisez le ${role} que les mesures de protection sont reprises à votre compte, puis notez l'heure de l'avis.`,
+        message: `${objet(d)} — avisez le ${role} que les mesures de protection sont reprises à votre compte, puis notez l'heure de l'avis.`,
       });
     }
   }
@@ -315,7 +345,7 @@ export function pendingReminders(input: {
       target: "DEPECHE",
       targetId: d.id,
       field: "avisCrcAt",
-      message: "Avisez le CRC de Lyon et notez l'heure de l'avis.",
+      message: `${objet(d)} — avisez le CRC de Lyon de cette ${DEPECHE_LIBELLES[d.subtype].toLowerCase()}, puis notez l'heure de l'avis.`,
     });
   }
 
@@ -338,12 +368,52 @@ export function pendingReminders(input: {
         target: "EVENT",
         targetId: e.id,
         field: t.key,
-        message: `Changement de CIL : avisez ${t.label} et notez l'heure de l'avis.`,
+        message: `Changement de CIL — avisez ${t.label} que la fonction de CIL a été reprise, puis notez l'heure de l'avis.`,
       });
     }
   }
 
   return out;
+}
+
+// ─── Transmission d'une protection (2 envois successifs) ────────────────────
+
+export type TransmissionState = {
+  subtype: DepecheSubtype;
+  /** Second destinataire attendu : RSS pour l'électrique, AC pour la circulation. */
+  secondInterlocutor: "RSS" | "AC";
+  crcDone: boolean;
+  secondDone: boolean;
+  /** Une seule des deux dépêches est passée : il reste un envoi à faire. */
+  incomplete: boolean;
+};
+
+/**
+ * Une protection se transmet en DEUX envois successifs (CRC puis RSS/AC), à des
+ * heures différentes et avec des n° reçus différents. Tant que le second n'est
+ * pas passé, la protection est incomplète : c'est le garde-fou qui évite de
+ * l'oublier entre les deux appels.
+ */
+export function protectionTransmission(
+  kind: ProtectionKind,
+  depeches: { subtype: DepecheSubtype; interlocutor: string | null }[],
+): TransmissionState {
+  const subtype: DepecheSubtype =
+    kind === "CIRCULATION" ? "PROTECTION_CIRCULATION" : "PROTECTION_ELECTRIQUE";
+  const secondInterlocutor = kind === "CIRCULATION" ? "AC" : "RSS";
+  const sent = (interlocutor: string) =>
+    depeches.some(
+      (d) => d.subtype === subtype && d.interlocutor === interlocutor,
+    );
+  const crcDone = sent("CRC");
+  const secondDone = sent(secondInterlocutor);
+  return {
+    subtype,
+    secondInterlocutor,
+    crcDone,
+    secondDone,
+    incomplete: crcDone !== secondDone,
+  };
 }
 
 // ─── Voies de protection (« fils d'Ariane » rouge / bleue) ───────────────────

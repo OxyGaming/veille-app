@@ -47,19 +47,19 @@ describe("computeChecklists — dépêches", () => {
     expect(res.depeches).toHaveLength(0);
   });
 
-  it("protection : items dépêche/collationnement/n° attribué/n° reçu, complète quand tout est fait", () => {
+  it("protection : items dépêche/n° attribué/n° reçu, complète quand tout est fait", () => {
     const res = computeChecklists(
-      [depeche({ collationne: true, numeroRecu: "27" })],
+      [depeche({ numeroRecu: "27" })],
       [],
       [],
     );
     const cl = res.depeches[0];
-    expect(cl.items.map((i) => i.done)).toEqual([true, true, true, true]);
+    expect(cl.items.map((i) => i.done)).toEqual([true, true, true]);
     expect(cl.complete).toBe(true);
   });
 
   it("protection incomplète si n° reçu manquant", () => {
-    const res = computeChecklists([depeche({ collationne: true })], [], []);
+    const res = computeChecklists([depeche({})], [], []);
     expect(res.depeches[0].complete).toBe(false);
   });
 

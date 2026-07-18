@@ -34,6 +34,7 @@ describe("renderDepecheTemplate", () => {
       voies: "1 et 2",
       km: "12,300",
       motif: "feu de broussailles",
+      destinataire: "CRC de Lyon",
     });
     expect(out).toContain("M. MARTIN, CIL, à CRC de Lyon");
     expect(out).toContain("suite à (l'événement) incendie poste sur voie(s) 1 et 2 au kilomètre 12,300");

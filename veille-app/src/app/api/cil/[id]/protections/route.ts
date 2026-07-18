@@ -7,11 +7,15 @@ import { createEvent, usedNumbers } from "@/lib/cil/repo";
 import { randomAvailableNumber, NUMBER_RANGES } from "@/lib/cil/numbering";
 
 /**
- * Création d'une PROTECTION = 2 dépêches numérotées (imprimé officiel 2024) :
- *  - électrique → CRC + RSS de Lyon
- *  - circulation → CRC + AC
- * Chacune consomme un numéro de la plage protections (10-29), avec son propre
- * N° donné (réservé serveur) / N° reçu. Réservation atomique + retry P2002.
+ * Création d'UNE dépêche de protection.
+ *
+ * Une protection en compte deux (CRC + RSS de Lyon / AC), mais elles sont
+ * transmises l'une APRÈS l'autre : chacune a donc sa propre heure et son propre
+ * n° reçu, et est enregistrée séparément. Le second envoi peut intervenir bien
+ * plus tard — la voie de protection le rappelle tant qu'il manque.
+ *
+ * Le n° reçu est OBLIGATOIRE : une dépêche sans collationnement du numéro n'est
+ * pas une dépêche passée.
  */
 const geometrySchema = z
   .object({
@@ -29,24 +33,20 @@ const geometrySchema = z
 
 const bodySchema = z.object({
   kind: z.enum(["CIRCULATION", "ELECTRIQUE"]),
+  /** Destinataire de CETTE dépêche. */
+  interlocutor: z.enum(["CRC", "RSS", "AC"]),
   occurredAt: z.string().datetime(),
   texte: z.string().trim().max(4000).default(""),
   geometry: geometrySchema,
-  /** N° reçu de la dépêche au CRC. */
-  crcNumeroRecu: z.string().trim().max(20).nullable().optional(),
-  /** N° reçu de la 2ᵉ dépêche (RSS de Lyon / AC). */
-  secondNumeroRecu: z.string().trim().max(20).nullable().optional(),
-  /** Libellé de l'AC (circulation) — ex. "AC de Givors". */
+  /** N° reçu de l'interlocuteur — obligatoire (collationnement). */
+  numeroRecu: z.string().trim().min(1).max(20),
+  /** Libellé de l'AC (circulation) — ex. « Givors ». */
   acLabel: z.string().trim().max(120).nullable().optional(),
   /** « Avis à (obligatoire) » — heures d'avis aux autorités présentes. */
   avisCosAt: z.string().datetime().nullable().optional(),
   avisOpjAt: z.string().datetime().nullable().optional(),
-  /**
-   * Numéros tirés côté client (affichés à l'utilisateur). Utilisés tels quels
-   * s'ils sont encore libres ; sinon tirage serveur (anti-collision).
-   */
+  /** Numéro tiré côté client (affiché) — retenu s'il est encore libre. */
   numeroDonne: z.number().int().min(10).max(29).optional(),
-  numeroDonne2: z.number().int().min(10).max(29).optional(),
 });
 
 export async function POST(
@@ -85,128 +85,108 @@ export async function POST(
   const p = parsed.data;
   const subtype =
     p.kind === "CIRCULATION" ? "PROTECTION_CIRCULATION" : "PROTECTION_ELECTRIQUE";
-  const secondInterlocutor = p.kind === "CIRCULATION" ? "AC" : "RSS";
+  // Le second interlocuteur dépend de la nature de la protection.
+  const expectedSecond = p.kind === "CIRCULATION" ? "AC" : "RSS";
+  if (p.interlocutor !== "CRC" && p.interlocutor !== expectedSecond) {
+    return NextResponse.json(
+      {
+        error: `Interlocuteur invalide pour une protection ${p.kind.toLowerCase()} : attendu CRC ou ${expectedSecond}.`,
+      },
+      { status: 400 },
+    );
+  }
+
+  // Une même protection ne se transmet pas deux fois au même interlocuteur.
+  const deja = await prisma.cilDepeche.findFirst({
+    where: { incidentId: id, subtype, interlocutor: p.interlocutor },
+    select: { id: true, numeroDonne: true },
+  });
+  if (deja) {
+    return NextResponse.json(
+      {
+        error: `Cette protection a déjà été transmise au ${p.interlocutor} (n° ${deja.numeroDonne}).`,
+      },
+      { status: 409 },
+    );
+  }
+
   const occurredAt = new Date(p.occurredAt);
   const geometry = { ...(p.geometry ?? {}) };
   if (p.acLabel) (geometry as Record<string, string>).acLabel = p.acLabel;
   const metadata = Object.keys(geometry).length ? JSON.stringify(geometry) : null;
   const label =
-    p.kind === "CIRCULATION"
-      ? "Protection circulation"
-      : "Protection électrique";
+    p.kind === "CIRCULATION" ? "Protection circulation" : "Protection électrique";
 
   const MAX_ATTEMPTS = 5;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const used = await usedNumbers(prisma, id);
-    const usedSet = new Set(used);
-    // Numéros proposés par le client (tirés et affichés côté UI) s'ils sont
-    // encore libres — garantit que le n° annoncé est celui retenu.
-    const wanted1 =
-      attempt === 0 && p.numeroDonne != null && !usedSet.has(p.numeroDonne)
+    // Numéro proposé par le client (déjà affiché) s'il est encore libre.
+    const wanted =
+      attempt === 0 && p.numeroDonne != null && !used.includes(p.numeroDonne)
         ? p.numeroDonne
         : null;
-    const n1 = wanted1 ?? randomAvailableNumber(NUMBER_RANGES.PROTECTION, used);
-    const wanted2 =
-      attempt === 0 &&
-      p.numeroDonne2 != null &&
-      !usedSet.has(p.numeroDonne2) &&
-      p.numeroDonne2 !== n1
-        ? p.numeroDonne2
-        : null;
-    const n2 =
-      n1 === null
-        ? null
-        : (wanted2 ??
-          randomAvailableNumber(NUMBER_RANGES.PROTECTION, [...used, n1]));
-    if (n1 === null || n2 === null) {
+    const numeroDonne =
+      wanted ?? randomAvailableNumber(NUMBER_RANGES.PROTECTION, used);
+    if (numeroDonne === null) {
       return NextResponse.json(
-        { error: "Pas assez de numéros disponibles (plage protections)." },
+        { error: "Plage de numéros épuisée (protections)." },
         { status: 409 },
       );
     }
     try {
       const created = await prisma.$transaction(async (tx) => {
-        const mkDepeche = async (
-          numeroDonne: number,
-          interlocutor: string,
-          numeroRecu: string | null,
-          /** Les avis COS/OPJ sont portés par la dépêche CRC de la protection. */
-          avis?: { cos: Date | null; opj: Date | null },
-          texte: string = p.texte,
-        ) => {
-          const event = await createEvent(tx, {
-            incidentId: id,
-            type: "DEPECHE",
-            occurredAt,
-            label: `${label} — ${interlocutor} — n° ${numeroDonne}`,
-            actorId: u.id,
-            actorName: u.name,
-          });
-          const dep = await tx.cilDepeche.create({
-            data: {
-              incidentId: id,
-              eventId: event.id,
-              subtype,
-              interlocutor,
-              texte,
-              numeroDonne,
-              numeroRecu,
-              avisCosAt: avis?.cos ?? null,
-              avisOpjAt: avis?.opj ?? null,
-              metadata,
-            },
-          });
-          await tx.cilEvent.update({
-            where: { id: event.id },
-            data: { refType: "DEPECHE", refId: dep.id },
-          });
-          return dep.id;
-        };
-        // La 2ᵉ dépêche s'adresse au RSS / à l'AC : on réécrit l'en-tête
-        // « … à CRC de Lyon : » pour que le texte relu soit cohérent avec son
-        // destinataire (sans impact sur le livret, qui a ses propres cases).
-        const acNom = p.acLabel?.trim();
-        const secondHeader =
-          p.kind === "CIRCULATION"
-            ? // « AC de Givors » si le poste est donné, sinon « AC » seul ; on
-              // n'ajoute pas « AC de » si le libellé le porte déjà.
-              `à ${!acNom ? "AC" : /^AC\b/i.test(acNom) ? acNom : `AC de ${acNom}`} :`
-            : "à RSS de Lyon :";
-        const secondTexte = p.texte.replace(
-          /à\s+CRC\s+de\s+Lyon\s*:/i,
-          secondHeader,
-        );
-
-        const crcId = await mkDepeche(n1, "CRC", p.crcNumeroRecu ?? null, {
-          cos: p.avisCosAt ? new Date(p.avisCosAt) : null,
-          opj: p.avisOpjAt ? new Date(p.avisOpjAt) : null,
+        const event = await createEvent(tx, {
+          incidentId: id,
+          type: "DEPECHE",
+          occurredAt,
+          label: `${label} — ${p.interlocutor} — n° ${numeroDonne}`,
+          actorId: u.id,
+          actorName: u.name,
         });
-        const secondId = await mkDepeche(
-          n2,
-          secondInterlocutor,
-          p.secondNumeroRecu ?? null,
-          undefined,
-          secondTexte,
-        );
-        return { crcId, secondId };
+        const dep = await tx.cilDepeche.create({
+          data: {
+            incidentId: id,
+            eventId: event.id,
+            subtype,
+            interlocutor: p.interlocutor,
+            texte: p.texte,
+            numeroDonne,
+            numeroRecu: p.numeroRecu,
+            // Les avis COS/OPJ sont portés par la dépêche au CRC.
+            avisCosAt:
+              p.interlocutor === "CRC" && p.avisCosAt
+                ? new Date(p.avisCosAt)
+                : null,
+            avisOpjAt:
+              p.interlocutor === "CRC" && p.avisOpjAt
+                ? new Date(p.avisOpjAt)
+                : null,
+            metadata,
+          },
+        });
+        await tx.cilEvent.update({
+          where: { id: event.id },
+          data: { refType: "DEPECHE", refId: dep.id },
+        });
+        return dep;
       });
       return NextResponse.json({
-        ...created,
-        numeros: [n1, n2],
-        interlocutors: ["CRC", secondInterlocutor],
+        id: created.id,
+        numeroDonne,
+        interlocutor: p.interlocutor,
       });
     } catch (e) {
       if (
         e instanceof Prisma.PrismaClientKnownRequestError &&
         e.code === "P2002"
       ) {
-        continue; // collision → retry
+        continue; // collision de numéro → retry
       }
       throw e;
     }
   }
   return NextResponse.json(
-    { error: "Impossible de réserver les numéros (réessayez)." },
+    { error: "Impossible de réserver un numéro (réessayez)." },
     { status: 409 },
   );
 }

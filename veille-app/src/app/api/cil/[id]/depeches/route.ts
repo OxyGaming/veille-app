@@ -125,10 +125,20 @@ export async function POST(
   const occurredAt = new Date(p.occurredAt);
   const eventType = eventTypeForSubtype(p.subtype);
   const geometry = p.geometry ?? {};
+  /** Autorisations déjà recueillies pour ce sous-type (écran dédié). */
+  let stored: {
+    role: string;
+    grantedAt: Date;
+    signerName: string | null;
+    imageB64: string;
+  }[] = [];
+  /** Heure d'autorisation recueillie en amont pour ce rôle, si elle existe. */
+  const storedGrantedAt = (role: "COS" | "OPJ") =>
+    stored.find((a) => a.role === role)?.grantedAt ?? null;
 
-  // Garde-fou métier : une reprise / un rétablissement exige l'autorisation de
-  // chaque COS/OPJ PRÉSENT (arrivé, non reparti), portée par avisCosAt/avisOpjAt,
-  // sauf s'il est déjà parti.
+  // Garde-fou métier : une reprise / un rétablissement exige l'autorisation ET
+  // la signature de chaque COS/OPJ PRÉSENT (arrivé, non reparti), sauf s'il est
+  // déjà parti.
   const isReprise =
     p.subtype === "REPRISE_PARTIELLE" ||
     p.subtype === "REPRISE_NORMALE" ||
@@ -144,12 +154,26 @@ export async function POST(
       arrivedAt: i.arrivedAt ? i.arrivedAt.toISOString() : null,
       departedAt: i.departedAt ? i.departedAt.toISOString() : null,
     }));
-    // La signature de l'autorité est exigée au même titre que son autorisation.
+    // Les autorisations sont recueillies EN AMONT (écran dédié) et persistées :
+    // on les lit ici plutôt que de les attendre dans le corps de la requête.
+    // Le corps reste accepté en repli (compatibilité).
+    stored = await prisma.cilAutorisation.findMany({
+      where: { incidentId: id, subtype: p.subtype },
+    });
+    const storedFor = (role: "COS" | "OPJ") =>
+      stored.find((a) => a.role === role);
     const signedBy = (role: "COS" | "OPJ") =>
+      !!storedFor(role)?.imageB64 ||
       (p.signatures ?? []).some((s) => s.role === role && !!s.imageB64);
     const { ok, missing } = repriseAllowed(presence, {
-      COS: { authorized: !!p.avisCosAt, signed: signedBy("COS") },
-      OPJ: { authorized: !!p.avisOpjAt, signed: signedBy("OPJ") },
+      COS: {
+        authorized: !!storedFor("COS") || !!p.avisCosAt,
+        signed: signedBy("COS"),
+      },
+      OPJ: {
+        authorized: !!storedFor("OPJ") || !!p.avisOpjAt,
+        signed: signedBy("OPJ"),
+      },
     });
     if (!ok) {
       return NextResponse.json(
@@ -205,8 +229,9 @@ export async function POST(
             numeroDonne,
             numeroRecu: p.numeroRecu ?? null,
             avisCrcAt: d(p.avisCrcAt),
-            avisCosAt: d(p.avisCosAt),
-            avisOpjAt: d(p.avisOpjAt),
+            // Heures d'autorisation : celles recueillies en amont priment.
+            avisCosAt: storedGrantedAt("COS") ?? d(p.avisCosAt),
+            avisOpjAt: storedGrantedAt("OPJ") ?? d(p.avisOpjAt),
             departEffectifAt: d(p.departEffectifAt),
             repriseAuthorization: p.repriseAuthorization ?? null,
             metadata: Object.keys(geometry).length
@@ -228,8 +253,25 @@ export async function POST(
           data: { refType: "DEPECHE", refId: dep.id },
         });
         // Signatures des autorités présentes (COS/OPJ) — le rôle est conservé
-        // pour placer chaque signature dans la bonne case du livret.
-        if (p.signatures?.length) {
+        // pour placer chaque signature dans la bonne case du livret. Celles
+        // recueillies en amont sont CONSOMMÉES ici.
+        if (stored.length) {
+          await tx.cilSignature.createMany({
+            data: stored.map((a) => ({
+              incidentId: id,
+              ownerType: "DEPECHE",
+              ownerId: dep.id,
+              signerRole: a.role,
+              signerName: a.signerName,
+              imageB64: a.imageB64,
+            })),
+          });
+          // L'autorisation a rempli son office : on la retire pour qu'une
+          // reprise ultérieure du même type en exige une nouvelle.
+          await tx.cilAutorisation.deleteMany({
+            where: { incidentId: id, subtype: p.subtype },
+          });
+        } else if (p.signatures?.length) {
           await tx.cilSignature.createMany({
             data: p.signatures.map((s) => ({
               incidentId: id,

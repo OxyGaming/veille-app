@@ -2,6 +2,7 @@
 
 import { Icon } from "@/components/icons";
 import type { CilActionId } from "@/lib/cil/machine";
+import { protectionTransmission } from "@/lib/cil/machine";
 import type { ProtectionKind, ProtectionLaneState } from "@/lib/cil/machine";
 import type { CilDepecheDTO } from "@/lib/cil/types";
 
@@ -72,6 +73,16 @@ export function CilProtectionLane({
   const protNums = depeches
     .filter((d) => d.subtype === c.subtype)
     .sort((a, b) => a.numeroDonne - b.numeroDonne);
+  // Garde-fou : une protection compte DEUX envois ; tant que le second manque,
+  // on l'affiche en rouge avec le moyen de le reprendre.
+  const transmission = protectionTransmission(kind, depeches);
+  const manquant = transmission.incomplete
+    ? transmission.crcDone
+      ? transmission.secondInterlocutor === "AC"
+        ? "AC"
+        : "RSS de Lyon"
+      : "CRC de Lyon"
+    : null;
 
   const Node = ({
     state,
@@ -130,10 +141,32 @@ export function CilProtectionLane({
       ) : (
         <div className="space-y-2.5">
           <Node
-            state="done"
-            label="Protection passée"
-            detail={protNums.map((d) => `${d.interlocutor} n° ${d.numeroDonne}${d.numeroRecu ? `/${d.numeroRecu}` : ""}`).join(" · ")}
+            state={transmission.incomplete ? "todo" : "done"}
+            label={transmission.incomplete ? "Protection incomplète" : "Protection passée"}
+            detail={protNums
+              .map(
+                (d) =>
+                  `${d.interlocutor} n° ${d.numeroDonne}${d.numeroRecu ? `/${d.numeroRecu}` : ""}`,
+              )
+              .join(" · ")}
           />
+          {manquant && !closed && (
+            <div className="ml-4 rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-2">
+              <p className="text-[11px] text-rose-800 font-semibold">
+                Dépêche non transmise au {manquant}
+              </p>
+              <p className="text-[11px] text-rose-700">
+                La protection n&apos;est complète qu&apos;une fois les deux
+                interlocuteurs avisés.
+              </p>
+              <button
+                onClick={() => onAction(c.create)}
+                className={`mt-1.5 text-xs font-semibold text-white px-2.5 py-1 rounded-lg border ${btn}`}
+              >
+                Transmettre au {manquant}
+              </button>
+            </div>
+          )}
           <Node
             state={lane.partialDone ? "done" : lane.lifted ? "locked" : "todo"}
             label={c.partielLabel}

@@ -5,6 +5,7 @@ const assertTeamAccess = vi.fn();
 const findUniqueIncident = vi.fn();
 const findManyIntervenant = vi.fn();
 const usedNumbers = vi.fn();
+const findManyAutorisation = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
   requireUser: (...a: unknown[]) => requireUser(...a),
@@ -14,6 +15,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     cilIncident: { findUnique: (...a: unknown[]) => findUniqueIncident(...a) },
     cilIntervenant: { findMany: (...a: unknown[]) => findManyIntervenant(...a) },
+    cilAutorisation: { findMany: (...a: unknown[]) => findManyAutorisation(...a) },
   },
 }));
 vi.mock("@/lib/cil/repo", async () => {
@@ -40,8 +42,10 @@ const base = {
 };
 
 beforeEach(() => {
-  for (const m of [requireUser, assertTeamAccess, findUniqueIncident, findManyIntervenant, usedNumbers])
+  for (const m of [requireUser, assertTeamAccess, findUniqueIncident, findManyIntervenant, usedNumbers, findManyAutorisation])
     m.mockReset();
+  // Par défaut : aucune autorisation recueillie en amont.
+  findManyAutorisation.mockResolvedValue([]);
   requireUser.mockResolvedValue({ id: "u1", name: "Obs", role: "USER", teamIds: ["tA"] });
   assertTeamAccess.mockReturnValue(true);
   findUniqueIncident.mockResolvedValue({ id: "inc1", teamId: "tA", status: "OPEN" });
@@ -103,9 +107,17 @@ describe("POST depeches — garde-fou autorisations reprise", () => {
     expect((await res.json()).error).toMatch(/COS \(signature\)/);
   });
 
-  it("autorisation + signature du COS → garde franchie", async () => {
+  it("autorisation + signature du COS (recueillies en amont) → garde franchie", async () => {
     findManyIntervenant.mockResolvedValue([
       { type: "COS", arrivedAt: new Date("2026-07-16T13:00:00Z"), departedAt: null },
+    ]);
+    findManyAutorisation.mockResolvedValue([
+      {
+        role: "COS",
+        grantedAt: new Date("2026-07-16T13:45:00Z"),
+        signerName: null,
+        imageB64: "AAA",
+      },
     ]);
     // plage pleine → 409 « épuisée » (≠ garde), prouve que la garde a été franchie.
     usedNumbers.mockResolvedValue(Array.from({ length: 20 }, (_, i) => 30 + i));

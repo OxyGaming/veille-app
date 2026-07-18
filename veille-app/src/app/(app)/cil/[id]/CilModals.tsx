@@ -17,7 +17,7 @@ import {
 } from "@/lib/cil/types";
 import { getTemplateForSubtype, renderTemplateText } from "@/lib/cil/depeches/catalog";
 import { randomAvailableNumber, randomNumberForSubtype, NUMBER_RANGES } from "@/lib/cil/numbering";
-import { localInputToIso, nowLocalInput } from "@/lib/cil/format";
+import { fmtDateTimeFr, localInputToIso, nowLocalInput } from "@/lib/cil/format";
 import type { CilActionId } from "@/lib/cil/machine";
 
 // ─── Wrapper modale (style cohérent NoteModal / ContactCreateModal) ───────────
@@ -104,7 +104,7 @@ async function patchJson(url: string, body: unknown): Promise<{ ok: boolean; err
 
 // ─── Modale générique d'action ────────────────────────────────────────────────
 
-const ACTION_SUBTYPE: Partial<Record<CilActionId, DepecheSubtype>> = {
+export const ACTION_SUBTYPE: Partial<Record<CilActionId, DepecheSubtype>> = {
   ADD_PROTECTION_CIRCULATION: "PROTECTION_CIRCULATION",
   ADD_PROTECTION_ELECTRIQUE: "PROTECTION_ELECTRIQUE",
   ADD_REPRISE_PARTIELLE: "REPRISE_PARTIELLE",
@@ -117,6 +117,7 @@ export function CilActionModal({
   action,
   incident,
   prefillTexte,
+  onTransmettre,
   onClose,
   onDone,
 }: {
@@ -124,6 +125,8 @@ export function CilActionModal({
   incident: CilIncidentFull;
   /** Texte pré-rempli pour une dépêche libre (transmission d'une dépêche passée). */
   prefillTexte?: string;
+  /** Bascule vers une dépêche libre pré-remplie. */
+  onTransmettre: (texte: string) => void;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -160,7 +163,16 @@ export function CilActionModal({
   }
   const subtype = ACTION_SUBTYPE[action];
   if (subtype) {
-    return <DepecheModal incident={incident} subtype={subtype} onClose={onClose} onDone={done} />;
+    return (
+      <DepecheModal
+        incident={incident}
+        subtype={subtype}
+        onClose={onClose}
+        onDone={done}
+        onRefresh={onDone}
+        onTransmettre={onTransmettre}
+      />
+    );
   }
   return null;
 }
@@ -206,11 +218,17 @@ function DepecheModal({
   subtype,
   onClose,
   onDone,
+  onRefresh,
+  onTransmettre,
 }: {
   incident: CilIncidentFull;
   subtype: DepecheSubtype;
   onClose: () => void;
   onDone: () => void;
+  /** Recharge l'incident SANS fermer (enchaînement des deux dépêches). */
+  onRefresh: () => void;
+  /** Ouvre une dépêche libre pré-remplie (retransmission à un AC encadrant). */
+  onTransmettre: (texte: string) => void;
 }) {
   const incidentId = incident.incident.id;
   const isCirculation = subtype === "PROTECTION_CIRCULATION";
@@ -226,15 +244,27 @@ function DepecheModal({
   // Numéros TIRÉS AU HASARD dans la plage, une seule fois à l'ouverture : le n°
   // annoncé ici est celui envoyé au serveur (et retenu, sauf collision).
   // Reprise/rétablissement : 1 numéro. Protection : 2 numéros (CRC + RSS/AC).
-  const { nextNum, protN1, protN2 } = useMemo(() => {
-    const one = randomNumberForSubtype(subtype, usedNums);
-    const p1 = isProtection ? randomAvailableNumber(NUMBER_RANGES.PROTECTION, usedNums) : null;
-    const p2 =
-      p1 == null ? null : randomAvailableNumber(NUMBER_RANGES.PROTECTION, [...usedNums, p1]);
-    return { nextNum: one, protN1: p1, protN2: p2 };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [nextNum, setNextNum] = useState<number | null>(() =>
+    isProtection
+      ? randomAvailableNumber(NUMBER_RANGES.PROTECTION, usedNums)
+      : randomNumberForSubtype(subtype, usedNums),
+  );
+  const secondInterlocutor = isCirculation ? "AC" : "RSS";
   const secondLabelFixed = isCirculation ? "AC" : "RSS de Lyon";
+  /**
+   * Une protection se transmet en DEUX envois successifs, chacun avec son heure
+   * et son n° reçu. On traite d'abord le CRC, puis le RSS/AC ; l'étape courante
+   * est déduite de ce qui a déjà été transmis (on peut fermer entre les deux).
+   */
+  const dejaTransmis = (interlocutor: string) =>
+    incident.depeches.some(
+      (dd) => dd.subtype === subtype && dd.interlocutor === interlocutor,
+    );
+  const [cible, setCible] = useState<"CRC" | "RSS" | "AC">(() =>
+    dejaTransmis("CRC") ? (secondInterlocutor as "RSS" | "AC") : "CRC",
+  );
+  const cibleLabel = cible === "CRC" ? "CRC de Lyon" : secondLabelFixed;
+  const resteASuivre = isProtection && !dejaTransmis(cible === "CRC" ? secondInterlocutor : "CRC");
   const cilName = [incident.incident.cilNom, incident.incident.cilPrenom].filter(Boolean).join(" ");
   const evenement =
     incident.incident.type === "AUTRE" && incident.incident.typeLibre
@@ -287,22 +317,20 @@ function DepecheModal({
   const [voiesNormale, setVoiesNormale] = useState("");
   const [occurredAt, setOccurredAt] = useState(nowLocalInput());
   const [numeroRecu, setNumeroRecu] = useState(""); // reprise/rétab (CRC)
-  const [crcRecu, setCrcRecu] = useState(""); // protection CRC
-  const [secondRecu, setSecondRecu] = useState(""); // protection RSS/AC
   // Protection circulation : destinataire de la 2ᵉ dépêche (« AC de … »).
   const [acLabel, setAcLabel] = useState(inc.acLabel ?? inc.poste ?? "");
-  const [collationne, setCollationne] = useState(false);
   // Autorisations reprise/rétablissement : pour chaque COS/OPJ présent.
-  const [cosAuthAt, setCosAuthAt] = useState("");
-  const [opjAuthAt, setOpjAuthAt] = useState("");
   // « Avis (obligatoire) » : au CRC (reprise) / aux autorités (protection).
   const [avisCrcAt, setAvisCrcAt] = useState("");
   const [avisCosAt, setAvisCosAt] = useState("");
   const [avisOpjAt, setAvisOpjAt] = useState("");
-  // Signatures des AUTORITÉS présentes (et non du CIL) sur les reprises.
-  const [sigCos, setSigCos] = useState("");
-  const [sigOpj, setSigOpj] = useState("");
   const [busy, setBusy] = useState(false);
+  /**
+   * Une dépêche transmise à un AC doit souvent être retransmise à l'AC
+   * encadrant : on pose systématiquement la question après l'envoi, plutôt que
+   * de compter sur la mémoire du CIL.
+   */
+  const [demandeRetransmission, setDemandeRetransmission] = useState<string | null>(null);
 
   const cosPresent = incident.intervenants.some(
     (i) => i.type === "COS" && i.arrivedAt && !i.departedAt,
@@ -311,17 +339,28 @@ function DepecheModal({
     (i) => i.type === "OPJ" && i.arrivedAt && !i.departedAt,
   );
   // Une reprise exige, pour chaque autorité présente, l'autorisation ET sa
-  // signature (même règle que le serveur, cf. repriseAllowed).
+  // signature. Elles sont recueillies en amont (écran dédié) : on vérifie ici
+  // qu'elles existent bien, même règle que le serveur (cf. repriseAllowed).
+  const autorisationFor = (role: "COS" | "OPJ") =>
+    incident.autorisations.find((a) => a.subtype === subtype && a.role === role);
   const manque: string[] = [];
   if (isReprise || hasRetab) {
-    if (cosPresent && !cosAuthAt) manque.push("autorisation du COS");
-    if (cosPresent && !sigCos) manque.push("signature du COS");
-    if (opjPresent && !opjAuthAt) manque.push("autorisation de l'OPJ");
-    if (opjPresent && !sigOpj) manque.push("signature de l'OPJ");
+    if (cosPresent && !autorisationFor("COS")) manque.push("autorisation du COS");
+    if (opjPresent && !autorisationFor("OPJ")) manque.push("autorisation de l'OPJ");
   }
   const authOk = manque.length === 0;
 
-  const buildText = () => {
+  /** Libellé imprimé en tête pour un interlocuteur donné. */
+  const labelDestinataire = (pour: "CRC" | "RSS" | "AC") =>
+    pour === "CRC"
+      ? "CRC de Lyon"
+      : pour === "RSS"
+        ? "RSS de Lyon"
+        : `AC de ${(isReprise ? ac : acLabel) || inc.acLabel || inc.poste || "…"}`;
+
+  // `pour` permet de régénérer le texte pour le PROCHAIN interlocuteur avant
+  // que l'état `cible` ne soit rafraîchi par React.
+  const buildTextPour = (pour: "CRC" | "RSS" | "AC") => {
     const tpl = getTemplateForSubtype(subtype);
     if (!tpl) return "";
     return renderTemplateText(tpl.text, {
@@ -330,6 +369,7 @@ function DepecheModal({
       // La localisation vient de l'incident : elle doit figurer dans le texte
       // relu (« Dépêches passées »), pas seulement dans les cases du livret.
       localisation: localisation ?? "",
+      destinataire: labelDestinataire(pour),
       voies,
       km,
       motif,
@@ -339,6 +379,7 @@ function DepecheModal({
       voiesNormale,
     });
   };
+  const buildText = () => buildTextPour(cible);
   const [texte, setTexte] = useState(buildText);
 
   function collectGeometry(): Record<string, string> {
@@ -374,48 +415,133 @@ function DepecheModal({
     if (isProtection) {
       r = await postJson(`/api/cil/${incidentId}/protections`, {
         kind: isCirculation ? "CIRCULATION" : "ELECTRIQUE",
+        interlocutor: cible,
         occurredAt: localInputToIso(occurredAt),
         texte,
         geometry: collectGeometry(),
-        crcNumeroRecu: crcRecu || null,
-        secondNumeroRecu: secondRecu || null,
+        numeroRecu: numeroRecu.trim(),
         acLabel: isCirculation ? acLabel || null : null,
-        // « Avis à (obligatoire) » aux autorités présentes.
+        // « Avis à (obligatoire) » aux autorités présentes — portés par le CRC.
         avisCosAt: cosPresent && avisCosAt ? localInputToIso(avisCosAt) : null,
         avisOpjAt: opjPresent && avisOpjAt ? localInputToIso(avisOpjAt) : null,
-        numeroDonne: protN1 ?? undefined,
-        numeroDonne2: protN2 ?? undefined,
+        numeroDonne: nextNum ?? undefined,
       });
     } else {
-      const signatures: { role: "COS" | "OPJ"; name: string | null; imageB64: string }[] = [];
-      if (sigCos) signatures.push({ role: "COS", name: null, imageB64: sigCos });
-      if (sigOpj) signatures.push({ role: "OPJ", name: null, imageB64: sigOpj });
       r = await postJson(`/api/cil/${incidentId}/depeches`, {
         subtype,
         occurredAt: localInputToIso(occurredAt),
         texte,
         numeroRecu: numeroRecu || null,
-        // Autorisations reprise/rétablissement = « Autorisation reçue du
-        // COS/OPJ : le … » (seulement pour les présents).
-        avisCosAt: cosPresent && cosAuthAt ? localInputToIso(cosAuthAt) : null,
-        avisOpjAt: opjPresent && opjAuthAt ? localInputToIso(opjAuthAt) : null,
+        // Les heures et signatures d'autorisation sont reprises côté serveur
+        // depuis les autorisations recueillies en amont.
         avisCrcAt: avisCrcAt ? localInputToIso(avisCrcAt) : null,
         geometry: collectGeometry(),
-        signatures: signatures.length ? signatures : undefined,
         numeroDonne: nextNum ?? undefined,
       });
     }
     setBusy(false);
-    if (r.ok) {
-      toast.success(
-        isProtection ? `Protection enregistrée (n° ${protN1}/${protN2})` : "Dépêche enregistrée",
+    if (!r.ok) {
+      toast.error(r.error!);
+      return;
+    }
+    // Envoi à un AC : proposer la retransmission à l'AC encadrant. Cela vaut
+    // pour la 2ᵉ dépêche d'une protection circulation ET pour les reprises,
+    // qui s'adressent elles aussi à un AC (les rétablissements vont au RSS).
+    if ((isProtection && cible === "AC") || isReprise) {
+      setDemandeRetransmission(texte);
+      return;
+    }
+    // Protection : s'il reste le second interlocuteur, on enchaîne dans la même
+    // modale avec une heure et un numéro neufs, au lieu de refermer.
+    if (isProtection && resteASuivre) {
+      const suivant = cible === "CRC" ? (secondInterlocutor as "RSS" | "AC") : "CRC";
+      toast.success(`Dépêche au ${cibleLabel} enregistrée — à transmettre au ${suivant === "CRC" ? "CRC de Lyon" : secondLabelFixed}`);
+      setCible(suivant);
+      setNumeroRecu("");
+      setOccurredAt(nowLocalInput());
+      // Le texte s'adresse au NOUVEL interlocuteur : on le régénère.
+      setTexte(buildTextPour(suivant));
+      setNextNum(
+        randomAvailableNumber(NUMBER_RANGES.PROTECTION, [
+          ...usedNums,
+          ...(nextNum != null ? [nextNum] : []),
+        ]),
       );
-      onDone();
-    } else toast.error(r.error!);
+      onRefresh();
+      return;
+    }
+    toast.success(isProtection ? `Dépêche au ${cibleLabel} enregistrée` : "Dépêche enregistrée");
+    onDone();
   }
 
-  const reserveOk = isProtection ? protN1 !== null && protN2 !== null : nextNum !== null;
-  const canSubmit = reserveOk && authOk;
+  const reserveOk = nextNum !== null;
+  // Une dépêche sans n° reçu n'est pas collationnée : on ne la valide pas.
+  const numeroRecuOk = numeroRecu.trim().length > 0;
+  const canSubmit = reserveOk && authOk && numeroRecuOk;
+
+  if (demandeRetransmission !== null) {
+    const suivant = cible === "CRC" ? (secondInterlocutor as "RSS" | "AC") : "CRC";
+    const continuerProtection = isProtection && resteASuivre;
+    const poursuivre = () => {
+      setDemandeRetransmission(null);
+      if (!continuerProtection) {
+        onDone();
+        return;
+      }
+      setCible(suivant);
+      setNumeroRecu("");
+      setOccurredAt(nowLocalInput());
+      setTexte(buildTextPour(suivant));
+      setNextNum(
+        randomAvailableNumber(NUMBER_RANGES.PROTECTION, [
+          ...usedNums,
+          ...(nextNum != null ? [nextNum] : []),
+        ]),
+      );
+      onRefresh();
+    };
+    return (
+      <Modal
+        title="Retransmettre à un AC encadrant ?"
+        icon={<Icon.MessageSquare className="w-4 h-4 text-rose-600" />}
+        onClose={onClose}
+        footer={
+          <>
+            <button
+              onClick={poursuivre}
+              className="text-sm text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-100"
+            >
+              Non
+            </button>
+            <BtnPrimary
+              onClick={() => {
+                const t = demandeRetransmission;
+                setDemandeRetransmission(null);
+                onTransmettre(t);
+              }}
+              label="Oui, retransmettre"
+            />
+          </>
+        }
+      >
+        <p className="text-xs text-slate-600">
+          La dépêche a été transmise à l&apos;
+          <span className="font-semibold">{labelDestinataire("AC")}</span>.
+          Doit-elle être retransmise à un AC encadrant ?
+        </p>
+        <p className="text-[11px] text-slate-500">
+          « Oui » ouvre une dépêche libre avec ce texte pré-rempli : elle prendra
+          un n° de la plage 50-69 et apparaîtra au carnet d&apos;enregistrement.
+        </p>
+        {continuerProtection && (
+          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            Il restera ensuite à transmettre au{" "}
+            {suivant === "CRC" ? "CRC de Lyon" : secondLabelFixed}.
+          </p>
+        )}
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -430,24 +556,30 @@ function DepecheModal({
       }
     >
       <div className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-        {isProtection ? (
-          protN1 === null || protN2 === null ? (
-            <span className="text-rose-600 font-semibold">pas assez de numéros disponibles</span>
-          ) : (
-            <>
-              Numéros réservés :{" "}
-              <span className="font-mono font-bold text-rose-700">CRC n° {protN1}</span> ·{" "}
-              <span className="font-mono font-bold text-rose-700">{secondLabelFixed} n° {protN2}</span>
-            </>
-          )
-        ) : nextNum === null ? (
+        {nextNum === null ? (
           <span className="text-rose-600 font-semibold">plage épuisée</span>
         ) : (
           <>
-            Numéro réservé : <span className="font-mono font-bold text-rose-700">n° {nextNum}</span>
+            {isProtection ? (
+              <>
+                Envoi au{" "}
+                <span className="font-semibold text-slate-700">{cibleLabel}</span> —
+                numéro réservé :{" "}
+              </>
+            ) : (
+              "Numéro réservé : "
+            )}
+            <span className="font-mono font-bold text-rose-700">n° {nextNum}</span>
           </>
         )}
       </div>
+      {isProtection && resteASuivre && (
+        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+          Cette protection se transmet en deux dépêches. Après celle-ci, il
+          restera à transmettre au{" "}
+          {cible === "CRC" ? secondLabelFixed : "CRC de Lyon"}.
+        </p>
+      )}
 
       {/* Éléments déjà saisis sur l'incident : rappelés, pas redemandés.
           Le crayon les déplie pour s'en écarter sur cette dépêche seulement. */}
@@ -558,96 +690,53 @@ function DepecheModal({
 
       <div className="grid grid-cols-2 gap-3">
         <TimeField label="Heure de la dépêche" value={occurredAt} onChange={setOccurredAt} />
-        {isProtection ? (
-          <Field label={`N° reçu du ${secondLabelFixed}`}>
-            <input value={secondRecu} onChange={(e) => setSecondRecu(e.target.value)} className={`${inputCls} font-mono`} />
-          </Field>
-        ) : (
-          <Field label="Numéro reçu (interlocuteur)">
-            <input value={numeroRecu} onChange={(e) => setNumeroRecu(e.target.value)} className={`${inputCls} font-mono`} />
-          </Field>
-        )}
-      </div>
-      {isProtection && (
-        <Field label="N° reçu du CRC">
-          <input value={crcRecu} onChange={(e) => setCrcRecu(e.target.value)} className={`${inputCls} font-mono`} />
+        <Field label={`N° reçu du ${isProtection ? cibleLabel : "correspondant"} *`}>
+          <input
+            value={numeroRecu}
+            onChange={(e) => setNumeroRecu(e.target.value)}
+            className={`${inputCls} font-mono`}
+          />
         </Field>
+      </div>
+      {!numeroRecuOk && (
+        <p className="text-[11px] text-rose-700">
+          Le n° reçu est obligatoire : notez celui que vous donne votre
+          correspondant au collationnement.
+        </p>
       )}
-      <label className="inline-flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={collationne} onChange={(e) => setCollationne(e.target.checked)} className="w-4 h-4" />
-        Collationnement effectué
-      </label>
-
-      {(isReprise || isRetab) && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
-          <p className="text-xs font-semibold text-amber-800">
-            Autorisations requises avant reprise
+      {(isReprise || isRetab) && (cosPresent || opjPresent) && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+          <p className="text-xs font-semibold text-emerald-900 mb-1">
+            Autorisations recueillies
           </p>
-          {!cosPresent && !opjPresent ? (
-            <p className="text-[11px] text-slate-600">
-              Aucun COS/OPJ présent sur site — pas d&apos;autorisation requise.
-            </p>
-          ) : (
-            <>
-              {cosPresent && (
-                <TimeField label="Autorisation reçue du COS (présent) *" value={cosAuthAt} onChange={setCosAuthAt} />
-              )}
-              {opjPresent && (
-                <TimeField label="Autorisation reçue de l'OPJ (présent) *" value={opjAuthAt} onChange={setOpjAuthAt} />
-              )}
-              <p className="text-[10px] text-slate-500">
-                Astuce : si un intervenant est parti, enregistrez son départ dans « Intervenants » — son autorisation ne sera plus requise.
-              </p>
-            </>
-          )}
-        </div>
-      )}
-
-      {isProtection && (cosPresent || opjPresent) && (
-        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2">
-          <p className="text-xs font-semibold text-sky-800">Avis (obligatoire)</p>
-          <p className="text-[11px] text-slate-600">
-            Avisez les autorités présentes que les mesures sont reprises à votre
-            compte, et notez l&apos;heure de l&apos;avis.
-          </p>
-          {cosPresent && (
-            <TimeField label="Avis au COS" value={avisCosAt} onChange={setAvisCosAt} />
-          )}
-          {opjPresent && (
-            <TimeField label="Avis à l'OPJ" value={avisOpjAt} onChange={setAvisOpjAt} />
-          )}
+          <ul className="text-[11px] text-emerald-800 space-y-0.5">
+            {(["COS", "OPJ"] as const)
+              .filter((r) => (r === "COS" ? cosPresent : opjPresent))
+              .map((r) => {
+                const a = incident.autorisations.find(
+                  (x) => x.subtype === subtype && x.role === r,
+                );
+                return (
+                  <li key={r}>
+                    {r} :{" "}
+                    {a ? (
+                      <>accord du {fmtDateTimeFr(a.grantedAt)}, signé</>
+                    ) : (
+                      <span className="text-rose-700">manquante</span>
+                    )}
+                  </li>
+                );
+              })}
+          </ul>
         </div>
       )}
 
       {needsSignature && (
-        <div className="space-y-3">
-          <TimeField label="Avis au CRC de Lyon" value={avisCrcAt} onChange={setAvisCrcAt} />
-          {/* L'imprimé recueille la signature de l'AUTORITÉ qui autorise
-              (COS/OPJ présent), pas celle du CIL. */}
-          {!cosPresent && !opjPresent ? (
-            <p className="text-[11px] text-slate-500">
-              Aucun COS/OPJ présent — aucune signature à recueillir.
-            </p>
-          ) : (
-            <>
-              {cosPresent && (
-                <Field label="Signature du COS">
-                  <SignaturePad value={sigCos} onChange={setSigCos} />
-                </Field>
-              )}
-              {opjPresent && (
-                <Field label="Signature de l'OPJ">
-                  <SignaturePad value={sigOpj} onChange={setSigOpj} />
-                </Field>
-              )}
-            </>
-          )}
-          {manque.length > 0 && (
-            <p className="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1">
-              Reprise bloquée — il manque : {manque.join(", ")}.
-            </p>
-          )}
-        </div>
+        <TimeField
+          label="Avis au CRC de Lyon"
+          value={avisCrcAt}
+          onChange={setAvisCrcAt}
+        />
       )}
     </Modal>
   );
@@ -678,6 +767,43 @@ function LibreModal({
   const [numeroRecu, setNumeroRecu] = useState("");
   const [dests, setDests] = useState<{ label: string; numeroRecu: string }[]>([{ label: "", numeroRecu: "" }]);
   const [busy, setBusy] = useState(false);
+  /**
+   * L'en-tête (« M. … CIL, à <destinataires> : ») suit les destinataires saisis
+   * TANT QUE l'utilisateur ne l'a pas retouché : une dépêche libre reste un
+   * texte libre, on ne veut pas écraser une correction volontaire.
+   */
+  const [enteteAuto, setEnteteAuto] = useState(true);
+  const cilName = [incident.incident.cilNom, incident.incident.cilPrenom]
+    .filter(Boolean)
+    .join(" ");
+
+  /** Remplace la 1ʳᵉ ligne par l'en-tête correspondant aux destinataires. */
+  function texteAvecEntete(
+    base: string,
+    labels: string[],
+    sensCourant: "RECU" | "EXPEDIE",
+  ): string {
+    // « Reçu de » : c'est l'interlocuteur qui s'adresse au CIL, pas l'inverse.
+    if (sensCourant !== "EXPEDIE") return base;
+    const cibles = labels.map((l) => l.trim()).filter(Boolean);
+    if (!cibles.length) return base;
+    const entete = `M. ${cilName}, CIL, à ${cibles.join(", ")} :`;
+    const lignes = base.split("\n");
+    if (lignes.length && /^M\..*CIL,.*:\s*$/.test(lignes[0])) {
+      lignes[0] = entete;
+      return lignes.join("\n");
+    }
+    return [entete, ...lignes].join("\n");
+  }
+
+  /** Applique l'en-tête après modification des destinataires ou du sens. */
+  function majEntete(
+    nouveauxDests: { label: string; numeroRecu: string }[],
+    sensCourant: "RECU" | "EXPEDIE" = sens,
+  ) {
+    if (!enteteAuto) return;
+    setTexte((t) => texteAvecEntete(t, nouveauxDests.map((d) => d.label), sensCourant));
+  }
 
   async function submit() {
     setBusy(true);
@@ -726,7 +852,10 @@ function LibreModal({
             <button
               key={s}
               type="button"
-              onClick={() => setSens(s)}
+              onClick={() => {
+                setSens(s);
+                majEntete(dests, s);
+              }}
               className={`text-sm px-3 py-1.5 rounded-lg border ${
                 sens === s ? "bg-rose-600 text-white border-rose-600" : "bg-white text-slate-600 border-slate-200"
               }`}
@@ -738,7 +867,15 @@ function LibreModal({
       </Field>
       <TimeField label="Heure" value={occurredAt} onChange={setOccurredAt} />
       <Field label="Texte">
-        <textarea value={texte} onChange={(e) => setTexte(e.target.value)} rows={3} className="input w-full min-h-[80px] text-xs" />
+        <textarea
+          value={texte}
+          onChange={(e) => {
+            setEnteteAuto(false);
+            setTexte(e.target.value);
+          }}
+          rows={3}
+          className="input w-full min-h-[80px] text-xs"
+        />
       </Field>
       <div>
         <label className={lblCls}>{sens === "EXPEDIE" ? "Destinataires" : "Expéditeur(s)"}</label>
@@ -753,7 +890,13 @@ function LibreModal({
               <input
                 value={dst.label}
                 onChange={(e) =>
-                  setDests((a) => a.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))
+                  setDests((a) => {
+                    const suite = a.map((x, j) =>
+                      j === i ? { ...x, label: e.target.value } : x,
+                    );
+                    majEntete(suite);
+                    return suite;
+                  })
                 }
                 placeholder={sens === "EXPEDIE" ? "CCR, EF, Infrapôle…" : "Émetteur"}
                 className="input w-full min-w-0"
@@ -768,7 +911,13 @@ function LibreModal({
               />
               {dests.length > 1 ? (
                 <button
-                  onClick={() => setDests((a) => a.filter((_, j) => j !== i))}
+                  onClick={() =>
+                    setDests((a) => {
+                      const suite = a.filter((_, j) => j !== i);
+                      majEntete(suite);
+                      return suite;
+                    })
+                  }
                   className="text-slate-400 hover:text-rose-600 px-1"
                   aria-label="Retirer"
                 >

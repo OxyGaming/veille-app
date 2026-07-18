@@ -1666,6 +1666,7 @@ model CilIncident {
   depeches      CilDepeche[]
   intervenants  CilIntervenant[]
   signatures    CilSignature[]
+  autorisations CilAutorisation[]
 
   @@index([teamId, status])
   @@index([authorId])
@@ -1779,6 +1780,33 @@ model CilIntervenant {
 
 /// Signature électronique polymorphe — réutilise le SignaturePad du RCI
 /// (base64 PNG sans préfixe). Rattachable à n'importe quel élément.
+/// Autorisation d'une autorité (COS / OPJ) recueillie AVANT de passer la
+/// dépêche de reprise ou de rétablissement.
+///
+/// Elle est persistée dès qu'elle est obtenue, ce qui permet de la recueillir
+/// en plusieurs fois (le COS maintenant, l'OPJ plus tard) sans bloquer le CIL
+/// dans une saisie unique. Elle est ensuite CONSOMMÉE à la création de la
+/// dépêche : heure → `avisCosAt`/`avisOpjAt`, signature → `CilSignature`.
+model CilAutorisation {
+  id         String @id @default(cuid())
+  incidentId String
+  /// Sous-type de dépêche visé (REPRISE_PARTIELLE, RETABLISSEMENT_NORMAL, …) :
+  /// une autorisation vaut pour UNE action précise, pas pour tout l'incident.
+  subtype    String
+  /// COS | OPJ
+  role       String
+  grantedAt  DateTime
+  signerName String?
+  /// PNG base64 (sans préfixe data:), comme les signatures RCI.
+  imageB64   String
+  createdAt  DateTime @default(now())
+
+  incident CilIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@unique([incidentId, subtype, role])
+  @@index([incidentId])
+}
+
 model CilSignature {
   id         String @id @default(cuid())
   incidentId String

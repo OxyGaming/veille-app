@@ -189,6 +189,16 @@ export type CilEventDTO = {
   metadata: Record<string, unknown> | null;
 };
 
+/** Autorisation recueillie en amont d'une reprise / d'un rétablissement. */
+export type CilAutorisationDTO = {
+  id: string;
+  subtype: DepecheSubtype;
+  role: "COS" | "OPJ";
+  grantedAt: string;
+  signerName: string | null;
+  imageB64: string;
+};
+
 export type CilSignatureDTO = {
   id: string;
   ownerType: SignatureOwnerType;
@@ -238,4 +248,5 @@ export type CilIncidentFull = {
   depeches: CilDepecheDTO[];
   intervenants: CilIntervenantDTO[];
   signatures: CilSignatureDTO[];
+  autorisations: CilAutorisationDTO[];
 };

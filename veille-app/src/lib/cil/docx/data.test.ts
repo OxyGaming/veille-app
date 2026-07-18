@@ -31,7 +31,7 @@ function dep(over: Partial<CilDepecheDTO>): CilDepecheDTO {
 }
 
 function full(over: Partial<CilIncidentFull> = {}): CilIncidentFull {
-  return { incident: incident(), events: [], depeches: [], intervenants: [], signatures: [], ...over };
+  return { incident: incident(), events: [], depeches: [], intervenants: [], signatures: [], autorisations: [], ...over };
 }
 
 describe("buildCilDocxData — en-tête", () => {

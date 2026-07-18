@@ -4,13 +4,15 @@ import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Icon } from "@/components/icons";
-import { CilActionModal, EditEventModal } from "./CilModals";
+import { ACTION_SUBTYPE, CilActionModal, EditEventModal } from "./CilModals";
+import CilAutorisationsModal from "./CilAutorisationsModal";
 import { CilProtectionLane } from "./CilProtectionLane";
 import {
   activeProtections,
   derivePhase,
   pendingReminders,
   protectionLane,
+  requiresAuthorization,
   type CilActionId,
   type MachineContext,
   type PendingReminder,
@@ -46,6 +48,8 @@ export default function CilDashboard({
   const [generating, setGenerating] = useState(false);
   /** Texte repris d'une dépêche passée quand on la transmet à un autre interlocuteur. */
   const [prefillTexte, setPrefillTexte] = useState<string | undefined>();
+  /** Action de reprise en attente de ses autorisations (écran dédié). */
+  const [pendingAuth, setPendingAuth] = useState<DepecheSubtype | null>(null);
   /** Rappel dont on saisit une heure d'avis différente de « maintenant ». */
   const [customTimeFor, setCustomTimeFor] = useState<string | null>(null);
   const [customTime, setCustomTime] = useState("");
@@ -172,6 +176,37 @@ export default function CilDashboard({
       setCustomTimeFor(null);
       reload();
     } else toast.error("Enregistrement impossible");
+  }
+
+  /**
+   * Ouvre une action. Pour une reprise/rétablissement avec une autorité
+   * présente, on passe D'ABORD par l'écran de recueil des autorisations :
+   * la dépêche n'est accessible qu'une fois les accords obtenus.
+   *
+   * La CRÉATION d'une protection n'est jamais concernée — poser une protection
+   * relève du seul CIL (cf. `requiresAuthorization`).
+   */
+  function openAction(id: CilActionId) {
+    const subtype = ACTION_SUBTYPE[id];
+    const autoriteSurPlace = full.intervenants.some(
+      (i) => (i.type === "COS" || i.type === "OPJ") && i.arrivedAt && !i.departedAt,
+    );
+    if (subtype && requiresAuthorization(subtype) && autoriteSurPlace) {
+      const toutesRecueillies = (["COS", "OPJ"] as const)
+        .filter((r) =>
+          full.intervenants.some(
+            (i) => i.type === r && i.arrivedAt && !i.departedAt,
+          ),
+        )
+        .every((r) =>
+          full.autorisations.some((a) => a.subtype === subtype && a.role === r),
+        );
+      if (!toutesRecueillies) {
+        setPendingAuth(subtype);
+        return;
+      }
+    }
+    setModalAction(id);
   }
 
   /** Transmet une dépêche déjà passée → dépêche libre pré-remplie (carnet). */
@@ -311,7 +346,7 @@ export default function CilDashboard({
           depeches={full.depeches}
           arrivedOnSite={!!inc.arrivedOnSiteAt}
           closed={closed}
-          onAction={setModalAction}
+          onAction={openAction}
         />
         <CilProtectionLane
           kind="ELECTRIQUE"
@@ -319,7 +354,7 @@ export default function CilDashboard({
           depeches={full.depeches}
           arrivedOnSite={!!inc.arrivedOnSiteAt}
           closed={closed}
-          onAction={setModalAction}
+          onAction={openAction}
         />
       </div>
 
@@ -521,11 +556,31 @@ export default function CilDashboard({
           action={modalAction}
           incident={full}
           prefillTexte={prefillTexte}
+          onTransmettre={(texte) => {
+            // Bascule vers la dépêche libre : le texte part au carnet.
+            setPrefillTexte(texte);
+            setModalAction("ADD_DEPECHE_LIBRE");
+          }}
           onClose={() => {
             setModalAction(null);
             setPrefillTexte(undefined);
           }}
           onDone={reload}
+        />
+      )}
+      {pendingAuth && (
+        <CilAutorisationsModal
+          incident={full}
+          subtype={pendingAuth}
+          onClose={() => setPendingAuth(null)}
+          onDone={reload}
+          onReady={() => {
+            const entry = (
+              Object.entries(ACTION_SUBTYPE) as [CilActionId, DepecheSubtype][]
+            ).find(([, st]) => st === pendingAuth);
+            setPendingAuth(null);
+            if (entry) setModalAction(entry[0]);
+          }}
         />
       )}
       {editEvent && (

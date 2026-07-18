@@ -5,6 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
+  CilAutorisationDTO,
   CilDepecheDTO,
   CilEventDTO,
   CilEventType,
@@ -32,6 +33,7 @@ export const INCIDENT_INCLUDE = {
   depeches: { include: { destinataires: true } },
   intervenants: { orderBy: { createdAt: "asc" } as const },
   signatures: true,
+  autorisations: true,
 } satisfies Prisma.CilIncidentInclude;
 
 type IncidentRow = Prisma.CilIncidentGetPayload<{ include: typeof INCIDENT_INCLUDE }>;
@@ -145,7 +147,16 @@ export function serializeIncident(row: IncidentRow): CilIncidentFull {
     imageB64: s.imageB64,
   }));
 
-  return { incident, events, depeches, intervenants, signatures };
+  const autorisations: CilAutorisationDTO[] = row.autorisations.map((a) => ({
+    id: a.id,
+    subtype: a.subtype as DepecheSubtype,
+    role: a.role as "COS" | "OPJ",
+    grantedAt: a.grantedAt.toISOString(),
+    signerName: a.signerName,
+    imageB64: a.imageB64,
+  }));
+
+  return { incident, events, depeches, intervenants, signatures, autorisations };
 }
 
 export async function loadIncidentFull(id: string): Promise<IncidentRow | null> {

@@ -73,12 +73,10 @@ export function buildCilDocxData(full: CilIncidentFull): CilDocxData {
     : "";
   out.txt_incident = nature;
   out.txt_lieu = incident.lieu;
-  // « Voie » doit afficher EXACTEMENT ce que la phrase des dépêches imprime
-  // (« sur voie(s) … »), sinon l'en-tête et le corps du livret se contredisent
-  // dès qu'une voie est modifiée pour une dépêche donnée. On part donc de la
-  // dépêche, puis de la géométrie partagée, puis du champ saisi à la création.
-  const voiesDepeche = depeches.find((d) => d.geometry.voies)?.geometry.voies;
-  out.txt_voie = voiesDepeche ?? incident.voies ?? incident.voie ?? "";
+  // « Voie » : uniquement le champ de l'en-tête, saisi à la création. Les
+  // dépêches ont leur propre voie (elles peuvent différer d'une protection à
+  // l'autre) ; les mélanger rendait la valeur imprévisible.
+  out.txt_voie = incident.voie ?? "";
   out.txt_nomCil = [incident.cilNom, incident.cilPrenom]
     .filter(Boolean)
     .join(" ");

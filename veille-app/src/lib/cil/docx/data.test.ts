@@ -47,34 +47,18 @@ describe("buildCilDocxData — en-tête", () => {
     expect(d.check_etab_lgv).toBe("☐");
   });
 
-  it("retombe sur la voie partagée et l'heure d'arrivée quand l'en-tête est vide", () => {
+  it("« Désigné(e) à » retombe sur l'heure d'arrivée (désignation non recueillie)", () => {
     const d = buildCilDocxData(
       full({
-        incident: incident({
-          voie: null,
-          voies: "1 et 2",
-          designatedAt: null,
-          arrivedOnSiteAt: iso(29),
-        }),
+        incident: incident({ designatedAt: null, arrivedOnSiteAt: iso(29) }),
       }),
     );
-    // « Voie » : saisie soit à la création, soit à la 1ʳᵉ dépêche.
-    expect(d.txt_voie).toBe("1 et 2");
-    // « Désigné(e) à » : l'heure de désignation n'est pas recueillie.
     expect(d.txt_designeA).toBe("14h31");
   });
 
-  it("privilégie la géométrie partagée sur le champ de création", () => {
-    const d = buildCilDocxData(
-      full({ incident: incident({ voie: "3", voies: "1 et 2", designatedAt: iso(6) }) }),
-    );
-    expect(d.txt_voie).toBe("1 et 2");
-    expect(d.txt_designeA).toBe("14h08");
-  });
-
-  it("l'en-tête reprend la voie IMPRIMÉE dans la phrase de la dépêche", () => {
-    // La dépêche fait foi : sinon l'en-tête annonce une voie et le corps du
-    // livret en imprime une autre.
+  it("« Voie » vient du seul champ d'en-tête, pas des dépêches", () => {
+    // Chaque dépêche a sa propre voie : les mélanger rendrait l'en-tête
+    // imprévisible selon la protection passée en premier.
     const d = buildCilDocxData(
       full({
         incident: incident({ voie: "3", voies: "1 et 2" }),
@@ -87,8 +71,13 @@ describe("buildCilDocxData — en-tête", () => {
         ],
       }),
     );
-    expect(d.txt_voie).toBe("2");
+    expect(d.txt_voie).toBe("3");
     expect(d.txt_prot_elec_voies).toBe("2");
+  });
+
+  it("« Voie » reste vide si le champ d'en-tête ne l'est pas", () => {
+    const d = buildCilDocxData(full({ incident: incident({ voie: null, voies: "1 et 2" }) }));
+    expect(d.txt_voie).toBe("");
   });
 });
 

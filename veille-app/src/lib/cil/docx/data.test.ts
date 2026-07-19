@@ -64,12 +64,31 @@ describe("buildCilDocxData — en-tête", () => {
     expect(d.txt_designeA).toBe("14h31");
   });
 
-  it("privilégie l'en-tête quand il est renseigné", () => {
+  it("privilégie la géométrie partagée sur le champ de création", () => {
     const d = buildCilDocxData(
       full({ incident: incident({ voie: "3", voies: "1 et 2", designatedAt: iso(6) }) }),
     );
-    expect(d.txt_voie).toBe("3");
+    expect(d.txt_voie).toBe("1 et 2");
     expect(d.txt_designeA).toBe("14h08");
+  });
+
+  it("l'en-tête reprend la voie IMPRIMÉE dans la phrase de la dépêche", () => {
+    // La dépêche fait foi : sinon l'en-tête annonce une voie et le corps du
+    // livret en imprime une autre.
+    const d = buildCilDocxData(
+      full({
+        incident: incident({ voie: "3", voies: "1 et 2" }),
+        depeches: [
+          dep({
+            subtype: "PROTECTION_ELECTRIQUE",
+            interlocutor: "CRC",
+            geometry: { voies: "2" },
+          }),
+        ],
+      }),
+    );
+    expect(d.txt_voie).toBe("2");
+    expect(d.txt_prot_elec_voies).toBe("2");
   });
 });
 

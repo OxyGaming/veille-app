@@ -67,70 +67,92 @@ def set_para(p, text):
         p.add_run(text)
 
 
-def ajuster_largeur_table(table, section):
-    """Ramène une table à la largeur imprimable en gardant ses proportions.
+def _mettre_a_echelle_table(table, facteur):
+    """Applique un facteur aux largeurs d'une table ET de ses tables imbriquées.
 
-    Chaque colonne de la grille ET chaque cellule sont mises à l'échelle par le
-    même facteur : les rapports de largeur du modèle officiel sont préservés,
-    seule la largeur totale change. Renvoie la largeur obtenue, en mm.
+    La récursion est indispensable : une sous-table laissée à sa taille d'origine
+    élargit sa cellule parente, et toute la table déborde malgré le
+    redimensionnement de la grille.
     """
     grid = table._tbl.find(qn("w:tblGrid"))
-    if grid is None:
-        return None
-    colonnes = grid.findall(qn("w:gridCol"))
-    actuelle = sum(int(c.get(qn("w:w"))) for c in colonnes)
-    # Largeur utile = page moins les marges. La soustraction de Length rend un
-    # int d'EMU : on convertit en twips (1 twip = 635 EMU).
-    utile_emu = section.page_width - section.left_margin - section.right_margin
-    cible = int(utile_emu / 635)
-    if actuelle <= cible:
-        return actuelle / 1440 * 25.4
-    facteur = cible / actuelle
+    if grid is not None:
+        for c in grid.findall(qn("w:gridCol")):
+            c.set(qn("w:w"), str(max(1, round(int(c.get(qn("w:w"))) * facteur))))
 
-    for c in colonnes:
-        c.set(qn("w:w"), str(max(1, round(int(c.get(qn("w:w"))) * facteur))))
+    tblW = table._tbl.tblPr.find(qn("w:tblW"))
+    if tblW is not None and tblW.get(qn("w:type")) == "dxa":
+        tblW.set(qn("w:w"), str(max(1, round(int(tblW.get(qn("w:w"))) * facteur))))
 
-    # Les cellules portent leur propre largeur : sans mise à l'échelle, Word
-    # privilégie tcW et le redimensionnement de la grille resterait sans effet.
     vues = set()
     for row in table.rows:
         for cell in row.cells:
             if cell._tc in vues:
                 continue
             vues.add(cell._tc)
-            tcW = cell._tc.tcPr.find(qn("w:tcW")) if cell._tc.tcPr is not None else None
+            # Les cellules portent leur propre largeur : Word la privilégie,
+            # redimensionner la seule grille resterait sans effet.
+            tcPr = cell._tc.tcPr
+            tcW = tcPr.find(qn("w:tcW")) if tcPr is not None else None
             if tcW is not None and tcW.get(qn("w:type")) == "dxa":
-                w = int(tcW.get(qn("w:w")))
-                tcW.set(qn("w:w"), str(max(1, round(w * facteur))))
-
-    tblW = table._tbl.tblPr.find(qn("w:tblW"))
-    if tblW is not None:
-        tblW.set(qn("w:w"), str(cible))
-        tblW.set(qn("w:type"), "dxa")
-    return cible / 1440 * 25.4
+                tcW.set(
+                    qn("w:w"), str(max(1, round(int(tcW.get(qn("w:w"))) * facteur)))
+                )
+            for sous_table in cell.tables:
+                _mettre_a_echelle_table(sous_table, facteur)
 
 
-def passer_en_a3(document, facteur=0.90):
-    """Repagine le livret en A3 portrait : 2 pages (livret, puis carnet).
+def largeur_table_mm(table):
+    grid = table._tbl.find(qn("w:tblGrid"))
+    if grid is None:
+        return 0.0
+    return sum(int(c.get(qn("w:w"))) for c in grid.findall(qn("w:gridCol"))) / 1440 * 25.4
 
-    A4 paysage et A3 portrait ont EXACTEMENT la même largeur (297 mm) : la
-    largeur utile est inchangée et aucun tableau n'est à redimensionner. Seule
-    la hauteur compte, et le livret y tient déjà sans réduction — mais à 10 mm
-    près, ce qui basculerait en 3 pages dès qu'un texte de dépêche s'allonge.
 
-    Le facteur 0,90 (police 12 pt → 10,8 pt) laisse ~42 mm de réserve tout en
-    restant confortablement lisible sur une feuille A3.
+def ajuster_largeur_table(table, section):
+    """Ramène une table à la largeur imprimable en gardant ses proportions.
 
-    Le document conserve ses deux sections : le livret d'abord, le carnet
-    ensuite — d'où les 2 pages.
+    Un facteur unique est appliqué à la grille, aux cellules et aux tables
+    imbriquées : les rapports de largeur du modèle officiel sont préservés,
+    seule la largeur totale change. Renvoie la largeur obtenue, en mm.
+    """
+    actuelle_mm = largeur_table_mm(table)
+    if actuelle_mm == 0:
+        return None
+    utile_emu = section.page_width - section.left_margin - section.right_margin
+    cible_mm = utile_emu / 635 / 1440 * 25.4
+    if actuelle_mm <= cible_mm:
+        return actuelle_mm
+    _mettre_a_echelle_table(table, cible_mm / actuelle_mm)
+    return largeur_table_mm(table)
+
+
+def passer_en_a4_portrait(document, facteur=0.60):
+    """Repagine le livret en A4 portrait : 2 pages (livret, puis carnet).
+
+    C'est l'agencement du livret papier d'origine. Contrairement à l'A3 — qui
+    partage sa largeur avec l'A4 paysage — il faut ici réduire AUSSI les
+    tableaux : la largeur utile tombe de 271,6 à 184,6 mm.
+
+    Le facteur s'applique aux polices et aux hauteurs de ligne ; les tableaux
+    sont ensuite ramenés à la largeur utile (cf. `ajuster_largeur_table`), ce
+    qui préserve leurs proportions internes. Les deux réductions doivent rester
+    du même ordre : une police trop grande dans un tableau rétréci provoquerait
+    des retours à la ligne, et donc un débordement en hauteur.
+
+    Le facteur 0,60 (12 pt → 7,2 pt) est le plus grand qui tienne en 2 pages
+    avec ~20 mm de réserve : au-delà, un texte de dépêche un peu long fait
+    basculer sur une 3ᵉ page. C'est la densité de l'imprimé papier d'origine.
+
+    Le document conservant deux sections (livret, puis carnet), le résultat
+    tient en 2 pages.
     """
     from docx.enum.section import WD_ORIENT
     from docx.shared import Mm, Pt
 
     for section in document.sections:
         section.orientation = WD_ORIENT.PORTRAIT
-        section.page_width = Mm(297)
-        section.page_height = Mm(420)
+        section.page_width = Mm(210)
+        section.page_height = Mm(297)
 
     # Style de base (les runs sans taille explicite en héritent).
     normal = document.styles["Normal"]
@@ -141,8 +163,7 @@ def passer_en_a3(document, facteur=0.90):
     for rPr in document.element.body.iter(qn("w:rPr")):
         sz = rPr.find(qn("w:sz"))
         if sz is not None:
-            demi_points = int(sz.get(qn("w:val")))
-            sz.set(qn("w:val"), str(max(2, round(demi_points * facteur))))
+            sz.set(qn("w:val"), str(max(2, round(int(sz.get(qn("w:val"))) * facteur))))
             runs += 1
         szCs = rPr.find(qn("w:szCs"))
         if szCs is not None:
@@ -157,7 +178,19 @@ def passer_en_a3(document, facteur=0.90):
         if h is not None:
             h.set(qn("w:val"), str(max(1, round(int(h.get(qn("w:val"))) * facteur))))
             lignes += 1
-    return runs, lignes
+
+    # Tous les tableaux de 1er niveau sont ramenés dans la largeur utile.
+    section = document.sections[0]
+    tables = 0
+    for table in document.tables:
+        avant = table._tbl.find(qn("w:tblGrid"))
+        if avant is None:
+            continue
+        largeur = sum(int(c.get(qn("w:w"))) for c in avant.findall(qn("w:gridCol")))
+        if largeur / 1440 * 25.4 > 184.7:
+            ajuster_largeur_table(table, section)
+            tables += 1
+    return runs, lignes, tables
 
 
 def tag_sentences(cell, rules):
@@ -419,20 +452,17 @@ def main():
             set_cell(row.cells[col], f"{{txt_libre_{line}_{key}}}")
     print("lignes de carnet balisées :", line)
 
-    # Le carnet de l'imprimé d'origine mesure 360 mm alors que la zone
-    # imprimable d'un A4 paysage n'en fait que ~272 : les colonnes « N° » et
-    # « Heure » tombaient hors page. On le ramène à la largeur utile en
-    # conservant les proportions entre colonnes.
-    largeur_ajustee = ajuster_largeur_table(carnet, d.sections[0])
-    print("carnet ramené à %.1f mm" % largeur_ajustee)
 
     # ── Réglettes de numéros (générique, en dernier) ────────────────────────
     tag_numbers(d)
 
-    # Repagination A3 en dernier : les largeurs de table sont déjà figées, et
-    # la mise à l'échelle ne touche que polices et hauteurs de ligne.
-    runs, lignes = passer_en_a3(d)
-    print("A3 portrait : %d runs et %d hauteurs de ligne mis à l'échelle" % (runs, lignes))
+    # Repagination en dernier : elle fixe le format, l'échelle du texte et la
+    # largeur des tableaux d'un seul tenant.
+    runs, lignes, tables = passer_en_a4_portrait(d)
+    print(
+        "A4 portrait : %d runs, %d hauteurs de ligne, %d tableaux ajustés"
+        % (runs, lignes, tables)
+    )
 
     d.save(out)
     print("template écrit :", out)

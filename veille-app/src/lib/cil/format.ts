@@ -10,6 +10,9 @@ export const fmtTimeFr = (iso: string | null | undefined): string =>
   iso ? format(new Date(iso), "HH'h'mm", { locale: fr }) : "";
 export const fmtDateFr = (iso: string | null | undefined): string =>
   iso ? format(new Date(iso), "dd/MM/yyyy", { locale: fr }) : "";
+/** Date courte « 18/07/26 » — colonnes étroites de l'imprimé (carnet). */
+export const fmtDateCourteFr = (iso: string | null | undefined): string =>
+  iso ? format(new Date(iso), "dd/MM/yy", { locale: fr }) : "";
 export const fmtDateTimeFr = (iso: string | null | undefined): string =>
   iso ? format(new Date(iso), "dd/MM/yyyy 'à' HH'h'mm", { locale: fr }) : "";
 export const fmtDayLongFr = (iso: string | null | undefined): string =>

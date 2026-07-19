@@ -20,6 +20,7 @@ import re
 import sys
 
 import docx
+from docx.oxml.ns import qn
 
 
 def set_cell(cell, text):
@@ -64,6 +65,49 @@ def set_para(p, text):
         runs[0].text = text
     else:
         p.add_run(text)
+
+
+def ajuster_largeur_table(table, section):
+    """Ramène une table à la largeur imprimable en gardant ses proportions.
+
+    Chaque colonne de la grille ET chaque cellule sont mises à l'échelle par le
+    même facteur : les rapports de largeur du modèle officiel sont préservés,
+    seule la largeur totale change. Renvoie la largeur obtenue, en mm.
+    """
+    grid = table._tbl.find(qn("w:tblGrid"))
+    if grid is None:
+        return None
+    colonnes = grid.findall(qn("w:gridCol"))
+    actuelle = sum(int(c.get(qn("w:w"))) for c in colonnes)
+    # Largeur utile = page moins les marges. La soustraction de Length rend un
+    # int d'EMU : on convertit en twips (1 twip = 635 EMU).
+    utile_emu = section.page_width - section.left_margin - section.right_margin
+    cible = int(utile_emu / 635)
+    if actuelle <= cible:
+        return actuelle / 1440 * 25.4
+    facteur = cible / actuelle
+
+    for c in colonnes:
+        c.set(qn("w:w"), str(max(1, round(int(c.get(qn("w:w"))) * facteur))))
+
+    # Les cellules portent leur propre largeur : sans mise à l'échelle, Word
+    # privilégie tcW et le redimensionnement de la grille resterait sans effet.
+    vues = set()
+    for row in table.rows:
+        for cell in row.cells:
+            if cell._tc in vues:
+                continue
+            vues.add(cell._tc)
+            tcW = cell._tc.tcPr.find(qn("w:tcW")) if cell._tc.tcPr is not None else None
+            if tcW is not None and tcW.get(qn("w:type")) == "dxa":
+                w = int(tcW.get(qn("w:w")))
+                tcW.set(qn("w:w"), str(max(1, round(w * facteur))))
+
+    tblW = table._tbl.tblPr.find(qn("w:tblW"))
+    if tblW is not None:
+        tblW.set(qn("w:w"), str(cible))
+        tblW.set(qn("w:type"), "dxa")
+    return cible / 1440 * 25.4
 
 
 def tag_sentences(cell, rules):
@@ -254,12 +298,44 @@ def main():
                 table.rows[3].cells[col].paragraphs[0],
                 "Autorisation reçue du OPJ : {txt_%s_autor_opj}" % pfx,
             )
-        # Avis au CRC (colonne des heures de la ligne « Avis »).
-        for col, pfx in ((2, retab_pfx), (7, reprise_pfx)):
-            paras = table.rows[5].cells[col].paragraphs
-            set_para(paras[0], "{txt_%s_avis_crc}" % pfx)
-            for extra in paras[1:]:
-                set_para(extra, "")
+        # Avis au CRC : la phrase pré-imprimée se termine par « à ……… », qui
+        # n'attend QUE l'heure (contrairement aux avis COS/OPJ des protections,
+        # dont la case porte « le ../../.. à ..h.. » et veut date + heure).
+        # On remplit donc le blanc de la phrase, et on vide la colonne de droite
+        # pour ne pas afficher deux fois la même information.
+        cellules = []
+        for row in table.rows:
+            vues = set()
+            for c in row.cells:
+                if c._tc in vues:
+                    continue
+                vues.add(c._tc)
+                if c.text.strip().startswith("au CRC de Lyon"):
+                    cellules.append((row, c))
+        assert len(cellules) == 2, f"cellules « Avis au CRC » attendues: 2, trouvées {len(cellules)}"
+        # 1ʳᵉ occurrence = cadre gauche (rétablissement), 2ᵉ = droite (reprise).
+        for (row, cell), pfx in zip(cellules, (retab_pfx, reprise_pfx)):
+            paras = cell.paragraphs
+            # La 2ᵉ ligne porte « à ……… » : c'est elle qui reçoit l'heure.
+            if len(paras) > 1:
+                set_para(paras[1], "à {txt_%s_avis_crc}" % pfx)
+            else:
+                cell.add_paragraph("à {txt_%s_avis_crc}" % pfx)
+            # Colonne de droite (« le ../../.. à ..h.. ») : vidée.
+            vues, suivante = set(), None
+            apres = False
+            for c in row.cells:
+                if c._tc in vues:
+                    continue
+                vues.add(c._tc)
+                if apres:
+                    suivante = c
+                    break
+                if c._tc is cell._tc:
+                    apres = True
+            if suivante is not None:
+                for para in suivante.paragraphs:
+                    set_para(para, "")
 
     tag_autorisations(T[3], "retp", "repp")
     tag_autorisations(T[5], "retn", "repn")
@@ -292,6 +368,13 @@ def main():
         for key, col in COLS.items():
             set_cell(row.cells[col], f"{{txt_libre_{line}_{key}}}")
     print("lignes de carnet balisées :", line)
+
+    # Le carnet de l'imprimé d'origine mesure 360 mm alors que la zone
+    # imprimable d'un A4 paysage n'en fait que ~272 : les colonnes « N° » et
+    # « Heure » tombaient hors page. On le ramène à la largeur utile en
+    # conservant les proportions entre colonnes.
+    largeur_ajustee = ajuster_largeur_table(carnet, d.sections[0])
+    print("carnet ramené à %.1f mm" % largeur_ajustee)
 
     # ── Réglettes de numéros (générique, en dernier) ────────────────────────
     tag_numbers(d)

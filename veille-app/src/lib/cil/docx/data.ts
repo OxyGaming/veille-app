@@ -5,7 +5,7 @@
  * `check_*` ☒/☐, `num_NN` numéro (barré si utilisé), `photo_sig_*` base64.
  * Testable sans docx. Le document reste une pure représentation des données.
  */
-import { fmtDateFr, fmtTimeFr } from "../format";
+import { fmtDateCourteFr, fmtDateFr, fmtTimeFr } from "../format";
 import type {
   CilDepecheDTO,
   CilIncidentFull,
@@ -172,9 +172,12 @@ export function buildCilDocxData(full: CilIncidentFull): CilDocxData {
 
   // ── Autorisations COS/OPJ + avis au CRC (reprises / rétablissements) ────────
   const putAvis = (prefix: string, d: CilDepecheDTO | undefined) => {
+    // « Autorisation reçue du COS : le ../../.. à ..h.. » → date ET heure.
     out[`${prefix}_autor_cos`] = dh(d?.avisCosAt ?? null);
     out[`${prefix}_autor_opj`] = dh(d?.avisOpjAt ?? null);
-    out[`${prefix}_avis_crc`] = dh(d?.avisCrcAt ?? null);
+    // « Avis au CRC de Lyon (obligatoire) à ……… » → la phrase n'attend que
+    // l'heure : y remettre la date la rendrait incorrecte.
+    out[`${prefix}_avis_crc`] = fmtTimeFr(d?.avisCrcAt ?? null);
   };
   putAvis("txt_repp", rpp);
   putAvis("txt_repn", rpn);
@@ -228,7 +231,8 @@ export function buildCilDocxData(full: CilIncidentFull): CilDocxData {
       const expedie = d.sens !== "RECU";
       rows.push({
         num: String(d.numeroDonne),
-        date: fmtDateFr(d.occurredAt),
+        // Colonne étroite : millésime à 2 chiffres, comme le pré-imprimé.
+        date: fmtDateCourteFr(d.occurredAt),
         de: expedie ? "" : c.label,
         texte: d.texte,
         expedie: expedie ? c.label : "",

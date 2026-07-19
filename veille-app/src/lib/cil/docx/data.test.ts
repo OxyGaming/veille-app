@@ -140,7 +140,9 @@ describe("buildCilDocxData — localisation, avis, changement de CIL, carnet", (
     );
     expect(d.txt_repp_autor_cos).toBe("le 16/07/2026 à 14h42");
     expect(d.txt_repp_autor_opj).toBe("le 16/07/2026 à 14h43");
-    expect(d.txt_repp_avis_crc).toBe("le 16/07/2026 à 14h47");
+    // « Avis au CRC de Lyon (obligatoire) à ……… » : la phrase pré-imprimée
+    // n'attend QUE l'heure, contrairement aux autorisations ci-dessus.
+    expect(d.txt_repp_avis_crc).toBe("14h47");
     // Cadre non utilisé → reste vierge.
     expect(d.txt_retn_avis_crc).toBe("");
   });

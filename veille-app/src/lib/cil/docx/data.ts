@@ -73,11 +73,16 @@ export function buildCilDocxData(full: CilIncidentFull): CilDocxData {
     : "";
   out.txt_incident = nature;
   out.txt_lieu = incident.lieu;
-  out.txt_voie = incident.voie ?? "";
+  // La voie est saisie soit dans l'en-tête à la création, soit comme géométrie
+  // partagée à la première dépêche : on prend la première renseignée.
+  out.txt_voie = incident.voie ?? incident.voies ?? "";
   out.txt_nomCil = [incident.cilNom, incident.cilPrenom]
     .filter(Boolean)
     .join(" ");
-  out.txt_designeA = fmtTimeFr(incident.designatedAt);
+  // « Désigné(e) à » : l'heure de désignation n'est pas saisie par l'assistant
+  // (le CIL crée l'incident une fois missionné), on retombe donc sur l'heure
+  // d'arrivée sur site, seule heure réellement recueillie.
+  out.txt_designeA = fmtTimeFr(incident.designatedAt ?? incident.arrivedOnSiteAt);
   out.check_etab_ral = incident.cilEtablissement === "EIC_RAL" ? CHECKED : UNCHECKED;
   out.check_etab_rhn = incident.cilEtablissement === "INFP_RHN" ? CHECKED : UNCHECKED;
   out.check_etab_lgv = incident.cilEtablissement === "INFP_LGV" ? CHECKED : UNCHECKED;

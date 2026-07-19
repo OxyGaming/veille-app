@@ -46,6 +46,31 @@ describe("buildCilDocxData — en-tête", () => {
     expect(d.check_etab_ral).toBe("☐");
     expect(d.check_etab_lgv).toBe("☐");
   });
+
+  it("retombe sur la voie partagée et l'heure d'arrivée quand l'en-tête est vide", () => {
+    const d = buildCilDocxData(
+      full({
+        incident: incident({
+          voie: null,
+          voies: "1 et 2",
+          designatedAt: null,
+          arrivedOnSiteAt: iso(29),
+        }),
+      }),
+    );
+    // « Voie » : saisie soit à la création, soit à la 1ʳᵉ dépêche.
+    expect(d.txt_voie).toBe("1 et 2");
+    // « Désigné(e) à » : l'heure de désignation n'est pas recueillie.
+    expect(d.txt_designeA).toBe("14h31");
+  });
+
+  it("privilégie l'en-tête quand il est renseigné", () => {
+    const d = buildCilDocxData(
+      full({ incident: incident({ voie: "3", voies: "1 et 2", designatedAt: iso(6) }) }),
+    );
+    expect(d.txt_voie).toBe("3");
+    expect(d.txt_designeA).toBe("14h08");
+  });
 });
 
 describe("buildCilDocxData — protections à 2 dépêches", () => {

@@ -110,6 +110,56 @@ def ajuster_largeur_table(table, section):
     return cible / 1440 * 25.4
 
 
+def passer_en_a3(document, facteur=0.90):
+    """Repagine le livret en A3 portrait : 2 pages (livret, puis carnet).
+
+    A4 paysage et A3 portrait ont EXACTEMENT la même largeur (297 mm) : la
+    largeur utile est inchangée et aucun tableau n'est à redimensionner. Seule
+    la hauteur compte, et le livret y tient déjà sans réduction — mais à 10 mm
+    près, ce qui basculerait en 3 pages dès qu'un texte de dépêche s'allonge.
+
+    Le facteur 0,90 (police 12 pt → 10,8 pt) laisse ~42 mm de réserve tout en
+    restant confortablement lisible sur une feuille A3.
+
+    Le document conserve ses deux sections : le livret d'abord, le carnet
+    ensuite — d'où les 2 pages.
+    """
+    from docx.enum.section import WD_ORIENT
+    from docx.shared import Mm, Pt
+
+    for section in document.sections:
+        section.orientation = WD_ORIENT.PORTRAIT
+        section.page_width = Mm(297)
+        section.page_height = Mm(420)
+
+    # Style de base (les runs sans taille explicite en héritent).
+    normal = document.styles["Normal"]
+    if normal.font.size is not None:
+        normal.font.size = Pt(round(normal.font.size.pt * facteur, 1))
+
+    runs = 0
+    for rPr in document.element.body.iter(qn("w:rPr")):
+        sz = rPr.find(qn("w:sz"))
+        if sz is not None:
+            demi_points = int(sz.get(qn("w:val")))
+            sz.set(qn("w:val"), str(max(2, round(demi_points * facteur))))
+            runs += 1
+        szCs = rPr.find(qn("w:szCs"))
+        if szCs is not None:
+            szCs.set(
+                qn("w:val"), str(max(2, round(int(szCs.get(qn("w:val"))) * facteur)))
+            )
+
+    # Hauteurs de ligne : ce sont des minimums, ils empêcheraient la réduction.
+    lignes = 0
+    for trPr in document.element.body.iter(qn("w:trPr")):
+        h = trPr.find(qn("w:trHeight"))
+        if h is not None:
+            h.set(qn("w:val"), str(max(1, round(int(h.get(qn("w:val"))) * facteur))))
+            lignes += 1
+    return runs, lignes
+
+
 def tag_sentences(cell, rules):
     """Applique à chaque paragraphe la 1ʳᵉ règle (predicat, texte) qui matche.
 
@@ -378,6 +428,11 @@ def main():
 
     # ── Réglettes de numéros (générique, en dernier) ────────────────────────
     tag_numbers(d)
+
+    # Repagination A3 en dernier : les largeurs de table sont déjà figées, et
+    # la mise à l'échelle ne touche que polices et hauteurs de ligne.
+    runs, lignes = passer_en_a3(d)
+    print("A3 portrait : %d runs et %d hauteurs de ligne mis à l'échelle" % (runs, lignes))
 
     d.save(out)
     print("template écrit :", out)

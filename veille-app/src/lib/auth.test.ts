@@ -5,6 +5,7 @@ import {
   canActOnAnyTeam,
   canActOnTeam,
   resolveOwningTeam,
+  sightingScope,
   teamScope,
   userScope,
   type SessionUser,
@@ -317,6 +318,61 @@ describe("resolveOwningTeam", () => {
     expect(resolveOwningTeam(admin, ["team-A"], "team-Z")).toEqual({
       ok: false,
       code: "TEAM_FORBIDDEN",
+    });
+  });
+});
+
+/**
+ * Non-régression : les commentaires (kind=NOTE) de la fiche agent / fiche site
+ * avaient disparu pour les ADMIN globaux. La cause était
+ * `OR: [{ kind: "SIGHT" }, { ...teamScope(u) }]` : quand teamScope renvoie `{}`,
+ * Prisma élimine la branche vide au lieu de la traiter comme « toujours vrai »,
+ * et la condition se réduit à `kind = 'SIGHT'`.
+ */
+describe("sightingScope", () => {
+  it("ADMIN global : aucun filtre (SIGHT et NOTE visibles)", () => {
+    expect(sightingScope(makeUser({ role: "ADMIN" }))).toEqual({});
+  });
+
+  it("viewAllTeams : aucun filtre", () => {
+    expect(sightingScope(makeUser({ viewAllTeams: true }))).toEqual({});
+  });
+
+  it("ne produit jamais de branche OR vide", () => {
+    for (const u of [
+      makeUser({ role: "ADMIN" }),
+      makeUser({ viewAllTeams: true }),
+      makeUser({ teamIds: ["team-A"] }),
+      makeUser({ teamIds: [] }),
+    ]) {
+      const scope = sightingScope(u);
+      for (const branch of scope.OR ?? []) {
+        expect(Object.keys(branch).length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("USER multi-équipes : SIGHT transversal, NOTE cloisonnée", () => {
+    const u = makeUser({ teamIds: ["team-A", "team-B"] });
+    expect(sightingScope(u)).toEqual({
+      OR: [{ kind: "SIGHT" }, { teamId: { in: ["team-A", "team-B"] } }],
+    });
+  });
+
+  it("ADMIN au périmètre restreint : cloisonné sur les équipes du scope", () => {
+    const u = makeUser({
+      role: "ADMIN",
+      adminScopeMode: "TEAM",
+      adminTeamId: "team-A",
+    });
+    expect(sightingScope(u)).toEqual({
+      OR: [{ kind: "SIGHT" }, { teamId: { in: ["team-A"] } }],
+    });
+  });
+
+  it("utilisateur sans équipe : ne voit que les SIGHT", () => {
+    expect(sightingScope(makeUser({ teamIds: [] }))).toEqual({
+      OR: [{ kind: "SIGHT" }, { teamId: "__none__" }],
     });
   });
 });

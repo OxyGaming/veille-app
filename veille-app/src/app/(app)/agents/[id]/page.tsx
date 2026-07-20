@@ -5,6 +5,7 @@ import {
   agentScope,
   effectiveTeamIds,
   getSessionUser,
+  sightingScope,
   teamScope,
 } from "@/lib/auth";
 import {
@@ -165,7 +166,7 @@ export default async function AgentPage({
   // entre toutes les équipes de l'agent. « Note » (NOTE) : acte managérial,
   // CLOISONNÉ par équipe. (Décision cloisonnement §5.)
   const sightings = await prisma.agentSighting.findMany({
-    where: { agentId: id, OR: [{ kind: "SIGHT" }, { ...teamScope(u) }] },
+    where: { agentId: id, ...sightingScope(u) },
     orderBy: { sightedAt: "desc" },
     take: 30,
     include: {

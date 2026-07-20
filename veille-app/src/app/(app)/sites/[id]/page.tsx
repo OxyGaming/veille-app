@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser, siteScope, teamScope } from "@/lib/auth";
+import { getSessionUser, siteScope, sightingScope, teamScope } from "@/lib/auth";
 import {
   actionEcheanceStateAt,
   echeanceBounds,
@@ -68,7 +68,7 @@ export default async function SitePage({
   });
 
   const sightings = await prisma.siteSighting.findMany({
-    where: { siteId: id, OR: [{ kind: "SIGHT" }, { ...teamScope(u) }] },
+    where: { siteId: id, ...sightingScope(u) },
     orderBy: { sightedAt: "desc" },
     take: 30,
     include: {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { addDays, format } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { agentScope, requireUser, teamScope } from "@/lib/auth";
+import { agentScope, requireUser, sightingScope, teamScope } from "@/lib/auth";
 
 /**
  * Renvoie un mini timeline d'activité par agent sur les 30 derniers jours
@@ -40,7 +40,7 @@ export async function GET() {
   // Cloisonnement §5 : l'activité agrégée (veilles + validations) est strictement
   // par équipe ; seuls les « Vu » (SIGHT) restent transversaux.
   const scope = teamScope(u);
-  const sightingScope = { OR: [{ kind: "SIGHT" }, { ...scope }] };
+  const sightingFilter = sightingScope(u);
 
   const [
     sessions,
@@ -59,7 +59,7 @@ export async function GET() {
       select: { agentId: true, realizedAt: true },
     }),
     prisma.agentSighting.findMany({
-      where: { agentId: { in: ids }, sightedAt: { gte: from, lte: today }, ...sightingScope },
+      where: { agentId: { in: ids }, sightedAt: { gte: from, lte: today }, ...sightingFilter },
       select: { agentId: true, sightedAt: true },
     }),
     // Toutes périodes confondues, on prend le max par agent.
@@ -75,7 +75,7 @@ export async function GET() {
     }),
     prisma.agentSighting.groupBy({
       by: ["agentId"],
-      where: { agentId: { in: ids }, ...sightingScope },
+      where: { agentId: { in: ids }, ...sightingFilter },
       _max: { sightedAt: true },
     }),
   ]);

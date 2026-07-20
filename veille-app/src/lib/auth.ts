@@ -189,6 +189,25 @@ export function teamScope(u: SessionUser): {
 }
 
 /**
+ * Filtre Prisma pour Agent/SiteSighting (décision cloisonnement §5) :
+ * « Vu » (SIGHT) TRANSVERSAL, « Note » (NOTE) CLOISONNÉE par équipe.
+ *
+ * ⚠️ Ne PAS écrire `OR: [{ kind: "SIGHT" }, { ...teamScope(u) }]` : quand
+ * teamScope renvoie `{}` (ADMIN global / viewAllTeams), Prisma élimine la
+ * branche vide de l'OR au lieu de la traiter comme « toujours vrai », et la
+ * condition se réduit à `kind = 'SIGHT'` — les NOTE disparaissent pour
+ * exactement les utilisateurs qui devraient toutes les voir.
+ */
+export function sightingScope(u: SessionUser): {
+  OR?: Array<{ kind?: string; teamId?: { in: string[] } | string }>;
+} | Record<string, never> {
+  const scope = teamScope(u);
+  // Périmètre global : aucun filtre, SIGHT et NOTE sont tous visibles.
+  if (!("teamId" in scope)) return {};
+  return { OR: [{ kind: "SIGHT" }, scope] };
+}
+
+/**
  * Vérifie qu'un utilisateur a accès à une donnée scopée par teamId.
  *
  * À utiliser dans les route handlers APRÈS un `findUnique`, pour

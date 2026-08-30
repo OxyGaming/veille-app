@@ -1023,11 +1023,14 @@ async function exportPNG(){
     for(const vm of viewsMeta){
       applyViewState(vm.state); build();
       const b=contentBounds(); let bx=b.x,by=b.y,bw=b.w,bh=b.h;
-      // Les repères km (ligne dès y70, label « km … » à y86) sont au-dessus des
-      // tracés : on remonte le haut du cadre pour qu'ils apparaissent bien.
+      // N (nombre de bandes) calculé sur le contenu BRUT → la disposition reste
+      // identique quelle que soit l'extension pour les km ci-dessous.
+      const mp0=Math.max(b.h*0.02,12);
+      const N=Math.max(1,Math.min(4,Math.round(((b.w+2*mp0)/(b.h+2*mp0))/10)));
+      // Les repères km (label « km … » à y86) sont au-dessus des tracés : on
+      // remonte le haut du cadre pour qu'ils apparaissent (sans changer N).
       if(DATA.km&&DATA.km.length){ const bot=by+bh; by=Math.min(by,66); bh=bot-by; }
       const mp=Math.max(bh*0.02,12); bx-=mp; by-=mp; bw+=2*mp; bh+=2*mp;
-      const N=Math.max(1,Math.min(4,Math.round((bw/bh)/10)));
       const cl=syn.cloneNode(true); cl.querySelectorAll(".sel-ring,.hit,.node,.nodes,.wm-layer").forEach(e=>e.remove());
       rendered.push({name:vm.name,bx,by,bw,bh,N,kids:[...cl.childNodes]});
     }

@@ -7,10 +7,34 @@ const scriptSrc = isProd
   ? "script-src 'self' 'unsafe-inline'"
   : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
 
-const securityHeaders = [
+// CSP paramétrée : `frameAncestors` pilote l'anti-framing ; `googleFonts`
+// autorise fonts.googleapis.com / fonts.gstatic.com (nécessaire au seul viewer
+// synoptique statique, qui charge ses polices via <link>).
+const cspHeader = (opts: { frameAncestors: string; googleFonts?: boolean }) => ({
+  key: "Content-Security-Policy",
+  value: [
+    "default-src 'self'",
+    scriptSrc,
+    `style-src 'self' 'unsafe-inline'${
+      opts.googleFonts ? " https://fonts.googleapis.com" : ""
+    }`,
+    "img-src 'self' data: blob:",
+    `font-src 'self'${opts.googleFonts ? " https://fonts.gstatic.com" : ""}`,
+    "connect-src 'self'",
+    opts.frameAncestors,
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+    ...(isProd ? ["upgrade-insecure-requests"] : []),
+  ].join("; "),
+});
+
+// En-têtes communs à toutes les réponses (hors anti-framing, géré par chemin).
+const commonHeaders = [
   { key: "X-DNS-Prefetch-Control", value: "on" },
   { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
     key: "Permissions-Policy",
@@ -20,24 +44,17 @@ const securityHeaders = [
     key: "Strict-Transport-Security",
     value: "max-age=31536000; includeSubDomains",
   },
-  {
-    key: "Content-Security-Policy",
-    value: [
-      "default-src 'self'",
-      scriptSrc,
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "font-src 'self'",
-      "connect-src 'self'",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      "object-src 'none'",
-      "worker-src 'self' blob:",
-      "manifest-src 'self'",
-      ...(isProd ? ["upgrade-insecure-requests"] : []),
-    ].join("; "),
-  },
+];
+
+// Anti-framing : SAMEORIGIN / frame-ancestors 'self' (et non DENY / 'none').
+// La page /synoptique embarque le viewer statique en iframe MÊME ORIGINE : il
+// faut donc autoriser le framing par soi-même. Le cross-origin reste bloqué →
+// la protection anti-clickjacking est conservée (SAMEORIGIN est le défaut sûr
+// habituel). Polices Google autorisées (le viewer les charge via <link>).
+const securityHeaders = [
+  ...commonHeaders,
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  cspHeader({ frameAncestors: "frame-ancestors 'self'", googleFonts: true }),
 ];
 
 const nextConfig: NextConfig = {

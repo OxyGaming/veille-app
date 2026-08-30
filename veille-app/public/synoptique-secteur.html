@@ -1000,15 +1000,13 @@ async function exportPNG(){
     }
     applyViewState(liveState); build();
     const colW=Math.max(...rendered.map(r=>r.bw/r.N));
-    const topH=colW*0.016;
+    const topH=colW*0.004; // simple marge haute (titre retiré) — les vues remontent
     const vth=r=>0, vgap=r=>r.bh*0.028, vafter=r=>r.bh*0.06;
     let totalH=topH; rendered.forEach(r=>{ totalH += vth(r) + r.N*r.bh + (r.N-1)*vgap(r) + vafter(r); });
     const S=el("svg",{xmlns:SVGNS, viewBox:"0 0 "+colW+" "+totalH, width:W, height:H, preserveAspectRatio:"xMidYMid meet"});
     const st=document.createElementNS(SVGNS,"style"); st.textContent=css+"\n"+EXPORT_NIGHT; S.appendChild(st);
     S.appendChild(el("rect",{x:0,y:0,width:colW,height:totalH,fill:BG}));
     const defs=el("defs",{}); S.appendChild(defs);
-    const tt=el("text",{x:colW*0.008, y:topH*0.7, fill:"#eef3f8","font-size":topH*0.6,"font-weight":800,"font-family":"'Barlow Semi Condensed',sans-serif"});
-    tt.textContent="SECTEUR VEILLE — Plan de voies unifié"; S.appendChild(tt);
     let curY=topH, ci=0;
     rendered.forEach(r=>{
       const segW=r.bw/r.N;

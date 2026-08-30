@@ -45,6 +45,7 @@ const MORE_ITEMS = [
   { href: "/stats", label: "Statistiques", icon: Icon.Filter },
   { href: "/rci", label: "RCI", icon: Icon.AlertTriangle },
   { href: "/cil", label: "Livret CIL", icon: Icon.Shield },
+  { href: "/synoptique", label: "Synoptique", icon: Icon.Train },
   { href: "/links", label: "Liens utiles", icon: Icon.Link },
   { href: "/contacts", label: "Contacts", icon: Icon.Phone },
   { href: "/echeances", label: "Échéances", icon: Icon.Calendar },
@@ -61,6 +62,7 @@ const BASE_NAV_DESKTOP = [
   { href: "/contacts", label: "Contacts", icon: Icon.Phone },
   { href: "/rci", label: "RCI", icon: Icon.AlertTriangle },
   { href: "/cil", label: "Livret CIL", icon: Icon.Shield },
+  { href: "/synoptique", label: "Synoptique", icon: Icon.Train },
 ];
 
 const PILOTAGE_ITEM = {

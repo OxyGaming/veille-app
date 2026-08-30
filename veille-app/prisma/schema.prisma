@@ -67,6 +67,8 @@ model User {
   notificationPreference NotificationPreference?
   /// Tournées véhicule réalisées (en tant qu'observateur).
   vehicleRounds          VehicleRound[]          @relation("VehicleRoundObserver")
+  /// Dernières modifications de plans synoptiques (auteur du dernier enregistrement).
+  synoptiquePlans        SynoptiquePlan[]
 
   @@index([teamId])
   @@index([isActive])
@@ -160,6 +162,7 @@ model Team {
   planningImports  PlanningImport[]
   planningShifts   PlanningShift[]
   cilIncidents     CilIncident[]
+  synoptiquePlans  SynoptiquePlan[]
 }
 
 // ─── Référentiel métier (commun à toutes les équipes) ─────────────────────────
@@ -1823,4 +1826,38 @@ model CilSignature {
 
   @@index([incidentId])
   @@index([ownerType, ownerId])
+}
+
+// ─── Synoptique secteur (plan de voies) ───────────────────────────────────────
+
+/// Plan de voies interactif d'un secteur, un document par équipe.
+///
+/// Le viewer est le fichier HTML autonome `public/synoptique-secteur.html`,
+/// embarqué en iframe dans la page `/synoptique`. Il charge et enregistre son
+/// document via l'API `/api/synoptique/[key]` (scope équipe). L'état embarqué
+/// dans le fichier ne sert plus que de graine / fallback (hors ligne, ou hors
+/// application, ex. artifact claude.ai).
+///
+/// `doc` est le document complet (les vues) sérialisé en JSON String — pas de
+/// type Json natif, par cohérence SQLite (cf. AuditLog.details, TeamActivity).
+/// `version` s'incrémente à chaque enregistrement et sert au verrou optimiste
+/// (le client renvoie la version chargée ; l'API rejette si elle a changé).
+model SynoptiquePlan {
+  id          String   @id @default(cuid())
+  teamId      String
+  /// Clé logique du plan dans l'équipe (défaut "secteur-veille"). Permet
+  /// d'héberger plusieurs plans par équipe ultérieurement.
+  key         String   @default("secteur-veille")
+  doc         String
+  version     Int      @default(1)
+  /// Auteur du dernier enregistrement (null si le compte est supprimé).
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team      Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([teamId, key])
+  @@index([teamId])
 }

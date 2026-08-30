@@ -1664,7 +1664,12 @@ function contentBounds(){ const xs=[],ys=[];
   if(!xs.length)return {x:VB0.x+40,y:VB0.y+40,w:VB0.w-80,h:VB0.h-80};
   const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
   return {x:x0,y:y0,w:Math.max(200,x1-x0),h:Math.max(120,y1-y0)}; }
-function fitContent(){ const b=contentBounds(); fitTo(b.x,b.y,b.w,b.h); }
+function fitContent(){ const b=contentBounds(); const ca=canvasAspect();
+  if(ca<1){ // canvas portrait (mobile) : caler sur la HAUTEUR du contenu et montrer
+    // une fenêtre horizontale (sinon un tracé très large devient une bande invisible).
+    const h=b.h, w=Math.max(h*ca,260); fitTo(b.x,b.y,w,h);
+  } else fitTo(b.x,b.y,b.w,b.h);
+}
 function refreshViewSel(){ const sel=document.getElementById("viewSel"); if(!sel)return;
   sel.innerHTML=VIEWS.map((v,i)=>`<option value="${i}" ${i===curView?"selected":""}>${(v.name||("Vue "+(i+1))).replace(/</g,"&lt;")}</option>`).join(""); }
 function afterViewChange(){ editSel=null; selIds=[]; _lastFocusKey=null; undoStack=[]; if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;}
@@ -1699,7 +1704,8 @@ document.getElementById("viewSel").addEventListener("change",e=>loadView(+e.targ
 document.getElementById("viewAdd").addEventListener("click",addView);
 document.getElementById("viewRen").addEventListener("click",renameView);
 build(); buildOverview(); renderZoneSummary(); refreshCounts(); refreshViewSel(); renderReglette();
-if(curView===0)fitTo(400,70,1040,470); else fitContent();
+if(canvasAspect()<1) fitContent(); // portrait (mobile) : cadrage adapté
+else if(curView===0) fitTo(400,70,1040,470); else fitContent();
 // Application Veille : tente de charger le plan de l'équipe depuis le serveur
 // (remplace la graine embarquée si un plan existe). Sans effet hors application.
 serverLoad();

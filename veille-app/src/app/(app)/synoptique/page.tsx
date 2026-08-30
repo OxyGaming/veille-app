@@ -15,7 +15,7 @@ export const metadata: Metadata = {
  */
 export default function SynoptiquePage() {
   return (
-    <div className="w-full h-full bg-slate-900">
+    <div className="w-full h-[calc(100dvh_-_3.5rem_-_64px)] lg:h-screen bg-slate-900">
       <iframe
         src="/synoptique-secteur.html"
         title="Synoptique Secteur — plan de voies du secteur Veille"

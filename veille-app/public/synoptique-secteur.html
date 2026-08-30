@@ -1006,6 +1006,8 @@ const EXPORT_NIGHT = `:root{
   --accent:#39c0b3;--accent-soft:rgba(57,192,179,.16);
 }
 svg{background:#26313d}
+.kmtick text{fill:#ffffff;font-weight:600}
+.kmtick line{stroke:#6b7c8d}
 `;
 async function exportPNG(){
   const W=10800,H=4800,BG="#26313d";
@@ -1021,6 +1023,9 @@ async function exportPNG(){
     for(const vm of viewsMeta){
       applyViewState(vm.state); build();
       const b=contentBounds(); let bx=b.x,by=b.y,bw=b.w,bh=b.h;
+      // Les repères km (ligne dès y70, label « km … » à y86) sont au-dessus des
+      // tracés : on remonte le haut du cadre pour qu'ils apparaissent bien.
+      if(DATA.km&&DATA.km.length){ const bot=by+bh; by=Math.min(by,66); bh=bot-by; }
       const mp=Math.max(bh*0.02,12); bx-=mp; by-=mp; bw+=2*mp; bh+=2*mp;
       const N=Math.max(1,Math.min(4,Math.round((bw/bh)/10)));
       const cl=syn.cloneNode(true); cl.querySelectorAll(".sel-ring,.hit,.node,.nodes,.wm-layer").forEach(e=>e.remove());

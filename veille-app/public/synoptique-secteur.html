@@ -302,7 +302,7 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
       <button id="railToggle" class="rail-toggle" aria-label="Afficher les calques et sections" title="Calques / sections ODICEO">☰</button>
       <svg id="syn" viewBox="-8600 0 10620 740" role="img" aria-label="Synoptique : PRS Givors Canal (St Étienne, Lyon Perrache, Badan, Chasse), Loire P1, Ste Colombe, Condrieu, pleine ligne, Peyraud"></svg>
       <div class="tooltip" id="tip"></div>
-      <div class="edithint" id="edithint">✎ Mode édition — <b>glissez</b> un objet ou un <b>nœud</b> de voie · <b>double-clic</b> sur un tracé pour ajouter un point, sur un nœud pour le retirer · <b>🔗 Relier</b> pour créer une jonction</div>
+      <div class="edithint" id="edithint">✎ Mode édition — <b>glissez</b> un objet ou un <b>nœud</b> · <b>Ctrl+clic</b> = sélection multiple · <b>Ctrl+C/V</b> = copier/coller · <b>Ctrl+Z</b> = annuler · <b>Suppr</b> = supprimer</div>
       <div id="connectOverlay"></div>
       <div id="snapDot"></div>
       <div id="connectStart"></div>
@@ -671,8 +671,8 @@ function wire(g,obj){
     tip.style.left=(e.clientX-r.left)+"px";tip.style.top=(e.clientY-r.top)+"px";tip.classList.add("on");});
   g.addEventListener("mousemove",e=>{const r=cwrap.getBoundingClientRect();tip.style.left=(e.clientX-r.left)+"px";tip.style.top=(e.clientY-r.top)+"px";});
   g.addEventListener("mouseleave",()=>tip.classList.remove("on"));
-  g.addEventListener("pointerdown",ev=>{ if(!editing) return; ev.stopPropagation(); if(obj.x!=null) startObjDrag(ev,g,obj); });
-  g.addEventListener("click",ev=>{ev.stopPropagation(); if(editing) selectForEdit(obj); else select(g,obj);});
+  g.addEventListener("pointerdown",ev=>{ if(!editing) return; ev.stopPropagation(); if(ev.ctrlKey||ev.metaKey) return; if(obj.x!=null) startObjDrag(ev,g,obj); });
+  g.addEventListener("click",ev=>{ev.stopPropagation(); if(!editing){ select(g,obj); return; } if(ev.ctrlKey||ev.metaKey) toggleSel(obj); else selectForEdit(obj);});
 }
 function tipText(o){
   if(o.kind==="aiguille")return "Aiguille "+o.n+" · km "+o.km;
@@ -698,7 +698,7 @@ function select(g,obj){
 }
 syn.addEventListener("click",()=>{
   if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;}
-  if(editing){ editSel=null; build(); renderEditor(); } else renderZoneSummary();
+  if(editing){ editSel=null; selIds=[]; _lastFocusKey=null; build(); renderEditor(); } else renderZoneSummary();
 });
 
 /* ---------- inspector ---------- */
@@ -903,12 +903,12 @@ syn.addEventListener("wheel",e=>{e.preventDefault();const p=clientToVB(e);zoomAt
 let drag=null;
 syn.addEventListener("pointerdown",e=>{const ctm=syn.getScreenCTM();drag={x:e.clientX,y:e.clientY,vx:vb.x,vy:vb.y,sx:(ctm&&ctm.a)||1,sy:(ctm&&ctm.d)||1};syn.setPointerCapture(e.pointerId);syn.classList.add("grabbing");});
 syn.addEventListener("pointermove",e=>{
-  if(ldrag){const p=clientToVB(e);const ndx=Math.round((ldrag.dx+(p.x-ldrag.px))/2)*2,ndy=Math.round((ldrag.dy+(p.y-ldrag.py))/2)*2;
+  if(ldrag){if(!ldrag._u){ldrag._u=1;pushUndo();}const p=clientToVB(e);const ndx=Math.round((ldrag.dx+(p.x-ldrag.px))/2)*2,ndy=Math.round((ldrag.dy+(p.y-ldrag.py))/2)*2;
     ldrag.ndx=ndx;ldrag.ndy=ndy;ldrag.g.setAttribute("transform",`translate(${ldrag.ax+ndx} ${ldrag.ay+ndy})`);return;}
-  if(ndrag){const p=clientToVB(e);const x=Math.round(p.x/2)*2,y=Math.round(p.y/2)*2;
+  if(ndrag){if(!ndrag._u){ndrag._u=1;pushUndo();}const p=clientToVB(e);const x=Math.round(p.x/2)*2,y=Math.round(p.y/2)*2;
     ndrag.obj.pts[ndrag.idx]=[x,y]; updateVoiePath(ndrag.obj);
     ndrag.handle.setAttribute("cx",x); ndrag.handle.setAttribute("cy",y); return;}
-  if(odrag){const p=clientToVB(e); let tx=p.x,ty=p.y;
+  if(odrag){if(!odrag._u){odrag._u=1;pushUndo();}const p=clientToVB(e); let tx=p.x,ty=p.y;
     if(["aiguille","signal","pn","butoir"].includes(odrag.kind)){const s=snapToVoie(p,26); if(s){tx=s.x;ty=s.y;}}
     tx=Math.round(tx/2)*2; ty=Math.round(ty/2)*2; odrag.tx=tx; odrag.ty=ty;
     odrag.g.setAttribute("transform",`translate(${tx-odrag.ox} ${ty-odrag.oy})`); return;}
@@ -919,7 +919,7 @@ syn.addEventListener("pointerup",()=>{
   if(ndrag){ndrag=null;build();reHighlight();syncJSON();return;}
   if(odrag){const ref=findRef(odrag.id);
     if(ref){ref.obj.x=(odrag.tx!=null?odrag.tx:odrag.ox); ref.obj.y=(odrag.ty!=null?odrag.ty:odrag.oy);}
-    const id=odrag.id; odrag=null; editSel=findRef(id); build(); reHighlight(); renderEditor(); syncJSON(); return;}
+    const id=odrag.id; odrag=null; setSel([id]); build(); reHighlight(); renderEditor(); syncJSON(); return;}
   drag=null;syn.classList.remove("grabbing");});
 syn.addEventListener("pointercancel",()=>{drag=null;syn.classList.remove("grabbing");});
 document.getElementById("zin").onclick=()=>zoomAt(vb.x+vb.w/2,vb.y+vb.h/2,0.8);
@@ -1050,6 +1050,11 @@ document.getElementById("exportbtn").addEventListener("click",exportPNG);
 
 /* ============================================================ ÉDITEUR WYSIWYG ==== */
 let editing=false, editSel=null, odrag=null, ndrag=null, ldrag=null, connectMode=false, connectA=null;
+let selIds=[];            // sélection multiple (ids) ; le primaire = editSel.obj.id
+let undoStack=[];         // pile d'annulation (Ctrl+Z) — snapshots JSON de la vue
+let clipboard=[];         // copier/coller interne — [{list, obj(clone)}]
+let _lastFocusKey=null;   // dédup des snapshots pendant l'édition d'un champ
+const UNDO_MAX=80;
 /* (filigrane retiré — la réglette d'ensemble est éditable par vue) */
 // étiquette déplaçable : positionnée à (ancre + décalage ldx/ldy stocké sur l'objet)
 function labelG(obj,ax,ay,ddx,ddy,text,anchor,tcls){
@@ -1152,15 +1157,115 @@ function findRef(id){
   if(DATA.limite&&DATA.limite.id===id)return{list:"limite",kind:"limite",obj:DATA.limite};
   return null;
 }
-function reHighlight(){ if(editSel){const g=document.getElementById("g-"+editSel.obj.id); if(g){g.classList.add("sel");selectedEl=g;}} refreshCounts(); }
+function reHighlight(){
+  document.querySelectorAll(".selectable.sel").forEach(el=>el.classList.remove("sel"));
+  selectedEl=null;
+  selIds.forEach(id=>{const g=document.getElementById("g-"+id); if(g)g.classList.add("sel");});
+  if(editSel){const g=document.getElementById("g-"+editSel.obj.id); if(g)selectedEl=g;}
+  refreshCounts();
+}
+/* ---------- annulation (Ctrl+Z) ---------- */
+// Snapshot de la vue courante avant mutation. Dédupliqué : deux appels sans
+// changement entre-temps ne poussent qu'un état (utile pour le focus de champ).
+function pushUndo(){ try{ const s=JSON.stringify(captureView()); if(undoStack[undoStack.length-1]===s)return; undoStack.push(s); if(undoStack.length>UNDO_MAX)undoStack.shift(); }catch(e){} }
+function undo(){
+  if(!undoStack.length){ toast("Rien à annuler."); return; }
+  let snap; try{ snap=JSON.parse(undoStack.pop()); }catch(e){ return; }
+  applyViewState(snap);
+  selIds=[]; editSel=null; _lastFocusKey=null; if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;}
+  build(); reHighlight(); renderEditor();
+  toast("Annulé"+(undoStack.length?" ("+undoStack.length+" pas restants)":"")+".");
+}
+/* ---------- sélection multiple ---------- */
+function setSel(ids){ selIds=[...new Set(ids)]; editSel = selIds.length ? (findRef(selIds[selIds.length-1])||null) : null; _lastFocusKey=null; }
+function toggleSel(obj){
+  const i=selIds.indexOf(obj.id);
+  if(i>=0) selIds.splice(i,1); else selIds.push(obj.id);
+  editSel = selIds.length ? (findRef(selIds[selIds.length-1])||null) : null; _lastFocusKey=null;
+  build(); reHighlight(); renderEditor();
+  if(window.innerWidth<=1080)railRight.classList.add("open");
+}
+function selRefs(){ return selIds.map(id=>findRef(id)).filter(Boolean); }
+/* ---------- copier / coller (Ctrl+C / Ctrl+V) ---------- */
+function copySel(){
+  const refs=selRefs(); if(!refs.length){ toast("Rien à copier."); return; }
+  clipboard = refs.map(r=>({list:r.list, obj:clone(r.obj)}));
+  toast(clipboard.length+" élément"+(clipboard.length>1?"s copiés":" copié")+" — Ctrl+V pour coller.");
+}
+function pasteClip(){
+  if(!clipboard.length){ toast("Presse-papier vide."); return; }
+  pushUndo();
+  const newIds=[];
+  clipboard.forEach((it,idx)=>{
+    if(it.list==="limite")return; // singleton non duplicable
+    const n=clone(it.obj);
+    n.id=uid((it.list||"o").slice(0,4))+"c"+idx;
+    if(n.x!=null)n.x+=24; if(n.y!=null)n.y+=16;
+    if(Array.isArray(n.pts))n.pts=n.pts.map(p=>[p[0]+24,p[1]+16]);
+    if(!DATA[it.list])DATA[it.list]=[]; DATA[it.list].push(n); newIds.push(n.id);
+  });
+  if(!newIds.length){ toast("Rien à coller."); return; }
+  setSel(newIds);
+  build(); reHighlight(); renderEditor(); syncJSON();
+  toast(newIds.length+" élément"+(newIds.length>1?"s collés":" collé")+" (décalés) — glissez-les.");
+}
+/* ---------- suppression (mono ou multi) ---------- */
+function deleteSelection(){
+  const refs=selRefs(); if(!refs.length){ toast("Rien à supprimer."); return; }
+  pushUndo();
+  refs.forEach(r=>{ if(r.list==="limite"){DATA.limite=null;} else {const l=DATA[r.list]; if(l){const i=l.indexOf(r.obj); if(i>=0)l.splice(i,1);}} });
+  const n=refs.length; selIds=[]; editSel=null; _lastFocusKey=null; if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;}
+  build(); renderEditor(); syncJSON(); toast(n+" élément"+(n>1?"s supprimés":" supprimé")+".");
+}
+/* ---------- application groupée d'une propriété (ex. taille des PRS) ---------- */
+// `prop` : nom de propriété (string) ou fonction ref→nom (ex. rond utilise "r").
+function applyToSel(pred,prop,val,rerender){
+  selRefs().forEach(r=>{ if(pred(r)){ const key=(typeof prop==="function")?prop(r):prop; r.obj[key]=val; } });
+  build(); reHighlight(); syncJSON(); if(rerender)renderEditor();
+}
+// Décale uniquement les objets sélectionnés (position ou tous leurs nœuds).
+function shiftSel(dx,dy){
+  pushUndo();
+  selRefs().forEach(r=>{ const o=r.obj; if(o.x!=null){o.x+=dx; if(o.y!=null)o.y+=dy;} else if(Array.isArray(o.pts)){o.pts.forEach(p=>{p[0]+=dx;p[1]+=dy;});} });
+  build(); reHighlight(); syncJSON();
+}
+// Panneau d'édition multi-sélection (retaille rapide des PRS/ronds, etc.).
+function multiEditorFields(){
+  const refs=selRefs();
+  const byKind={}; refs.forEach(r=>{byKind[r.kind]=(byKind[r.kind]||0)+1;});
+  const kinds=Object.entries(byKind).map(([k,n])=>n+"× "+k).join(" · ");
+  const prsN=(byKind.prs||0), rondN=(byKind.rond||0);
+  const sized=refs.filter(r=>r.kind==="prs"||r.kind==="rond");
+  let curSize=""; if(sized.length){ const vals=[...new Set(sized.map(r=>r.kind==="rond"?r.obj.r:r.obj.size))]; curSize = vals.length===1?vals[0]:""; }
+  let h=`<div class="ed-head"><span class="t">${refs.length} éléments sélectionnés</span></div>`;
+  h+=`<div class="insp-sub" style="margin:2px 0 8px">${kinds}. Ctrl+clic pour ajouter/retirer · Ctrl+C copier · Suppr supprimer.</div>`;
+  if(sized.length){
+    h+=`<div class="ed-tool" style="align-items:center">
+      <div class="ed-field" style="flex:1"><label>Taille des boutons (${prsN?prsN+" PRS":""}${prsN&&rondN?" + ":""}${rondN?rondN+" ronds":""})</label>
+        <input type="range" id="mSize" min="8" max="60" step="1" value="${curSize||22}" style="width:100%">
+      </div>
+      <div class="ed-field" style="width:64px"><label>&nbsp;px</label><input type="number" id="mSizeNum" min="6" max="80" step="1" value="${curSize||22}" style="width:60px"></div>
+    </div>`;
+  }
+  if(prsN){
+    h+=edSel("__mstyle","Style des PRS (tous)","",[["","— inchangé —"],["light","Fond clair"],["dark","Fond sombre"],["yellow","Fond jaune"]]).replace('data-k="__mstyle"','id="mStyle"');
+  }
+  h+=`<div class="ed-tool" style="margin-top:8px"><span style="align-self:center;font-size:11px;color:var(--muted)">Décaler la sélection&nbsp;:</span>
+      <button id="mU" title="Monter">↑</button><button id="mD" title="Descendre">↓</button>
+      <button id="mL" title="Gauche">←</button><button id="mR" title="Droite">→</button>
+      <input id="mStep" type="number" value="10" min="1" style="width:52px" title="Pas (px)"></div>`;
+  h+=`<div class="ed-tool"><button id="mCopy" title="Copier la sélection (Ctrl+C)">⧉ Copier</button>
+      <button id="mDel" title="Supprimer la sélection (Suppr)" style="color:var(--danger,#e5484d);border-color:var(--danger,#e5484d)">🗑 Supprimer</button></div>`;
+  return h;
+}
 function refreshCounts(){document.querySelectorAll(".layer").forEach(b=>{const d=layerDefs.find(x=>x.id===b.dataset.layer);const c=b.querySelector(".ct");if(d&&c)c.textContent=d.get();});}
 function startObjDrag(ev,g,obj){const p=clientToVB(ev);odrag={id:obj.id,g,kind:obj.kind,ox:obj.x,oy:obj.y,px:p.x,py:p.y,dx:0,dy:0,tx:obj.x,ty:obj.y};try{syn.setPointerCapture(ev.pointerId);}catch(e){}}
 // aimante un point sur la voie/liaison la plus proche (projection)
 function snapToVoie(p,maxD){ let best=null,bd=maxD*maxD;
   [...DATA.voies,...DATA.liaisons].forEach(o=>{if(!o.pts)return;for(let i=0;i<o.pts.length-1;i++){const q=projectOnSeg(p,o.pts[i],o.pts[i+1]);
     const dx=q.x-p.x,dy=q.y-p.y,d=dx*dx+dy*dy;if(d<bd){bd=d;best={x:q.x,y:q.y};}}}); return best; }
-function selectForEdit(obj){editSel=findRef(obj.id); if(selectedEl)selectedEl.classList.remove("sel");
-  build(); const g=document.getElementById("g-"+obj.id); if(g){g.classList.add("sel");selectedEl=g;} renderEditor();
+function selectForEdit(obj){ selIds=[obj.id]; editSel=findRef(obj.id); _lastFocusKey=null;
+  build(); reHighlight(); renderEditor();
   if(window.innerWidth<=1080)railRight.classList.add("open");}
 
 function exportSingle(){const o={};EDITABLE.forEach(k=>o[k]=DATA[k]); o._secteur=DATA.secteur;
@@ -1253,6 +1358,7 @@ function primarySave(){ return serverMode?serverSave():saveDownload(); }
 
 const uid=p=>p+"_"+Date.now().toString(36).slice(-4)+Math.floor(Math.random()*90+10);
 function addObject(kind){
+  pushUndo();
   const cx=Math.round((vb.x+vb.w/2)/2)*2, cy=Math.round((vb.y+vb.h/2)/2)*2;
   let o,list;
   if(kind==="aig"){o={id:uid("a"),n:"?",x:cx,y:cy,km:"",voie:"",poste:"Peyraud P1"};list="aiguilles";}
@@ -1271,12 +1377,13 @@ function addObject(kind){
   if(!DATA[list])DATA[list]=[];
   DATA[list].push(o);
   const kmap={aig:"aiguille",c:"signal",cv:"signal",pn:"pn",poste:"poste",voie:"voie",butoir:"butoir",quai:"quai",dbc:"dbc",prs:"prs",rond:"rond",km:"km",dir:"dir",band:"band"};
-  editSel={list,kind:kmap[kind],obj:o};
+  editSel={list,kind:kmap[kind],obj:o}; selIds=[o.id]; _lastFocusKey=null;
   build(); reHighlight(); renderEditor(); syncJSON();
   toast("Objet ajouté — glissez-le à sa place.");
 }
 // décale TOUT le plan (toutes les voies/objets) de (dx,dy) — pour caler sur le filigrane
 function shiftAll(dx,dy){
+  pushUndo();
   DATA.voies.concat(DATA.liaisons).forEach(v=>{ if(v.pts)v.pts.forEach(p=>{p[0]+=dx;p[1]+=dy;}); });
   DATA.aiguilles.concat(DATA.signaux,DATA.pn,DATA.postes,DATA.buffers).forEach(o=>{ if(o.x!=null)o.x+=dx; if(o.y!=null)o.y+=dy; });
   // la décoration suit aussi (graduation km horizontale, directions, bandes, limite) — les VALEURS km ne changent jamais
@@ -1289,6 +1396,7 @@ function shiftAll(dx,dy){
 // agrandit la zone de dessin (VB0) du côté choisi, sans déplacer le contenu, puis révèle le nouvel espace
 function frameStep(){ return Math.max(50,+((document.getElementById("frStep")||{}).value)||800); }
 function growFrame(side){
+  pushUndo();
   const s=frameStep();
   if(side==="left"){ VB0.x-=s; VB0.w+=s; vb.x=VB0.x; }
   else if(side==="right"){ VB0.w+=s; vb.x=VB0.x+VB0.w-vb.w; }
@@ -1299,17 +1407,17 @@ function growFrame(side){
   toast("Cadre agrandi de "+s+" px "+lbl+" — nouvel espace révélé, tracez-y la suite.");
 }
 // réajuste le cadre au contenu (annule un agrandissement de trop)
-function frameToContent(){ const b=contentBounds(), m=180;
+function frameToContent(){ pushUndo(); const b=contentBounds(), m=180;
   VB0.x=Math.round(b.x-m); VB0.y=Math.round(b.y-m); VB0.w=Math.round(b.w+2*m); VB0.h=Math.round(b.h+2*m);
   fitContent(); saveStored(); syncJSON(); toast("Cadre réajusté au contenu."); }
-function deleteSel(){ if(!editSel)return;
+function deleteSel(){ if(!editSel)return; pushUndo();
   if(editSel.kind==="limite"){ DATA.limite=null; }
   else { const l=DATA[editSel.list]; if(l){const i=l.indexOf(editSel.obj); if(i>=0)l.splice(i,1);} }
-  editSel=null; if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;} build(); renderEditor(); syncJSON(); toast("Élément supprimé."); }
-function resetAll(){ EDITABLE.forEach(k=>DATA[k]=clone(DEFAULTS[k])); editSel=null;
+  editSel=null; selIds=[]; _lastFocusKey=null; if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;} build(); renderEditor(); syncJSON(); toast("Élément supprimé."); }
+function resetAll(){ pushUndo(); EDITABLE.forEach(k=>DATA[k]=clone(DEFAULTS[k])); editSel=null; selIds=[];
   try{localStorage.removeItem(KEY);}catch(e){} build(); renderEditor(); syncJSON(); toast("Plan réinitialisé aux valeurs par défaut."); }
 function applyJSON(){ const t=document.getElementById("jsonArea"); if(!t)return;
-  try{const d=JSON.parse(t.value); importDocument(d); toast("JSON appliqué ("+VIEWS.length+" vue"+(VIEWS.length>1?"s":"")+").");
+  try{const d=JSON.parse(t.value); pushUndo(); importDocument(d); toast("JSON appliqué ("+VIEWS.length+" vue"+(VIEWS.length>1?"s":"")+").");
   }catch(err){ toast("JSON invalide : "+err.message); }
 }
 function copyJSON(){ const t=document.getElementById("jsonArea"); if(!t)return; t.select();
@@ -1406,8 +1514,9 @@ function renderEditor(){
     <input id="frStep" type="number" value="800" min="50" step="50" style="width:60px" title="Pas (px)">
     <button id="frFit" title="Réajuster le cadre au contenu">↺ contenu</button>
   </div>`;
-  if(!editSel) h+=`<div class="insp-sub">Glissez un objet pour le repositionner, ou cliquez dessus pour éditer ses propriétés (numéro, km, voie, sens…). Utilisez « + » pour ajouter une installation manquante. « Agrandir le cadre » ajoute de l'espace de dessin du côté choisi.</div>`;
-  else h+=editorFields(editSel);
+  if(selIds.length>1) h+=multiEditorFields();
+  else if(editSel) h+=editorFields(editSel);
+  else h+=`<div class="insp-sub">Glissez un objet pour le repositionner, ou cliquez dessus pour éditer ses propriétés (numéro, km, voie, sens…). Utilisez « + » pour ajouter une installation manquante.<br><b>Raccourcis :</b> <b>Ctrl+clic</b> = sélection multiple · <b>Ctrl+C / Ctrl+V</b> = copier / coller · <b>Ctrl+Z</b> = annuler · <b>Suppr</b> = supprimer la sélection.</div>`;
   h+=`<div class="jsonpanel">
         <div class="jh"><h3>Modèle de données (JSON)</h3>
           <div class="jbtns"><button id="jCopy">Copier</button><button id="jApply">Appliquer</button></div></div>
@@ -1419,7 +1528,7 @@ function renderEditor(){
 function bindEditor(){
   insp.querySelectorAll("[data-add]").forEach(b=>b.addEventListener("click",()=>addObject(b.dataset.add)));
   const rst=document.getElementById("edReset"); if(rst)rst.addEventListener("click",resetAll);
-  const del=document.getElementById("edDel"); if(del)del.addEventListener("click",deleteSel);
+  const del=document.getElementById("edDel"); if(del)del.addEventListener("click",deleteSelection);
   const jc=document.getElementById("jCopy"); if(jc)jc.addEventListener("click",copyJSON);
   const ja=document.getElementById("jApply"); if(ja)ja.addEventListener("click",applyJSON);
   const sv=document.getElementById("edSave"); if(sv){ sv.addEventListener("click",primarySave);
@@ -1430,7 +1539,7 @@ function bindEditor(){
   const cn=document.getElementById("edConnect"); if(cn)cn.addEventListener("click",startConnect);
   const an=document.getElementById("edAddNode"); if(an)an.addEventListener("click",addNodeToSel);
   const st=document.getElementById("edStraight"); if(st)st.addEventListener("click",straightenSel);
-  insp.querySelectorAll("[data-rot]").forEach(b=>b.addEventListener("click",()=>{ if(editSel){editSel.obj.rot=+b.dataset.rot; build(); reHighlight(); syncJSON();} }));
+  insp.querySelectorAll("[data-rot]").forEach(b=>b.addEventListener("click",()=>{ if(editSel){pushUndo(); editSel.obj.rot=+b.dataset.rot; build(); reHighlight(); syncJSON();} }));
   const step=()=>Math.max(1,+((document.getElementById("shStep")||{}).value)||10);
   const shb=(id,fx,fy)=>{const b=document.getElementById(id); if(b)b.addEventListener("click",()=>shiftAll(fx*step(),fy*step()));};
   shb("shU",0,-1); shb("shD",0,1); shb("shL",-1,0); shb("shR",1,0);
@@ -1438,6 +1547,8 @@ function bindEditor(){
   frb("frL","left"); frb("frR","right"); frb("frU","up"); frb("frD","down");
   const ff=document.getElementById("frFit"); if(ff)ff.addEventListener("click",frameToContent);
   insp.querySelectorAll("[data-k]").forEach(inp=>{
+    // Un snapshot d'annulation par session d'édition de champ (dédupliqué).
+    inp.addEventListener("focus",()=>{ const key=(editSel?editSel.obj.id:"")+"/"+inp.dataset.k; if(key!==_lastFocusKey){_lastFocusKey=key;pushUndo();} });
     inp.addEventListener("input",()=>{
       if(!editSel)return; const k=inp.dataset.k; let v;
       if(inp.type==="checkbox")v=inp.checked?1:0;
@@ -1447,6 +1558,20 @@ function bindEditor(){
       editSel.obj[k]=v; build(); reHighlight(); syncJSON();
     });
   });
+  // ---- panneau multi-sélection ----
+  const mStep=()=>Math.max(1,+((document.getElementById("mStep")||{}).value)||10);
+  const mb=(id,fx,fy)=>{const b=document.getElementById(id); if(b)b.addEventListener("click",()=>shiftSel(fx*mStep(),fy*mStep()));};
+  mb("mU",0,-1); mb("mD",0,1); mb("mL",-1,0); mb("mR",1,0);
+  const mCopy=document.getElementById("mCopy"); if(mCopy)mCopy.addEventListener("click",copySel);
+  const mDel=document.getElementById("mDel"); if(mDel)mDel.addEventListener("click",deleteSelection);
+  const mSize=document.getElementById("mSize"), mSizeNum=document.getElementById("mSizeNum");
+  const sizeSnap=()=>{ if(_lastFocusKey!=="multi/size"){_lastFocusKey="multi/size";pushUndo();} };
+  const applySize=(raw)=>{ const v=Math.max(6,Math.min(80,parseFloat(raw)||22)); if(mSize)mSize.value=v; if(mSizeNum)mSizeNum.value=v;
+    applyToSel(r=>r.kind==="prs"||r.kind==="rond", r=>r.kind==="rond"?"r":"size", v, false); };
+  if(mSize){ mSize.addEventListener("pointerdown",sizeSnap); mSize.addEventListener("focus",sizeSnap); mSize.addEventListener("input",()=>applySize(mSize.value)); }
+  if(mSizeNum){ mSizeNum.addEventListener("focus",sizeSnap); mSizeNum.addEventListener("input",()=>applySize(mSizeNum.value)); }
+  const mStyle=document.getElementById("mStyle");
+  if(mStyle)mStyle.addEventListener("change",()=>{ if(!mStyle.value)return; pushUndo(); applyToSel(r=>r.kind==="prs","style",mStyle.value,false); });
 }
 function setEditing(on){
   editing=on;
@@ -1455,7 +1580,7 @@ function setEditing(on){
   document.getElementById("editbtn").setAttribute("aria-pressed",String(on));
   document.getElementById("edithint").style.display=on?"block":"none";
   if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;}
-  editSel=null; endConnect(); build();
+  editSel=null; selIds=[]; _lastFocusKey=null; endConnect(); build();
   if(on){renderEditor();renderReglette();toast("Mode édition activé.");} else {renderZoneSummary();railRight.classList.remove("open");}
 }
 document.getElementById("editbtn").addEventListener("click",()=>setEditing(!editing));
@@ -1478,7 +1603,19 @@ const _ovl=document.getElementById("connectOverlay");
 _ovl.addEventListener("click",connectClick);
 _ovl.addEventListener("pointermove",overlayMove);
 _ovl.addEventListener("pointerleave",()=>{document.getElementById("snapDot").style.display="none";});
-document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&connectMode){endConnect();toast("Connexion annulée.");} });
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"&&connectMode){endConnect();toast("Connexion annulée.");return;}
+  if(!editing)return;
+  const t=(e.target&&e.target.tagName||"").toLowerCase();
+  const inField = t==="input"||t==="textarea"||t==="select"||(e.target&&e.target.isContentEditable);
+  // Suppr / Retour arrière → supprimer la sélection (hors champ de saisie).
+  if((e.key==="Delete"||e.key==="Backspace")&&!inField&&selIds.length){ e.preventDefault(); deleteSelection(); return; }
+  if(!(e.ctrlKey||e.metaKey))return;
+  const k=(e.key||"").toLowerCase();
+  if(k==="z"&&!inField){ e.preventDefault(); undo(); }
+  else if(k==="c"&&!inField&&selIds.length){ e.preventDefault(); copySel(); }
+  else if(k==="v"&&!inField&&clipboard.length){ e.preventDefault(); pasteClip(); }
+});
 
 /* ============ VUES (plans multiples) ============ */
 const VIEW_KEYS=["voies","liaisons","aiguilles","signaux","pn","postes","buffers","quais","dbc","prs","rond","km","dirs","bands"];
@@ -1496,7 +1633,7 @@ function contentBounds(){ const xs=[],ys=[];
 function fitContent(){ const b=contentBounds(); fitTo(b.x,b.y,b.w,b.h); }
 function refreshViewSel(){ const sel=document.getElementById("viewSel"); if(!sel)return;
   sel.innerHTML=VIEWS.map((v,i)=>`<option value="${i}" ${i===curView?"selected":""}>${(v.name||("Vue "+(i+1))).replace(/</g,"&lt;")}</option>`).join(""); }
-function afterViewChange(){ editSel=null; if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;}
+function afterViewChange(){ editSel=null; selIds=[]; _lastFocusKey=null; undoStack=[]; if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;}
   build(); buildOverview(); if(editing){renderEditor();renderReglette();} else renderZoneSummary(); refreshCounts(); refreshViewSel(); fitContent(); saveStored(); }
 function loadView(i){ if(i<0||i>=VIEWS.length||i===curView){refreshViewSel();return;}
   VIEWS[curView].state=captureView(); curView=i; applyViewState(VIEWS[i].state); afterViewChange(); }

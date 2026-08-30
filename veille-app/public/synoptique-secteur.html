@@ -2,6 +2,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script>
+// Ce fichier sert à la fois d'artifact (doctype/head fournis) ET de page
+// statique dans l'app (public/synoptique-secteur.html, sans head propre) :
+// on garantit un viewport mobile s'il n'en existe pas déjà (n'affecte pas l'artifact).
+(function(){try{ if(!document.querySelector('meta[name=viewport]')){var m=document.createElement('meta');m.name='viewport';m.content='width=device-width, initial-scale=1, viewport-fit=cover';(document.head||document.documentElement).appendChild(m);} }catch(e){}})();
+</script>
 
 <style>
 :root{
@@ -196,6 +202,9 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
     color:var(--ink);box-shadow:var(--shadow);font-size:17px;cursor:pointer}
   /* Export PNG (tapis 10800×4800) trop lourd pour un mobile → masqué. */
   #exportbtn{display:none}
+  /* Cibles tactiles plus grandes pour le zoom (44px) + pincer-zoomer géré en JS. */
+  .canvas-tools button{width:44px;height:44px;font-size:20px}
+  .canvas-tools{right:10px;bottom:10px;gap:8px}
 }
 
 /* ---------- éditeur WYSIWYG ---------- */
@@ -901,8 +910,26 @@ function vbToClient(x,y){const ctm=syn.getScreenCTM();if(!ctm)return{cx:0,cy:0};
   const pt=syn.createSVGPoint();pt.x=x;pt.y=y;const p=pt.matrixTransform(ctm);return{cx:p.x,cy:p.y};}
 syn.addEventListener("wheel",e=>{e.preventDefault();const p=clientToVB(e);zoomAt(p.x,p.y,e.deltaY>0?1.12:0.89);},{passive:false});
 let drag=null;
-syn.addEventListener("pointerdown",e=>{const ctm=syn.getScreenCTM();drag={x:e.clientX,y:e.clientY,vx:vb.x,vy:vb.y,sx:(ctm&&ctm.a)||1,sy:(ctm&&ctm.d)||1};syn.setPointerCapture(e.pointerId);syn.classList.add("grabbing");});
+// Tactile : suivi des doigts pour le pincer-zoomer (pinch) — mobile/tablette.
+const activePointers=new Map(); let pinch=null;
+syn.addEventListener("pointerdown",e=>{
+  activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(activePointers.size>=2){ // 2e doigt → on passe en mode pincer (annule le pan)
+    const pts=[...activePointers.values()];
+    pinch={d:Math.hypot(pts[1].x-pts[0].x,pts[1].y-pts[0].y)}; drag=null; syn.classList.remove("grabbing");
+    try{syn.setPointerCapture(e.pointerId);}catch(_){}
+    return;
+  }
+  const ctm=syn.getScreenCTM();drag={x:e.clientX,y:e.clientY,vx:vb.x,vy:vb.y,sx:(ctm&&ctm.a)||1,sy:(ctm&&ctm.d)||1};syn.setPointerCapture(e.pointerId);syn.classList.add("grabbing");});
 syn.addEventListener("pointermove",e=>{
+  if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch && activePointers.size>=2){ // pincer-zoomer autour du milieu des deux doigts
+    const pts=[...activePointers.values()];
+    const nd=Math.hypot(pts[1].x-pts[0].x,pts[1].y-pts[0].y);
+    const c=clientToVB({clientX:(pts[0].x+pts[1].x)/2, clientY:(pts[0].y+pts[1].y)/2});
+    if(nd>0 && pinch.d>0) zoomAt(c.x,c.y, pinch.d/nd);
+    pinch.d=nd; return;
+  }
   if(ldrag){if(!ldrag._u){ldrag._u=1;pushUndo();}const p=clientToVB(e);const ndx=Math.round((ldrag.dx+(p.x-ldrag.px))/2)*2,ndy=Math.round((ldrag.dy+(p.y-ldrag.py))/2)*2;
     ldrag.ndx=ndx;ldrag.ndy=ndy;ldrag.g.setAttribute("transform",`translate(${ldrag.ax+ndx} ${ldrag.ay+ndy})`);return;}
   if(ndrag){if(!ndrag._u){ndrag._u=1;pushUndo();}const p=clientToVB(e);const x=Math.round(p.x/2)*2,y=Math.round(p.y/2)*2;
@@ -914,14 +941,15 @@ syn.addEventListener("pointermove",e=>{
     odrag.g.setAttribute("transform",`translate(${tx-odrag.ox} ${ty-odrag.oy})`); return;}
   if(!drag)return;
   vb.x=drag.vx-(e.clientX-drag.x)/drag.sx; vb.y=drag.vy-(e.clientY-drag.y)/drag.sy; clampVB(); setVB();});
-syn.addEventListener("pointerup",()=>{
+syn.addEventListener("pointerup",e=>{
+  activePointers.delete(e.pointerId); if(activePointers.size<2)pinch=null;
   if(ldrag){const ref=findRef(ldrag.id);if(ref){ref.obj.ldx=ldrag.ndx;ref.obj.ldy=ldrag.ndy;}ldrag=null;syncJSON();return;}
   if(ndrag){ndrag=null;build();reHighlight();syncJSON();return;}
   if(odrag){const ref=findRef(odrag.id);
     if(ref){ref.obj.x=(odrag.tx!=null?odrag.tx:odrag.ox); ref.obj.y=(odrag.ty!=null?odrag.ty:odrag.oy);}
     const id=odrag.id; odrag=null; setSel([id]); build(); reHighlight(); renderEditor(); syncJSON(); return;}
   drag=null;syn.classList.remove("grabbing");});
-syn.addEventListener("pointercancel",()=>{drag=null;syn.classList.remove("grabbing");});
+syn.addEventListener("pointercancel",e=>{activePointers.delete(e.pointerId); if(activePointers.size<2)pinch=null; drag=null;syn.classList.remove("grabbing");});
 document.getElementById("zin").onclick=()=>zoomAt(vb.x+vb.w/2,vb.y+vb.h/2,0.8);
 document.getElementById("zout").onclick=()=>zoomAt(vb.x+vb.w/2,vb.y+vb.h/2,1.25);
 document.getElementById("zreset").onclick=()=>{vb={...VB0};setVB();};

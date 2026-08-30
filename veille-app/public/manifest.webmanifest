@@ -5,7 +5,7 @@
   "start_url": "/procedures",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#EDEFEC",
   "theme_color": "#1B2330",
   "lang": "fr",

@@ -114,6 +114,7 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
 .leg-line span.k{color:var(--muted);margin-left:auto;font-size:11px}
 
 .canvaswrap{position:relative;background:var(--canvas-bg);min-height:0;overflow:hidden}
+.canvaswrap:fullscreen,.canvaswrap:-webkit-full-screen{width:100vw;height:100vh;background:var(--canvas-bg)}
 #syn{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
 #syn.grabbing{cursor:grabbing}
 .canvas-tools{position:absolute;right:14px;bottom:14px;display:flex;flex-direction:column;gap:6px;z-index:3}
@@ -205,6 +206,18 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
   /* Cibles tactiles plus grandes pour le zoom (44px) + pincer-zoomer géré en JS. */
   .canvas-tools button{width:44px;height:44px;font-size:20px}
   .canvas-tools{right:10px;bottom:10px;gap:8px}
+  /* Barre d'outils condensée (gagne de la hauteur pour le plan). */
+  .topbar{padding:7px 12px;gap:8px}
+  .topbar h1{font-size:15px;line-height:1.05}
+}
+/* Écrans courts (téléphone en paysage) : barre encore plus compacte. */
+@media(max-height:520px){
+  .topbar{padding:5px 10px;gap:6px}
+  .topbar h1{font-size:14px;line-height:1}
+  .brand .sub{display:none}
+  .searchbox{flex:0 1 170px}
+  .seg button{padding:5px 9px}
+  .canvas-tools button{width:40px;height:40px}
 }
 
 /* ---------- éditeur WYSIWYG ---------- */
@@ -316,6 +329,7 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
       <div id="snapDot"></div>
       <div id="connectStart"></div>
       <div class="canvas-tools">
+        <button id="fsbtn" aria-label="Plein écran" title="Plein écran (idéal sur mobile)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3"/></svg></button>
         <button id="zin" aria-label="Zoom avant">+</button>
         <button id="zout" aria-label="Zoom arrière">−</button>
         <button id="zreset" aria-label="Recadrer" title="Recadrer" style="font-size:13px">⤢</button>
@@ -953,6 +967,23 @@ syn.addEventListener("pointercancel",e=>{activePointers.delete(e.pointerId); if(
 document.getElementById("zin").onclick=()=>zoomAt(vb.x+vb.w/2,vb.y+vb.h/2,0.8);
 document.getElementById("zout").onclick=()=>zoomAt(vb.x+vb.w/2,vb.y+vb.h/2,1.25);
 document.getElementById("zreset").onclick=()=>{vb={...VB0};setVB();};
+/* Plein écran du CANVAS — sur mobile, donne tout l'écran au plan (masque le
+   chrome de l'app + la barre d'outils). Nécessite allow="fullscreen" sur l'iframe. */
+(function(){
+  const fs=document.getElementById("fsbtn"); if(!fs)return;
+  const wrap=document.querySelector(".canvaswrap");
+  const req=el=>(el.requestFullscreen||el.webkitRequestFullscreen||el.msRequestFullscreen);
+  const exit=()=>(document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen);
+  const cur=()=>document.fullscreenElement||document.webkitFullscreenElement||null;
+  fs.addEventListener("click",()=>{
+    try{ if(!cur()){ const r=req(wrap); if(r)r.call(wrap).catch(()=>toast("Plein écran indisponible ici.")); }
+      else { const x=exit(); if(x)x.call(document); } }
+    catch(e){ toast("Plein écran indisponible ici."); }
+  });
+  const onChange=()=>{ document.body.classList.toggle("fs", !!cur()); setTimeout(()=>fitContent(),60); };
+  document.addEventListener("fullscreenchange",onChange);
+  document.addEventListener("webkitfullscreenchange",onChange);
+})();
 
 /* ---------- search (multi-résultats : Entrée = suivant · Maj+Entrée = précédent) ---------- */
 let searchState={q:"",view:-1,hits:[],idx:-1};

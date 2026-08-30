@@ -21,6 +21,8 @@ export default function SynoptiquePage() {
         title="Synoptique Secteur — plan de voies du secteur Veille"
         className="block w-full h-full border-0"
         loading="lazy"
+        allow="fullscreen"
+        allowFullScreen
       />
     </div>
   );

@@ -69,6 +69,12 @@ h1,h2,h3{font-family:"Barlow Semi Condensed",sans-serif;margin:0;font-weight:600
   border:1px solid var(--line);background:var(--panel-2);color:var(--ink)}
 .searchbox input:focus{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
 .searchbox svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--muted)}
+.searchbox input{padding-right:30px}
+.search-clear{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:23px;height:23px;
+  border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:19px;line-height:1;
+  border-radius:6px;display:none;place-items:center}
+.search-clear:hover{color:var(--ink);background:var(--panel)}
+.searchbox.has-val .search-clear{display:grid}
 .iconbtn{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:8px;
   border:1px solid var(--line);background:var(--panel-2);color:var(--ink);cursor:pointer}
 .iconbtn:hover{border-color:var(--accent)}
@@ -153,6 +159,12 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
 .kmtick text{fill:var(--track-dim);font-family:"IBM Plex Mono";font-size:9.5px}
 .dir text{fill:var(--muted);font-family:"Barlow Semi Condensed";font-weight:600;font-size:12px;letter-spacing:.03em}
 .zone-lbl{fill:var(--track-dim);font-family:"Barlow Semi Condensed";font-weight:600;font-size:12px}
+/* Secteurs de graissage (consigne Entretien des IS) — rectangles surlignés */
+.grzone rect.gz{stroke-width:1.6;stroke-dasharray:6 4;rx:8}
+.grzone text.gzt{font-family:"Barlow Semi Condensed";font-weight:700;font-size:13px;paint-order:stroke;stroke:var(--canvas-bg);stroke-width:3px}
+.grzone .sel-ring{fill:none;stroke:var(--accent);stroke-width:2;opacity:0}
+.grzone.sel .sel-ring{opacity:1}
+.grzone.sel rect.gz{stroke:var(--accent);stroke-dasharray:none;stroke-width:2.4}
 .limite line{stroke:var(--sig-c);stroke-width:1.4;stroke-dasharray:5 4;opacity:.65}
 .limite text{fill:var(--sig-c);font-family:"Barlow Semi Condensed";font-weight:700;font-size:11px;letter-spacing:.03em}
 .selectable.sel .trk,.selectable.sel .liaison{stroke:var(--accent);stroke-width:4}
@@ -185,11 +197,25 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
   box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.2s;z-index:20;max-width:80vw}
 .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 
+/* Fermeture des tiroirs mobiles : fond cliquable (scrim) + bouton ✕.
+   Masqués sur desktop ; activés dans les media queries mobiles ci-dessous. */
+.rail-scrim{position:fixed;inset:0;background:rgba(10,15,22,.45);z-index:14;display:none;
+  -webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px)}
+.rail-close{display:none;position:absolute;top:9px;width:34px;height:34px;border-radius:8px;
+  border:1px solid var(--line);background:var(--panel-2);color:var(--ink);cursor:pointer;
+  align-items:center;justify-content:center;font-size:22px;line-height:1;z-index:2}
+.rail.left .rail-close{right:9px}
+.rail.right .rail-close{right:9px}
+.rail-close:hover{border-color:var(--accent);color:var(--accent)}
+.rail.right .railpad{position:relative}
+
 @media(max-width:1080px){
   .main{grid-template-columns:206px 1fr}
   .rail.right{position:fixed;right:0;top:0;bottom:0;width:300px;transform:translateX(105%);
     transition:transform .25s;z-index:15;box-shadow:var(--shadow)}
   .rail.right.open{transform:none}
+  .rail.right .rail-close{display:flex}
+  body:has(.rail.right.open) .rail-scrim{display:block}
 }
 .rail-toggle{display:none}
 @media(max-width:720px){
@@ -197,6 +223,9 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
   .rail.left{position:fixed;left:0;top:0;bottom:0;width:236px;transform:translateX(-105%);
     transition:transform .25s;z-index:15;background:var(--panel);box-shadow:var(--shadow)}
   .rail.left.open{transform:none}
+  .rail.left .rail-close{display:flex}
+  body:has(.rail.left.open) .rail-scrim{display:block}
+  .rail.left .railpad{padding-top:52px}
   .brand .sub{display:none}
   .rail-toggle{display:grid;place-items:center;position:absolute;left:10px;top:10px;z-index:16;
     width:38px;height:38px;border-radius:9px;background:var(--panel);border:1px solid var(--line);
@@ -285,9 +314,10 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
     <button id="viewAdd" class="iconbtn" title="Nouvelle vue" aria-label="Nouvelle vue" style="font-size:18px;font-family:'Barlow Semi Condensed'">＋</button>
     <button id="viewRen" class="iconbtn" title="Renommer la vue" aria-label="Renommer la vue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
     <div class="spacer"></div>
-    <div class="searchbox">
+    <div class="searchbox" id="searchbox">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
       <input id="search" placeholder="Aiguille 12, C 14, Cv 8…" aria-label="Rechercher une installation">
+      <button id="searchClear" class="search-clear" type="button" aria-label="Effacer la recherche" title="Effacer">×</button>
     </div>
     <div class="seg" role="group" aria-label="Niveau de détail">
       <button data-detail="secteur" aria-pressed="false">Secteur</button>
@@ -307,6 +337,7 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
 
   <div class="main">
     <aside class="rail left" id="railLeft">
+      <button class="rail-close" data-closerail aria-label="Fermer les calques">×</button>
       <div class="railpad">
         <h3>Calques</h3>
         <div id="layers"></div>
@@ -337,9 +368,11 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
     </section>
 
     <aside class="rail right" id="railRight">
+      <button class="rail-close" data-closerail aria-label="Fermer le panneau">×</button>
       <div class="railpad" id="inspector"></div>
     </aside>
   </div>
+  <div class="rail-scrim" id="railScrim" aria-hidden="true"></div>
 </div>
 <div class="toast" id="toast"></div>
 <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
@@ -465,6 +498,17 @@ function defaultSecteur(){return JSON.parse(JSON.stringify(SECTEUR));}
 function emptySecteur(){return {kmMin:526,kmMax:636,postes:[],view:[530,542]};}
 
 /* ============================================================ RENDER ============ */
+// Palette des secteurs de graissage (fond translucide + bord). Clés stables
+// pour l'éditeur ; on retombe sur "grey" si la couleur est inconnue.
+const ZONE_COLORS={
+  blue:  {fill:"#3f7fd6", stroke:"#3f7fd6"},
+  orange:{fill:"#e08a2b", stroke:"#c9761c"},
+  red:   {fill:"#dc5b57", stroke:"#c94641"},
+  green: {fill:"#3a9d6b", stroke:"#2f8a5c"},
+  purple:{fill:"#8a6bd0", stroke:"#7a5fc0"},
+  grey:  {fill:"#8794a3", stroke:"#6f7c8b"},
+};
+const zoneColor=c=>ZONE_COLORS[c]||ZONE_COLORS.grey;
 const SVGNS="http://www.w3.org/2000/svg";
 const el=(t,a={})=>{const e=document.createElementNS(SVGNS,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
 const syn=document.getElementById("syn");
@@ -480,8 +524,9 @@ const layerDefs=[
   {id:"dbc",   name:"Détect. boîte chaude", sw:"var(--dbc)", get:()=>(DATA.dbc||[]).length},
   {id:"prs",   name:"Boutons PRS", sw:"var(--prs)", get:()=>(DATA.prs||[]).length},
   {id:"rond",  name:"Ronds (lettres)", sw:"var(--rond)", get:()=>(DATA.rond||[]).length},
+  {id:"zones", name:"Secteurs graissage", sw:"#e08a2b", get:()=>(DATA.zones||[]).length},
 ];
-const layerState={voies:1,buf:1,aig:1,sig:1,pn:1,poste:1,km:1,quai:1,dbc:1,prs:1,rond:1};
+const layerState={voies:1,buf:1,aig:1,sig:1,pn:1,poste:1,km:1,quai:1,dbc:1,prs:1,rond:1,zones:1};
 const groups={};
 
 function build(){
@@ -497,6 +542,19 @@ function build(){
     groups.km.appendChild(g);
   });
   syn.appendChild(groups.km);
+
+  // SECTEURS DE GRAISSAGE (zones surlignées) — rendus en arrière-plan, sous les voies
+  groups.zones=el("g",{class:"layer-zones"});
+  (DATA.zones||[]).forEach(z=>{
+    const c=zoneColor(z.color); const w=z.w||200, hh=z.h||120;
+    const g=el("g",{class:"grzone selectable",id:"g-"+z.id});
+    g.appendChild(el("rect",{class:"sel-ring",x:z.x-3,y:z.y-3,width:w+6,height:hh+6,rx:10}));
+    g.appendChild(el("rect",{class:"gz",x:z.x,y:z.y,width:w,height:hh,fill:c.fill,"fill-opacity":.13,stroke:c.stroke}));
+    const t=el("text",{class:"gzt",x:z.x+8,y:z.y+16,fill:c.stroke}); t.textContent=z.txt||""; g.appendChild(t);
+    wire(g,{kind:"zone",...z});
+    groups.zones.appendChild(g);
+  });
+  syn.appendChild(groups.zones);
 
   // directions + zone bands + limite
   const gDir=el("g",{class:"dir"});
@@ -706,6 +764,7 @@ function tipText(o){
   if(o.kind==="dbc")return "Détecteur de boîte chaude"+(o.name&&o.name!=="DBC"?" "+o.name:"")+(o.km?" · km "+o.km:"");
   if(o.kind==="prs")return "Bouton PRS"+((o.txt!=null?o.txt:o.name)?" — "+(o.txt!=null?o.txt:o.name):"");
   if(o.kind==="rond")return "Rond « "+(o.txt||"")+" »";
+  if(o.kind==="zone")return "Secteur de graissage "+(o.txt||"");
   if(o.kind==="butoir")return "Butoir (heurtoir)";
   if(o.kind==="km")return "Repère km "+o.lbl;
   if(o.kind==="dir")return "Direction : "+o.txt;
@@ -766,6 +825,12 @@ function renderInspector(o){
     html=chip("Décor","var(--track-dim)","#fff")
       +`<div class="insp-title">${nm}</div><div class="insp-sub">Élément d'habillage — passez en mode édition pour le déplacer ou le supprimer</div>`
       +field("Texte", o.lbl||o.txt||"");
+  }else if(o.kind==="zone"){
+    const cc=zoneColor(o.color);
+    html=chip("Secteur graissage",cc.stroke,"#fff")
+      +`<div class="insp-title">${o.txt||"Secteur"}</div><div class="insp-sub">Secteur de graissage — consigne Entretien des IS Badan</div>`
+      +field("Périodicité","4 semaines")
+      +field("Étendue","x "+o.x+" · y "+o.y+" · "+(o.w||0)+"×"+(o.h||0));
   }else{
     const secname={"l-800":"800000 — LR 698,9 · Le Teil / Givors Canal","l-797":"797000 — Rac Peyraud / St Rambert (entrée)","l-circ":"Peyraud Voie de circulation","racc-sud2":"Peyraud Rac Nord (boucle)","racc-sud":"Peyraud Rac Sud","trk":"Voie de service / communication"}[o.cls]||"—";
     html=chip(o.kind==="liaison"?"Raccordement":"Voie","var(--accent)","#fff")
@@ -1013,6 +1078,21 @@ document.getElementById("search").addEventListener("keydown",e=>{
     : hit.lab);
 });
 
+/* ---------- recherche : bouton d'effacement (✕) + Échap ---------- */
+(function(){
+  var inp=document.getElementById("search"), box=document.getElementById("searchbox"),
+      clr=document.getElementById("searchClear");
+  if(!inp||!box)return;
+  function sync(){ box.classList.toggle("has-val", inp.value.length>0); }
+  function reset(){ inp.value=""; sync(); searchState={q:"",view:-1,hits:[],idx:-1};
+    if(window.closeRails)window.closeRails(); }
+  inp.addEventListener("input",sync);
+  inp.addEventListener("keydown",function(e){ if(e.key==="Escape"){ e.stopPropagation();
+    if(inp.value){reset(); inp.focus();} else { inp.blur(); if(window.closeRails)window.closeRails(); } } });
+  if(clr)clr.addEventListener("click",function(){ reset(); inp.focus(); });
+  sync();
+})();
+
 /* ---------- seg + theme ---------- */
 document.querySelectorAll(".seg button").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".seg button").forEach(x=>x.setAttribute("aria-pressed","false"));
@@ -1210,14 +1290,14 @@ function connectClick(e){
   build(); reHighlight(); renderEditor(); syncJSON();
   toast("Jonction créée vers "+(s?s.label:"point libre")+" — ajustez-la en glissant ses nœuds."); }
 const clone=o=>JSON.parse(JSON.stringify(o));
-const EDITABLE=["voies","liaisons","aiguilles","signaux","pn","postes","buffers","quais","dbc","prs","rond"];
+const EDITABLE=["voies","liaisons","aiguilles","signaux","pn","postes","buffers","quais","dbc","prs","rond","zones"];
 const DEFAULTS=clone({voies:DATA.voies,liaisons:DATA.liaisons,aiguilles:DATA.aiguilles,
-  signaux:DATA.signaux,pn:DATA.pn,postes:DATA.postes,buffers:DATA.buffers,quais:DATA.quais||[],dbc:DATA.dbc||[],prs:DATA.prs||[],rond:DATA.rond||[]});
+  signaux:DATA.signaux,pn:DATA.pn,postes:DATA.postes,buffers:DATA.buffers,quais:DATA.quais||[],dbc:DATA.dbc||[],prs:DATA.prs||[],rond:DATA.rond||[],zones:DATA.zones||[]});
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
 const railRight=document.getElementById("railRight");
 
 function findRef(id){
-  const map=[["voies","voie"],["liaisons","liaison"],["aiguilles","aiguille"],["signaux","signal"],["pn","pn"],["postes","poste"],["buffers","butoir"],["quais","quai"],["dbc","dbc"],["prs","prs"],["rond","rond"],["km","km"],["dirs","dir"],["bands","band"]];
+  const map=[["voies","voie"],["liaisons","liaison"],["aiguilles","aiguille"],["signaux","signal"],["pn","pn"],["postes","poste"],["buffers","butoir"],["quais","quai"],["dbc","dbc"],["prs","prs"],["rond","rond"],["zones","zone"],["km","km"],["dirs","dir"],["bands","band"]];
   for(const [list,kind] of map){const arr=DATA[list]; if(!arr)continue; const obj=arr.find(o=>o.id===id); if(obj)return{list,kind,obj};}
   if(DATA.limite&&DATA.limite.id===id)return{list:"limite",kind:"limite",obj:DATA.limite};
   return null;
@@ -1439,9 +1519,10 @@ function addObject(kind){
   else if(kind==="km"){o={id:uid("km"),x:cx,lbl:"000,0"};list="km";}
   else if(kind==="dir"){o={id:uid("dir"),x:cx,y:cy,txt:"→ Direction",anchor:"start"};list="dirs";}
   else if(kind==="band"){o={id:uid("band"),x:cx,y:cy,txt:"Libellé"};list="bands";}
+  else if(kind==="zone"){o={id:uid("z"),txt:"BAD",x:cx-120,y:cy-70,w:240,h:140,color:"blue"};list="zones";}
   if(!DATA[list])DATA[list]=[];
   DATA[list].push(o);
-  const kmap={aig:"aiguille",c:"signal",cv:"signal",pn:"pn",poste:"poste",voie:"voie",butoir:"butoir",quai:"quai",dbc:"dbc",prs:"prs",rond:"rond",km:"km",dir:"dir",band:"band"};
+  const kmap={aig:"aiguille",c:"signal",cv:"signal",pn:"pn",poste:"poste",voie:"voie",butoir:"butoir",quai:"quai",dbc:"dbc",prs:"prs",rond:"rond",zone:"zone",km:"km",dir:"dir",band:"band"};
   editSel={list,kind:kmap[kind],obj:o}; selIds=[o.id]; _lastFocusKey=null;
   build(); reHighlight(); renderEditor(); syncJSON();
   toast("Objet ajouté — glissez-le à sa place.");
@@ -1455,6 +1536,7 @@ function shiftAll(dx,dy){
   (DATA.km||[]).forEach(t=>{ if(Array.isArray(t))t[0]+=dx; else t.x+=dx; });
   (DATA.dirs||[]).forEach(d=>{ d.x+=dx; d.y+=dy; });
   (DATA.bands||[]).forEach(b=>{ b.x+=dx; b.y+=dy; });
+  (DATA.zones||[]).forEach(z=>{ z.x+=dx; z.y+=dy; });
   if(DATA.limite){ DATA.limite.x+=dx; DATA.limite.y0+=dy; DATA.limite.y1+=dy; }
   build(); reHighlight(); syncJSON();
 }
@@ -1508,6 +1590,7 @@ function editorFields(ref){
   else if(k==="km")h+="Repère km"; else if(k==="dir")h+="Direction"; else if(k==="band")h+="Libellé"; else if(k==="limite")h+="Limite secteur";
   else if(k==="quai")h+="Quai"; else if(k==="dbc")h+="Détecteur boîte chaude";
   else if(k==="prs")h+="Bouton PRS"; else if(k==="rond")h+="Rond (lettres)";
+  else if(k==="zone")h+="Secteur "+(o.txt||"");
   else h+=o.name||"Voie";
   h+=`</span><button class="ed-del" id="edDel">Supprimer</button></div>`;
   if(k==="aiguille")   h+=edTxt("n","Numéro",o.n)+edTxt("km","Point km",o.km)+edTxt("voie","Voie",o.voie)+edTxt("poste","Poste",o.poste)+edXY(o);
@@ -1529,6 +1612,10 @@ function editorFields(ref){
   else if(k==="dbc") h+=edTxt("name","Nom / n°",o.name)+edTxt("km","Point km",o.km||"")+`<div class="insp-sub">Détecteur de boîte chaude (DBC) — posez-le sur la voie surveillée.</div>`+edXY(o);
   else if(k==="prs") h+=edTxt("txt","Lettres",o.txt!=null?o.txt:(o.name||""))+edSel("style","Style",o.style||(o.dark?"dark":"light"),[["light","Blanc (texte noir)"],["dark","Noir (texte blanc)"],["yellow","Jaune (texte noir)"]])+edSel("deco","Trait",o.deco||"",[["","Aucun"],["under","Souligné"],["over","Barre au-dessus"]])+edNum("size","Taille (px)",o.size||22)+`<div class="ed-field"><label>Angle (°)</label><input type="number" step="15" data-k="rot" value="${o.rot||0}"></div>`+`<div class="insp-sub">Bouton de PRS — carré à lettres (blanc / noir / jaune).</div>`+edXY(o);
   else if(k==="rond") h+=edTxt("txt","Lettres",o.txt)+edNum("r","Rayon (px)",o.r||15)+`<div class="insp-sub">Rond opaque contenant des lettres (fond plein).</div>`+edXY(o);
+  else if(k==="zone") h+=edTxt("txt","Nom du secteur",o.txt)
+    +edSel("color","Couleur",o.color||"blue",[["blue","Bleu"],["orange","Orange"],["red","Rouge"],["green","Vert"],["purple","Violet"],["grey","Gris (annonce)"]])
+    +`<div class="ed-row">${edNum("w","Largeur",o.w||200)}${edNum("h","Hauteur",o.h||120)}</div>`
+    +`<div class="insp-sub">Secteur de graissage (consigne IS). Le repère (x,y) est le coin haut-gauche ; glissez le rectangle pour le déplacer.</div>`+edXY(o);
   else if(k==="km") h+=edTxt("lbl","Texte km",o.lbl)+edNum("x","Position X",o.x);
   else if(k==="dir") h+=edTxt("txt","Texte",o.txt)+edSel("anchor","Alignement",o.anchor||"start",[["start","gauche"],["middle","centré"],["end","droite"]])+edXY(o);
   else if(k==="band") h+=edTxt("txt","Texte",o.txt)+edXY(o);
@@ -1567,6 +1654,7 @@ function renderEditor(){
   <div class="ed-tool">
     <button data-add="prs">+ Bouton PRS</button>
     <button data-add="rond">+ Rond (lettres)</button>
+    <button data-add="zone">+ Secteur graissage</button>
   </div>
   <div class="ed-tool"><span style="align-self:center;font-size:11px;color:var(--muted)">Décaler tout&nbsp;:</span>
     <button id="shU" title="Monter">↑</button><button id="shD" title="Descendre">↓</button>
@@ -1683,7 +1771,7 @@ document.addEventListener("keydown",e=>{
 });
 
 /* ============ VUES (plans multiples) ============ */
-const VIEW_KEYS=["voies","liaisons","aiguilles","signaux","pn","postes","buffers","quais","dbc","prs","rond","km","dirs","bands"];
+const VIEW_KEYS=["voies","liaisons","aiguilles","signaux","pn","postes","buffers","quais","dbc","prs","rond","zones","km","dirs","bands"];
 let VIEWS=[], curView=0;
 function emptyViewState(){ const s={limite:null,secteur:emptySecteur(),vb0:{x:-200,y:-120,w:2500,h:1350}}; VIEW_KEYS.forEach(k=>s[k]=[]); return s; }
 function captureView(){ const s={}; VIEW_KEYS.forEach(k=>s[k]=DATA[k]); s.limite=DATA.limite||null; s.secteur=DATA.secteur; s.vb0={x:VB0.x,y:VB0.y,w:VB0.w,h:VB0.h}; return s; }
@@ -1692,6 +1780,7 @@ function applyViewState(s){ VIEW_KEYS.forEach(k=>{ DATA[k]=Array.isArray(s[k])?s
 function contentBounds(){ const xs=[],ys=[];
   DATA.voies.concat(DATA.liaisons).forEach(v=>v.pts&&v.pts.forEach(p=>{xs.push(p[0]);ys.push(p[1]);}));
   DATA.aiguilles.concat(DATA.signaux,DATA.pn,DATA.postes,DATA.buffers,DATA.quais||[],DATA.dbc||[],DATA.prs||[],DATA.rond||[]).forEach(o=>{if(o.x!=null){xs.push(o.x);ys.push(o.y);}});
+  (DATA.zones||[]).forEach(z=>{if(z.x!=null){xs.push(z.x,z.x+(z.w||0));ys.push(z.y,z.y+(z.h||0));}});
   if(!xs.length)return {x:VB0.x+40,y:VB0.y+40,w:VB0.w-80,h:VB0.h-80};
   const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
   return {x:x0,y:y0,w:Math.max(200,x1-x0),h:Math.max(120,y1-y0)}; }
@@ -1741,11 +1830,27 @@ else if(curView===0) fitTo(400,70,1040,470); else fitContent();
 // (remplace la graine embarquée si un plan existe). Sans effet hors application.
 serverLoad();
 window.addEventListener("resize",()=>setVB());
-/* Mobile (≤720px) : bouton ☰ pour ouvrir/fermer le tiroir des calques (sinon inaccessible). */
+/* Mobile : ouverture/fermeture des tiroirs (calques à gauche, inspecteur à droite).
+   Fermeture par ✕, par tap sur le scrim, par la touche Échap, ou en touchant le plan.
+   Corrige le blocage mobile : sans ces sorties, les tiroirs restaient ouverts. */
 (function(){
-  var t=document.getElementById("railToggle"), rl=document.getElementById("railLeft"); if(!t||!rl)return;
-  t.addEventListener("click",function(e){ e.stopPropagation(); rl.classList.toggle("open"); });
-  document.getElementById("syn").addEventListener("pointerdown",function(){ rl.classList.remove("open"); });
+  var t=document.getElementById("railToggle"),
+      rl=document.getElementById("railLeft"),
+      rr=document.getElementById("railRight"),
+      scrim=document.getElementById("railScrim");
+  function closeRails(){ if(rl)rl.classList.remove("open"); if(rr)rr.classList.remove("open"); }
+  window.closeRails=closeRails;
+  if(t&&rl){ t.addEventListener("click",function(e){ e.stopPropagation();
+    var willOpen=!rl.classList.contains("open"); closeRails(); if(willOpen)rl.classList.add("open"); }); }
+  document.getElementById("syn").addEventListener("pointerdown",closeRails);
+  if(scrim)scrim.addEventListener("click",closeRails);
+  document.querySelectorAll("[data-closerail]").forEach(function(b){
+    b.addEventListener("click",function(e){ e.stopPropagation(); closeRails(); }); });
+  document.addEventListener("keydown",function(e){
+    if(e.key==="Escape" && (( rl&&rl.classList.contains("open"))||(rr&&rr.classList.contains("open")))){
+      e.stopPropagation(); closeRails();
+    }
+  },true);
 })();
 /* Bouton « ‹ Veille » : visible uniquement quand le synoptique est intégré
    dans l'app Veille (iframe même origine). En artifact/standalone (origine

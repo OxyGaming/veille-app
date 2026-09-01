@@ -75,6 +75,17 @@ h1,h2,h3{font-family:"Barlow Semi Condensed",sans-serif;margin:0;font-weight:600
   border-radius:6px;display:none;place-items:center}
 .search-clear:hover{color:var(--ink);background:var(--panel)}
 .searchbox.has-val .search-clear{display:grid}
+/* Navigateur de résultats de recherche — flottant, au-dessus du panneau (mobile) */
+.search-nav{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);z-index:17;display:none;
+  align-items:center;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:22px;
+  padding:4px 6px;box-shadow:var(--shadow)}
+.search-nav.on{display:flex}
+.search-nav button{width:34px;height:34px;border:0;background:transparent;color:var(--ink);cursor:pointer;
+  border-radius:50%;font-size:20px;line-height:1;display:grid;place-items:center}
+.search-nav button:hover{background:var(--panel-2);color:var(--accent)}
+.search-nav .sn-count{font-size:13px;font-weight:600;min-width:52px;text-align:center;color:var(--muted);padding:0 4px}
+.search-nav .sn-close{font-size:17px;color:var(--muted)}
+.search-nav:not(.multi) .sn-prev,.search-nav:not(.multi) .sn-next{display:none}
 .iconbtn{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:8px;
   border:1px solid var(--line);background:var(--panel-2);color:var(--ink);cursor:pointer}
 .iconbtn:hover{border-color:var(--accent)}
@@ -365,6 +376,12 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
         <button id="zout" aria-label="Zoom arrière">−</button>
         <button id="zreset" aria-label="Recadrer" title="Recadrer" style="font-size:13px">⤢</button>
       </div>
+      <div class="search-nav" id="searchNav" aria-hidden="true">
+        <button class="sn-prev" type="button" aria-label="Résultat précédent" title="Précédent (Maj+Entrée)">‹</button>
+        <span class="sn-count mono">0 / 0</span>
+        <button class="sn-next" type="button" aria-label="Résultat suivant" title="Suivant (Entrée)">›</button>
+        <button class="sn-close" type="button" aria-label="Fermer la navigation des résultats">×</button>
+      </div>
     </section>
 
     <aside class="rail right" id="railRight">
@@ -578,9 +595,16 @@ function build(){
     const d=toPath(v.pts,v.curve);
     const g=el("g",{class:"selectable",id:"g-"+v.id});
     const colored=v.cls.startsWith("l-")||v.cls.startsWith("racc");
-    const stroke=colored?`var(--${v.cls})`:"var(--track)";
-    if(colored) g.appendChild(el("path",{class:isLia?"liaison":"voie",d,stroke,"stroke-width":7,"stroke-opacity":.20,fill:"none"}));
-    g.appendChild(el("path",{class:isLia?"liaison":"voie trk",d,...(isLia&&colored?{stroke}:{})}));
+    const baseStroke=colored?`var(--${v.cls})`:"var(--track)";
+    // couleur perso (v.color, hex) et épaisseur perso (v.w) prioritaires
+    const custom=v.color||null;
+    const stroke=custom||baseStroke;
+    const width=(v.w!=null&&v.w!=="")?+v.w:(isLia?2.4:3);
+    // halo coloré des sections ODICEO (seulement sans couleur perso)
+    if(colored && !custom) g.appendChild(el("path",{class:isLia?"liaison":"voie",d,stroke:baseStroke,"stroke-width":width+4,"stroke-opacity":.20,fill:"none"}));
+    const mainAttrs={class:isLia?"liaison":"voie trk",d,"stroke-width":width};
+    if(custom||(isLia&&colored)) mainAttrs.stroke=stroke;
+    g.appendChild(el("path",mainAttrs));
     const hit=el("path",{class:"voie hit",d}); g.appendChild(hit);
     hit.addEventListener("dblclick",ev=>{ if(editing){ev.stopPropagation(); selectForEdit({id:v.id}); insertNode(v,clientToVB(ev));} });
     wire(g,{kind:isLia?"liaison":"voie",...v,color:stroke});
@@ -1050,33 +1074,62 @@ document.getElementById("zreset").onclick=()=>{vb={...VB0};setVB();};
   document.addEventListener("webkitfullscreenchange",onChange);
 })();
 
-/* ---------- search (multi-résultats : Entrée = suivant · Maj+Entrée = précédent) ---------- */
+/* ---------- search (multi-résultats) ----------
+   Entrée = suivant · Maj+Entrée = précédent (clavier). Sur mobile, le clavier
+   n'a pas de Maj et le panneau d'inspection couvre le champ : un navigateur
+   tactile ‹ n/N › flottant (au-dessus du panneau) permet de passer d'un
+   résultat à l'autre au doigt. */
 let searchState={q:"",view:-1,hits:[],idx:-1};
-document.getElementById("search").addEventListener("keydown",e=>{
-  if(e.key!=="Enter")return; e.preventDefault();
-  const raw=e.target.value.trim(); const q=raw.toLowerCase().replace(/\s/g,""); if(!q)return;
-  const all=[...DATA.aiguilles.map(a=>({g:"g-"+a.id,lab:"Aiguille "+a.n,k:["aiguille "+a.n,a.n],x:a.x,y:a.y,o:{kind:"aiguille",...a}})),
+function searchIndex(){
+  return [...DATA.aiguilles.map(a=>({g:"g-"+a.id,lab:"Aiguille "+a.n,k:["aiguille "+a.n,a.n],x:a.x,y:a.y,o:{kind:"aiguille",...a}})),
     ...DATA.signaux.map(s=>({g:"g-"+s.id,lab:s.lbl,k:[s.lbl.toLowerCase(),s.id.toLowerCase()],x:s.x,y:s.y,o:{kind:"signal",...s}})),
     ...DATA.pn.map(p=>({g:"g-"+p.id,lab:p.lbl,k:[p.lbl.toLowerCase()],x:p.x,y:p.y,o:{kind:"pn",...p}})),
     ...DATA.dbc.map(d=>({g:"g-"+d.id,lab:d.name||"DBC",k:[(d.name||"").toLowerCase(),"dbc"],x:d.x,y:d.y,o:{kind:"dbc",...d}})),
     ...DATA.postes.map(p=>({g:"g-"+p.id,lab:p.name,k:[p.name.toLowerCase()],x:p.x,y:p.y,o:{kind:"poste",...p}}))];
-  // Nouvelle requête (ou changement de vue) : on (re)calcule la liste des résultats.
-  if(q!==searchState.q || curView!==searchState.view){
-    searchState.q=q; searchState.view=curView;
-    searchState.hits=all.filter(a=>a.k.some(k=>k.replace(/\s/g,"").includes(q)));
-    searchState.idx=-1;
-  }
+}
+function renderSearchNav(){
+  const n=document.getElementById("searchNav"); if(!n)return;
   const hits=searchState.hits;
-  if(!hits.length){ toast("Aucune installation « "+raw+" » dans ce périmètre."); return; }
-  const dir=e.shiftKey?-1:1;
+  if(hits.length>=1){
+    const c=n.querySelector(".sn-count"); if(c)c.textContent=(searchState.idx+1)+" / "+hits.length;
+    n.classList.toggle("multi",hits.length>1);
+    n.classList.add("on");
+  } else n.classList.remove("on");
+}
+function hideSearchNav(){ const n=document.getElementById("searchNav"); if(n)n.classList.remove("on"); }
+function gotoHit(dir){
+  const hits=searchState.hits; if(!hits.length)return;
   searchState.idx=(searchState.idx+dir+hits.length)%hits.length;
   const hit=hits[searchState.idx];
   vb.w=680;vb.h=vb.w*(VB0.h/VB0.w);vb.x=hit.x-vb.w/2;vb.y=hit.y-vb.h/2;clampVB();setVB();
   const g=document.getElementById(hit.g); if(g)select(g,hit.o);
+  renderSearchNav();
   toast(hits.length>1
-    ? "Résultat "+(searchState.idx+1)+" / "+hits.length+" — "+hit.lab+"  ·  Entrée = suivant · Maj+Entrée = précédent"
+    ? "Résultat "+(searchState.idx+1)+" / "+hits.length+" — "+hit.lab+"  ·  ‹ › ou Entrée pour naviguer"
     : hit.lab);
+}
+function runSearch(raw,dir){
+  const q=(raw||"").trim().toLowerCase().replace(/\s/g,""); if(!q)return;
+  const same=(q===searchState.q && curView===searchState.view && searchState.hits.length);
+  if(!same){
+    searchState.q=q; searchState.view=curView;
+    searchState.hits=searchIndex().filter(a=>a.k.some(k=>k.replace(/\s/g,"").includes(q)));
+    searchState.idx=-1;
+    if(!searchState.hits.length){ toast("Aucune installation « "+raw.trim()+" » dans ce périmètre."); hideSearchNav(); return; }
+  }
+  gotoHit(dir||1);
+}
+document.getElementById("search").addEventListener("keydown",e=>{
+  if(e.key!=="Enter")return; e.preventDefault();
+  runSearch(e.target.value, e.shiftKey?-1:1);
 });
+(function(){
+  const n=document.getElementById("searchNav"); if(!n)return;
+  const p=n.querySelector(".sn-prev"), nx=n.querySelector(".sn-next"), x=n.querySelector(".sn-close");
+  if(p)p.addEventListener("click",e=>{e.stopPropagation();gotoHit(-1);});
+  if(nx)nx.addEventListener("click",e=>{e.stopPropagation();gotoHit(1);});
+  if(x)x.addEventListener("click",e=>{e.stopPropagation();hideSearchNav();});
+})();
 
 /* ---------- recherche : bouton d'effacement (✕) + Échap ---------- */
 (function(){
@@ -1085,6 +1138,7 @@ document.getElementById("search").addEventListener("keydown",e=>{
   if(!inp||!box)return;
   function sync(){ box.classList.toggle("has-val", inp.value.length>0); }
   function reset(){ inp.value=""; sync(); searchState={q:"",view:-1,hits:[],idx:-1};
+    if(typeof hideSearchNav==="function")hideSearchNav();
     if(window.closeRails)window.closeRails(); }
   inp.addEventListener("input",sync);
   inp.addEventListener("keydown",function(e){ if(e.key==="Escape"){ e.stopPropagation();
@@ -1621,6 +1675,13 @@ function editorFields(ref){
   else if(k==="band") h+=edTxt("txt","Texte",o.txt)+edXY(o);
   else if(k==="limite") h+=edTxt("lbl","Texte",o.lbl)+edNum("x","Position X",o.x)+edNum("y0","Haut Y",o.y0)+edNum("y1","Bas Y",o.y1);
   else { h+=edTxt("name","Nom",o.name)+edSel("cls","Section / couleur",o.cls,CLS_OPTS)+edTxt("km","Étendue km",o.km)
+    +`<div class="ed-field"><label>Couleur personnalisée${o.color?"":" (par défaut : section)"}</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="color" data-k="color" value="${o.color||'#3a4a5c'}" style="flex:1;height:32px;padding:2px;min-width:0">
+          <button type="button" id="voieColorReset" title="Revenir à la couleur de la section">↺ section</button>
+        </div></div>`
+    +`<div class="ed-field"><label>Épaisseur : ${o.w!=null?o.w+' px':'auto ('+(o.cls==='trk'?3:3)+' px)'}</label>
+        <input type="range" min="1" max="14" step="0.5" data-k="w" value="${o.w!=null?o.w:3}"></div>`
     +`<label class="ed-chk"><input type="checkbox" data-k="dead" ${o.dead?"checked":""}> Voie en impasse (butoir)</label>`
     +`<label class="ed-chk"><input type="checkbox" data-k="curve" ${o.curve?"checked":""}> Tracé courbe (lissé)</label>`
     +`<div class="ed-tool" style="margin:8px 0 4px"><button id="edAddNode">+ Point</button><button id="edStraight">Redresser</button></div>`
@@ -1692,6 +1753,9 @@ function bindEditor(){
   const cn=document.getElementById("edConnect"); if(cn)cn.addEventListener("click",startConnect);
   const an=document.getElementById("edAddNode"); if(an)an.addEventListener("click",addNodeToSel);
   const st=document.getElementById("edStraight"); if(st)st.addEventListener("click",straightenSel);
+  const vcr=document.getElementById("voieColorReset"); if(vcr)vcr.addEventListener("click",()=>{
+    if(!editSel)return; pushUndo(); delete editSel.obj.color; build(); reHighlight(); renderEditor(); syncJSON();
+    toast("Couleur remise à la section."); });
   insp.querySelectorAll("[data-rot]").forEach(b=>b.addEventListener("click",()=>{ if(editSel){pushUndo(); editSel.obj.rot=+b.dataset.rot; build(); reHighlight(); syncJSON();} }));
   const step=()=>Math.max(1,+((document.getElementById("shStep")||{}).value)||10);
   const shb=(id,fx,fy)=>{const b=document.getElementById(id); if(b)b.addEventListener("click",()=>shiftAll(fx*step(),fy*step()));};
@@ -1705,7 +1769,7 @@ function bindEditor(){
     inp.addEventListener("input",()=>{
       if(!editSel)return; const k=inp.dataset.k; let v;
       if(inp.type==="checkbox")v=inp.checked?1:0;
-      else if(inp.type==="number")v=parseFloat(inp.value)||0;
+      else if(inp.type==="number"||inp.type==="range")v=parseFloat(inp.value)||0;
       else if(k==="face")v=parseInt(inp.value,10);
       else v=inp.value;
       editSel.obj[k]=v; build(); reHighlight(); syncJSON();
@@ -1793,7 +1857,8 @@ function fitContent(){ const b=contentBounds(); const ca=canvasAspect();
 function refreshViewSel(){ const sel=document.getElementById("viewSel"); if(!sel)return;
   sel.innerHTML=VIEWS.map((v,i)=>`<option value="${i}" ${i===curView?"selected":""}>${(v.name||("Vue "+(i+1))).replace(/</g,"&lt;")}</option>`).join(""); }
 function afterViewChange(){ editSel=null; selIds=[]; _lastFocusKey=null; undoStack=[]; if(selectedEl){selectedEl.classList.remove("sel");selectedEl=null;}
-  build(); buildOverview(); if(editing){renderEditor();renderReglette();} else renderZoneSummary(); refreshCounts(); refreshViewSel(); fitContent(); saveStored(); }
+  build(); buildOverview(); if(editing){renderEditor();renderReglette();} else renderZoneSummary(); refreshCounts(); refreshViewSel(); fitContent(); saveStored();
+  searchState={q:"",view:-1,hits:[],idx:-1}; if(typeof hideSearchNav==="function")hideSearchNav(); }
 function loadView(i){ if(i<0||i>=VIEWS.length||i===curView){refreshViewSel();return;}
   VIEWS[curView].state=captureView(); curView=i; applyViewState(VIEWS[i].state); afterViewChange(); }
 function addView(){ VIEWS[curView].state=captureView(); VIEWS.push({name:"Givors Canal / Badan", state:emptyViewState()});

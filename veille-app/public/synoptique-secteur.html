@@ -764,7 +764,20 @@ function build(){
     syn.appendChild(gh);
   }
 
+  addLabelHits();
   applyLayers();
+}
+// Cible de clic pleine boîte pour les libellés : un <text> SVG n'est cliquable
+// que sur le tracé des lettres → cliquer « à côté » ratait la sélection. On
+// ajoute un rectangle transparent couvrant la boîte du libellé (nom de voie,
+// n° d'aiguille, carré, PN, quai, DBC, poste…) pour le rendre facile à saisir.
+function addLabelHits(){
+  syn.querySelectorAll(".olabel").forEach(g=>{
+    let bb; try{ bb=g.getBBox(); }catch(e){ return; }
+    if(!bb||!bb.width||!bb.height)return;
+    const pad=6, r=el("rect",{x:bb.x-pad,y:bb.y-pad,width:bb.width+2*pad,height:bb.height+2*pad,fill:"transparent","pointer-events":"all"});
+    g.insertBefore(r,g.firstChild);
+  });
 }
 
 /* ---------- interaction ---------- */

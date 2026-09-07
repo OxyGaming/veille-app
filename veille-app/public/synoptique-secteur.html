@@ -1252,6 +1252,7 @@ let editing=false, editSel=null, odrag=null, ndrag=null, ldrag=null, connectMode
 let selIds=[];            // sélection multiple (ids) ; le primaire = editSel.obj.id
 let undoStack=[];         // pile d'annulation (Ctrl+Z) — snapshots JSON de la vue
 let clipboard=[];         // copier/coller interne — [{list, obj(clone)}]
+let _mResize=null;        // snapshot d'un geste de retaille groupée (positions PRS d'origine)
 let _lastFocusKey=null;   // dédup des snapshots pendant l'édition d'un champ
 const UNDO_MAX=80;
 /* (filigrane retiré — la réglette d'ensemble est éditable par vue) */
@@ -1385,6 +1386,24 @@ function toggleSel(obj){
   if(window.innerWidth<=1080)railRight.classList.add("open");
 }
 function selRefs(){ return selIds.map(id=>findRef(id)).filter(Boolean); }
+/* ---------- sélection de tous les éléments d'un même type ---------- */
+// Libellés pluriels (mêmes « kind » que findRef / kmap).
+const KIND_LABELS={aiguille:"aiguilles",signal:"signaux",pn:"passages à niveau",poste:"postes",
+  butoir:"butoirs",quai:"quais",dbc:"détecteurs BC",prs:"boutons PRS",rond:"ronds",
+  zone:"secteurs de graissage",voie:"voies",liaison:"raccordements",km:"repères km",dir:"sens",band:"bandeaux"};
+// Liste ↔ kind (miroir de findRef) pour énumérer par type.
+const KIND_LIST=[["voies","voie"],["liaisons","liaison"],["aiguilles","aiguille"],["signaux","signal"],
+  ["pn","pn"],["postes","poste"],["buffers","butoir"],["quais","quai"],["dbc","dbc"],
+  ["prs","prs"],["rond","rond"],["zones","zone"],["km","km"],["dirs","dir"],["bands","band"]];
+function idsOfKind(kind){ const out=[]; KIND_LIST.forEach(([list,kd])=>{ if(kd===kind)(DATA[list]||[]).forEach(o=>out.push(o.id)); }); return out; }
+function countOfKind(kind){ return idsOfKind(kind).length; }
+function selectAllOfKind(kind){
+  const ids=idsOfKind(kind);
+  if(!ids.length){ toast("Aucun élément de ce type."); return; }
+  setSel(ids); build(); reHighlight(); renderEditor();
+  if(window.innerWidth<=1080)railRight.classList.add("open");
+  toast(ids.length+" "+(KIND_LABELS[kind]||kind)+" sélectionné"+(ids.length>1?"s":"")+".");
+}
 /* ---------- copier / coller (Ctrl+C / Ctrl+V) ---------- */
 function copySel(){
   const refs=selRefs(); if(!refs.length){ toast("Rien à copier."); return; }
@@ -1445,6 +1464,7 @@ function multiEditorFields(){
       </div>
       <div class="ed-field" style="width:64px"><label>&nbsp;px</label><input type="number" id="mSizeNum" min="6" max="80" step="1" value="${curSize||22}" style="width:60px"></div>
     </div>`;
+    if(prsN>1) h+=`<div class="insp-sub" style="margin:-6px 0 8px">La disposition relative des boutons PRS est conservée (l'espacement suit la taille).</div>`;
   }
   if(prsN){
     h+=edSel("__mstyle","Style des PRS (tous)","",[["","— inchangé —"],["light","Fond clair"],["dark","Fond sombre"],["yellow","Fond jaune"]]).replace('data-k="__mstyle"','id="mStyle"');
@@ -1647,6 +1667,7 @@ function editorFields(ref){
   else if(k==="zone")h+="Secteur "+(o.txt||"");
   else h+=o.name||"Voie";
   h+=`</span><button class="ed-del" id="edDel">Supprimer</button></div>`;
+  { const nk=countOfKind(k); if(nk>1) h+=`<div class="ed-tool" style="margin:-4px 0 12px"><button id="edSelAll" data-kind="${k}" title="Sélectionner tous les éléments de ce type pour les modifier en lot (taille, style, position…)">⊞ Sélectionner les ${nk} ${KIND_LABELS[k]||k}</button></div>`; }
   if(k==="aiguille")   h+=edTxt("n","Numéro",o.n)+edTxt("km","Point km",o.km)+edTxt("voie","Voie",o.voie)+edTxt("poste","Poste",o.poste)+edXY(o);
   else if(k==="signal")h+=edTxt("lbl","Libellé",o.lbl)+edSel("type","Type",o.type,[["c","Carré (C)"],["cv","Carré violet (Cv)"]])+edTxt("km","Point km",o.km)+edTxt("protege","Protège",o.protege)+edSel("face","Sens",o.face,[[-1,"◄ Pair (décroissant)"],[1,"Impair (croissant) ►"]])+edXY(o)
     +`<div class="ed-field"><label>Orientation</label><div class="ed-tool">
@@ -1689,6 +1710,7 @@ function editorFields(ref){
   return h;
 }
 function renderEditor(){
+  _mResize=null; // toute nouvelle sélection réinitialise le geste de retaille
   let h=`<div class="ed-tool">
     <button id="edSave" class="save" title="Enregistrer le plan (serveur — partagé avec l'équipe, versionné)">💾 Enregistrer</button>
     <button id="edExport" title="Exporter une copie .json (secours / hors-ligne)">⬇️ .json</button>
@@ -1743,6 +1765,7 @@ function bindEditor(){
   insp.querySelectorAll("[data-add]").forEach(b=>b.addEventListener("click",()=>addObject(b.dataset.add)));
   const rst=document.getElementById("edReset"); if(rst)rst.addEventListener("click",resetAll);
   const del=document.getElementById("edDel"); if(del)del.addEventListener("click",deleteSelection);
+  const selAll=document.getElementById("edSelAll"); if(selAll)selAll.addEventListener("click",()=>selectAllOfKind(selAll.dataset.kind));
   const jc=document.getElementById("jCopy"); if(jc)jc.addEventListener("click",copyJSON);
   const ja=document.getElementById("jApply"); if(ja)ja.addEventListener("click",applyJSON);
   const sv=document.getElementById("edSave"); if(sv){ sv.addEventListener("click",primarySave);
@@ -1782,11 +1805,27 @@ function bindEditor(){
   const mCopy=document.getElementById("mCopy"); if(mCopy)mCopy.addEventListener("click",copySel);
   const mDel=document.getElementById("mDel"); if(mDel)mDel.addEventListener("click",deleteSelection);
   const mSize=document.getElementById("mSize"), mSizeNum=document.getElementById("mSizeNum");
-  const sizeSnap=()=>{ if(_lastFocusKey!=="multi/size"){_lastFocusKey="multi/size";pushUndo();} };
+  // Instantané des PRS/ronds au début d'un geste : positions + taille de référence
+  // + ancre (barycentre des PRS). Recalculé à chaque nouveau geste → pas de dérive.
+  const captureResize=()=>{
+    const prs=selRefs().filter(r=>r.kind==="prs"), ronds=selRefs().filter(r=>r.kind==="rond");
+    let ax=0,ay=0,as=0; prs.forEach(r=>{ax+=r.obj.x;ay+=r.obj.y;as+=(r.obj.size||22);});
+    const anchor=prs.length?{x:ax/prs.length,y:ay/prs.length}:{x:0,y:0};
+    const size0=prs.length?(as/prs.length):22;
+    return {prs:prs.map(r=>({obj:r.obj,x0:r.obj.x,y0:r.obj.y})),ronds,anchor,size0};
+  };
+  const sizeSnap=()=>{ if(_lastFocusKey!=="multi/size"){_lastFocusKey="multi/size";pushUndo();} _mResize=captureResize(); };
   const applySize=(raw)=>{ const v=Math.max(6,Math.min(80,parseFloat(raw)||22)); if(mSize)mSize.value=v; if(mSizeNum)mSizeNum.value=v;
-    applyToSel(r=>r.kind==="prs"||r.kind==="rond", r=>r.kind==="rond"?"r":"size", v, false); };
-  if(mSize){ mSize.addEventListener("pointerdown",sizeSnap); mSize.addEventListener("focus",sizeSnap); mSize.addEventListener("input",()=>applySize(mSize.value)); }
-  if(mSizeNum){ mSizeNum.addEventListener("focus",sizeSnap); mSizeNum.addEventListener("input",()=>applySize(mSizeNum.value)); }
+    if(!_mResize)_mResize=captureResize();
+    const {prs,ronds,anchor,size0}=_mResize, ratio=size0>0?v/size0:1;
+    // PRS : la taille change ET l'espacement suit (mise à l'échelle autour du
+    // barycentre) → la disposition relative des boutons est conservée.
+    prs.forEach(({obj,x0,y0})=>{ obj.size=v; obj.x=anchor.x+(x0-anchor.x)*ratio; obj.y=anchor.y+(y0-anchor.y)*ratio; });
+    ronds.forEach(r=>{ r.obj.r=v; });
+    build(); reHighlight(); syncJSON(); };
+  if(mSize){ mSize.addEventListener("pointerdown",sizeSnap); mSize.addEventListener("focus",sizeSnap); mSize.addEventListener("input",()=>applySize(mSize.value));
+    mSize.addEventListener("pointerup",()=>{_mResize=null;}); mSize.addEventListener("change",()=>{_mResize=null;}); }
+  if(mSizeNum){ mSizeNum.addEventListener("focus",sizeSnap); mSizeNum.addEventListener("input",()=>applySize(mSizeNum.value)); mSizeNum.addEventListener("blur",()=>{_mResize=null;}); }
   const mStyle=document.getElementById("mStyle");
   if(mStyle)mStyle.addEventListener("change",()=>{ if(!mStyle.value)return; pushUndo(); applyToSel(r=>r.kind==="prs","style",mStyle.value,false); });
 }

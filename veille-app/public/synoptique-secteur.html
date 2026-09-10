@@ -352,18 +352,11 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
       <div class="railpad">
         <h3>Calques</h3>
         <div id="layers"></div>
-        <h3>Sections ODICEO</h3>
-        <div id="odiceo"></div>
-        <div class="foot">
-          Source : Consigne UTIL — Poste de Peyraud (EIC RA DC07447 v07). Périmètre modélisé :
-          <b>secteur de Peyraud</b>, du carré d'entrée <b>C 6</b> (côté St Rambert) jusqu'à Le Teil.
-          St Rambert, le faisceau Valence et les postes adjacents sont hors périmètre.
-        </div>
       </div>
     </aside>
 
     <section class="canvaswrap">
-      <button id="railToggle" class="rail-toggle" aria-label="Afficher les calques et sections" title="Calques / sections ODICEO">☰</button>
+      <button id="railToggle" class="rail-toggle" aria-label="Afficher les calques" title="Calques">☰</button>
       <svg id="syn" viewBox="-8600 0 10620 740" role="img" aria-label="Synoptique : PRS Givors Canal (St Étienne, Lyon Perrache, Badan, Chasse), Loire P1, Ste Colombe, Condrieu, pleine ligne, Peyraud"></svg>
       <div class="tooltip" id="tip"></div>
       <div class="edithint" id="edithint">✎ Mode édition — <b>glissez</b> un objet ou un <b>nœud</b> · <b>Ctrl+clic</b> = sélection multiple · <b>Ctrl+C/V</b> = copier/coller · <b>Ctrl+Z</b> = annuler · <b>Suppr</b> = supprimer</div>
@@ -543,7 +536,7 @@ const layerDefs=[
   {id:"rond",  name:"Ronds (lettres)", sw:"var(--rond)", get:()=>(DATA.rond||[]).length},
   {id:"zones", name:"Secteurs graissage", sw:"#e08a2b", get:()=>(DATA.zones||[]).length},
 ];
-const layerState={voies:1,buf:1,aig:1,sig:1,pn:1,poste:1,km:1,quai:1,dbc:1,prs:1,rond:1,zones:1};
+const layerState={voies:1,buf:1,aig:1,sig:1,pn:1,poste:1,km:1,quai:1,dbc:1,prs:1,rond:1,zones:0};
 const groups={};
 
 function build(){
@@ -594,20 +587,15 @@ function build(){
   const drawVoie=(v,isLia)=>{
     const d=toPath(v.pts,v.curve);
     const g=el("g",{class:"selectable",id:"g-"+v.id});
-    const colored=v.cls.startsWith("l-")||v.cls.startsWith("racc");
-    const baseStroke=colored?`var(--${v.cls})`:"var(--track)";
-    // couleur perso (v.color, hex) et épaisseur perso (v.w) prioritaires
+    // couleur perso (v.color, hex) et épaisseur perso (v.w) prioritaires ; sinon rail par défaut
     const custom=v.color||null;
-    const stroke=custom||baseStroke;
     const width=(v.w!=null&&v.w!=="")?+v.w:(isLia?2.4:3);
-    // halo coloré des sections ODICEO (seulement sans couleur perso)
-    if(colored && !custom) g.appendChild(el("path",{class:isLia?"liaison":"voie",d,stroke:baseStroke,"stroke-width":width+4,"stroke-opacity":.20,fill:"none"}));
     const mainAttrs={class:isLia?"liaison":"voie trk",d,"stroke-width":width};
-    if(custom||(isLia&&colored)) mainAttrs.stroke=stroke;
+    if(custom) mainAttrs.stroke=custom;
     g.appendChild(el("path",mainAttrs));
     const hit=el("path",{class:"voie hit",d}); g.appendChild(hit);
     hit.addEventListener("dblclick",ev=>{ if(editing){ev.stopPropagation(); selectForEdit({id:v.id}); insertNode(v,clientToVB(ev));} });
-    wire(g,{kind:isLia?"liaison":"voie",...v,color:stroke});
+    wire(g,{kind:isLia?"liaison":"voie",...v,color:custom||"var(--track)"});
     if(!isLia&&v.name&&v.pts&&v.pts[0]){g.appendChild(labelG(v,v.pts[0][0],v.pts[0][1],10,-6,v.name,"start","voielabel"));}
     groups.voies.appendChild(g);
   };
@@ -870,10 +858,9 @@ function renderInspector(o){
       +field("Périodicité","4 semaines")
       +field("Étendue","x "+o.x+" · y "+o.y+" · "+(o.w||0)+"×"+(o.h||0));
   }else{
-    const secname={"l-800":"800000 — LR 698,9 · Le Teil / Givors Canal","l-797":"797000 — Rac Peyraud / St Rambert (entrée)","l-circ":"Peyraud Voie de circulation","racc-sud2":"Peyraud Rac Nord (boucle)","racc-sud":"Peyraud Rac Sud","trk":"Voie de service / communication"}[o.cls]||"—";
     html=chip(o.kind==="liaison"?"Raccordement":"Voie","var(--accent)","#fff")
       +`<div class="insp-title">${o.name}</div><div class="insp-sub">Élément de voie</div>`
-      +field("Section ODICEO",secname)+(o.km?field("Étendue","km "+o.km):"")
+      +(o.km?field("Étendue","km "+o.km):"")
       +(o.dead?field("Terminaison","Voie en impasse (butoir)"):"");
   }
   html+=`<div class="note"><b>Donnée live —</b> dans l'application, ce panneau afficherait l'état temps réel (occupation, position d'aiguille, ouverture PN) issu du poste.</div>`;
@@ -881,10 +868,7 @@ function renderInspector(o){
 }
 function renderZoneSummary(){
   insp.innerHTML=
-     `<h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:11px">Zone affichée</h3>`
-    +`<div class="insp-title" style="margin-top:0">Secteur de Peyraud</div>`
-    +`<div class="insp-sub">Consigne UTIL DC07447 · du C 6 (entrée St Rambert) à Le Teil</div>`
-    +`<div class="statgrid">
+     `<div class="statgrid" style="margin-top:0">
         <div class="stat"><div class="n">${DATA.aiguilles.length}</div><div class="l">Aiguilles</div></div>
         <div class="stat"><div class="n">${DATA.signaux.length}</div><div class="l">Signaux</div></div>
         <div class="stat"><div class="n">${DATA.voies.length}</div><div class="l">Voies</div></div>
@@ -900,7 +884,7 @@ function renderZoneSummary(){
 const layersDiv=document.getElementById("layers");
 layerDefs.forEach(l=>{
   const b=document.createElement("button");
-  b.className="layer";b.setAttribute("aria-pressed","true");b.dataset.layer=l.id;
+  b.className="layer";b.setAttribute("aria-pressed",String(layerState[l.id]!==0));b.dataset.layer=l.id;
   b.innerHTML=`<span class="sw" style="background:${l.sw}"></span><span class="nm">${l.name}</span>`
     +`<span class="ct">${l.get()}</span>`
     +`<svg class="chk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg>`;
@@ -909,16 +893,6 @@ layerDefs.forEach(l=>{
   layersDiv.appendChild(b);
 });
 function applyLayers(){for(const id in groups){if(layerState[id]===undefined)continue;if(groups[id])groups[id].classList.toggle("layerhidden",!layerState[id]);}}
-const odiceo=document.getElementById("odiceo");
-[["l-800","Ligne 800000 — LR 698,9 (Le Teil / Givors Canal)"],
- ["l-750","Ligne 750000 — Badan / Lyon Perrache"],
- ["l-bc","Raccordement Badan - Chasse"],
- ["l-797","Racct 797000 — entrée St Rambert (C 5 / C 6)"],
- ["l-circ","Peyraud — Voie de circulation"],
- ["racc-sud2","Peyraud — Raccordement Nord (boucle)"],
- ["racc-sud","Peyraud — Raccordement Sud"],
-].forEach(([c,n])=>{const d=document.createElement("div");d.className="leg-line";
-  d.innerHTML=`<span class="bar" style="background:var(--${c})"></span><span>${n}</span>`;odiceo.appendChild(d);});
 
 /* ---------- overview ---------- */
 const ov=document.getElementById("overview-svg");
@@ -1177,7 +1151,7 @@ document.getElementById("themebtn").addEventListener("click",()=>{
 });
 
 /* ---------- Export PNG haute résolution (tapis de souris 900×400 mm) ---------- */
-// Palette « nuit » forcée + toutes les voies en gris (indépendant des sections ODICEO)
+// Palette « nuit » forcée + toutes les voies en gris
 const EXPORT_NIGHT = `:root{
   --canvas-bg:#26313d;--panel:#26313d;--ink:#eef3f8;--muted:#aab8c6;--line:#41505f;--track-dim:#7c8a99;
   --track:#a6b2be;--l-800:#a6b2be;--l-797:#a6b2be;--l-circ:#a6b2be;--l-750:#a6b2be;--l-bc:#a6b2be;--l-chs:#a6b2be;--racc-sud:#a6b2be;--racc-sud2:#a6b2be;
@@ -1210,7 +1184,9 @@ async function exportPNG(){
       // remonte le haut du cadre pour qu'ils apparaissent (sans changer N).
       if(DATA.km&&DATA.km.length){ const bot=by+bh; by=Math.min(by,66); bh=bot-by; }
       const mp=Math.max(bh*0.02,12); bx-=mp; by-=mp; bw+=2*mp; bh+=2*mp;
-      const cl=syn.cloneNode(true); cl.querySelectorAll(".sel-ring,.hit,.node,.nodes,.wm-layer").forEach(e=>e.remove());
+      // .layer-zones : les secteurs de graissage ne doivent JAMAIS figurer dans l'export PNG,
+      // quel que soit l'état du calque à l'écran.
+      const cl=syn.cloneNode(true); cl.querySelectorAll(".sel-ring,.hit,.node,.nodes,.wm-layer,.layer-zones").forEach(e=>e.remove());
       rendered.push({name:vm.name,bx,by,bw,bh,N,kids:[...cl.childNodes]});
     }
     applyViewState(liveState); build();
@@ -1683,7 +1659,6 @@ function edArea(k,lbl,v){return `<div class="ed-field"><label>${lbl}</label><tex
 function edSel(k,lbl,v,opts){return `<div class="ed-field"><label>${lbl}</label><select data-k="${k}">`+
   opts.map(([val,t])=>`<option value="${val}" ${String(v)===String(val)?"selected":""}>${t}</option>`).join("")+`</select></div>`;}
 function edXY(o){return `<div class="ed-row">${edNum("x","Position X",o.x)}${edNum("y","Position Y",o.y)}</div>`;}
-const CLS_OPTS=[["l-800","800000 — LR 698,9 (vert)"],["l-797","797000 — entrée St Rambert (orange)"],["l-circ","Voie de circulation (violet)"],["racc-sud2","Rac Nord Peyraud (gris)"],["racc-sud","Rac Sud Peyraud (rose)"],["trk","Voie de service / liaison (rail)"]];
 
 function editorFields(ref){
   const o=ref.obj, k=ref.kind;
@@ -1724,11 +1699,11 @@ function editorFields(ref){
   else if(k==="dir") h+=edTxt("txt","Texte",o.txt)+edSel("anchor","Alignement",o.anchor||"start",[["start","gauche"],["middle","centré"],["end","droite"]])+edXY(o);
   else if(k==="band") h+=edTxt("txt","Texte",o.txt)+edXY(o);
   else if(k==="limite") h+=edTxt("lbl","Texte",o.lbl)+edNum("x","Position X",o.x)+edNum("y0","Haut Y",o.y0)+edNum("y1","Bas Y",o.y1);
-  else { h+=edTxt("name","Nom",o.name)+edSel("cls","Section / couleur",o.cls,CLS_OPTS)+edTxt("km","Étendue km",o.km)
-    +`<div class="ed-field"><label>Couleur personnalisée${o.color?"":" (par défaut : section)"}</label>
+  else { h+=edTxt("name","Nom",o.name)+edTxt("km","Étendue km",o.km)
+    +`<div class="ed-field"><label>Couleur${o.color?"":" (par défaut : rail)"}</label>
         <div style="display:flex;gap:6px;align-items:center">
           <input type="color" data-k="color" value="${o.color||'#3a4a5c'}" style="flex:1;height:32px;padding:2px;min-width:0">
-          <button type="button" id="voieColorReset" title="Revenir à la couleur de la section">↺ section</button>
+          <button type="button" id="voieColorReset" title="Revenir à la couleur par défaut">↺ défaut</button>
         </div></div>`
     +`<div class="ed-field"><label>Épaisseur : ${o.w!=null?o.w+' px':'auto ('+(o.cls==='trk'?3:3)+' px)'}</label>
         <input type="range" min="1" max="14" step="0.5" data-k="w" value="${o.w!=null?o.w:3}"></div>`
@@ -1809,7 +1784,7 @@ function bindEditor(){
   const st=document.getElementById("edStraight"); if(st)st.addEventListener("click",straightenSel);
   const vcr=document.getElementById("voieColorReset"); if(vcr)vcr.addEventListener("click",()=>{
     if(!editSel)return; pushUndo(); delete editSel.obj.color; build(); reHighlight(); renderEditor(); syncJSON();
-    toast("Couleur remise à la section."); });
+    toast("Couleur remise par défaut."); });
   insp.querySelectorAll("[data-rot]").forEach(b=>b.addEventListener("click",()=>{ if(editSel){pushUndo(); editSel.obj.rot=+b.dataset.rot; build(); reHighlight(); syncJSON();} }));
   const step=()=>Math.max(1,+((document.getElementById("shStep")||{}).value)||10);
   const shb=(id,fx,fy)=>{const b=document.getElementById(id); if(b)b.addEventListener("click",()=>shiftAll(fx*step(),fy*step()));};

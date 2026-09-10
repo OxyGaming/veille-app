@@ -43,8 +43,9 @@ const MORE_ITEMS = [
   { href: "/procedures", label: "Veilles", icon: Icon.ClipboardCheck },
   { href: "/sessions", label: "Sessions", icon: Icon.ClipboardCheck },
   { href: "/stats", label: "Statistiques", icon: Icon.Filter },
-  { href: "/rci", label: "RCI", icon: Icon.AlertTriangle },
-  { href: "/cil", label: "Livret CIL", icon: Icon.Shield },
+  // Masqués temporairement (fonctionnalités à développer) — routes conservées :
+  // { href: "/rci", label: "RCI", icon: Icon.AlertTriangle },
+  // { href: "/cil", label: "Livret CIL", icon: Icon.Shield },
   { href: "/synoptique", label: "Synoptique", icon: Icon.Train },
   { href: "/links", label: "Liens utiles", icon: Icon.Link },
   { href: "/contacts", label: "Contacts", icon: Icon.Phone },
@@ -60,8 +61,9 @@ const BASE_NAV_DESKTOP = [
   { href: "/stats", label: "Statistiques", icon: Icon.Filter },
   { href: "/links", label: "Liens utiles", icon: Icon.Link },
   { href: "/contacts", label: "Contacts", icon: Icon.Phone },
-  { href: "/rci", label: "RCI", icon: Icon.AlertTriangle },
-  { href: "/cil", label: "Livret CIL", icon: Icon.Shield },
+  // Masqués temporairement (fonctionnalités à développer) — routes conservées :
+  // { href: "/rci", label: "RCI", icon: Icon.AlertTriangle },
+  // { href: "/cil", label: "Livret CIL", icon: Icon.Shield },
   { href: "/synoptique", label: "Synoptique", icon: Icon.Train },
 ];
 
@@ -99,15 +101,13 @@ export default function AppShell({
   ];
   const NAV = navMobile;
   const NAV_DESKTOP = navDesktop;
-  // +1 pour le bouton « Plus » toujours présent à droite. La grille
-  // gère 5 → 7 colonnes selon le rôle / activation de Today.
-  const totalMobileCells = navMobile.length + 1;
-  const mobileGridClass =
-    totalMobileCells === 7
-      ? "grid-cols-7"
-      : totalMobileCells === 6
-        ? "grid-cols-6"
-        : "grid-cols-5";
+  // Les items de nav se partagent la largeur en parts égales ; le bouton
+  // « Plus » (icône seule, à droite) prend une colonne ajustée à son contenu
+  // plutôt qu'une part égale — sinon il flotte au bout d'une colonne pleine,
+  // ce qui crée un écart visuel avec le dernier item (« Histo. »).
+  const mobileGridStyle = {
+    gridTemplateColumns: `repeat(${navMobile.length}, minmax(0, 1fr)) auto`,
+  };
 
   const pathname = usePathname();
   const router = useRouter();
@@ -330,7 +330,7 @@ export default function AppShell({
           tactile.
         */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 no-print z-30 pb-[env(safe-area-inset-bottom)]">
-          <div className={`grid ${mobileGridClass}`}>
+          <div className="grid" style={mobileGridStyle}>
             {NAV.map((n) => {
               const active =
                 pathname === n.href || pathname.startsWith(n.href + "/");
@@ -361,7 +361,7 @@ export default function AppShell({
               aria-haspopup="menu"
               aria-expanded={moreOpen}
               aria-label="Plus d'options"
-              className={`flex flex-col items-center justify-center py-2.5 text-[10px] font-medium transition-colors ${
+              className={`flex flex-col items-center justify-center py-2.5 pl-1 pr-3 text-[10px] font-medium transition-colors ${
                 moreOpen ? "text-indigo-600" : "text-slate-500"
               }`}
             >

@@ -714,7 +714,8 @@ function build(){
     if(b.rot)g.setAttribute("transform","rotate("+b.rot+" "+b.x+" "+b.y+")");
     const s=b.size||22, st=b.style||(b.dark?"dark":"light");
     const bg=st==="dark"?"#141414":(st==="yellow"?"#f2c200":"#f2f2f2"), fg=st==="dark"?"#ffffff":"#141414";
-    const fs=Math.max(8,Math.min(13,s*0.5));
+    // Texte : suit la taille du bouton par défaut, sauf `fs` explicite (réglable, non plafonné).
+    const fs=(b.fs!=null&&b.fs!=="")?+b.fs:Math.max(8,Math.min(13,s*0.5));
     g.appendChild(el("rect",{class:"sel-ring",x:b.x-s/2-3,y:b.y-s/2-3,width:s+6,height:s+6,rx:3,fill:"none"}));
     g.appendChild(el("rect",{x:b.x-s/2,y:b.y-s/2,width:s,height:s,rx:2,fill:bg,stroke:"#000","stroke-width":0.8}));
     const t=el("text",{x:b.x,y:b.y+fs*0.35,"text-anchor":"middle","font-family":"IBM Plex Mono","font-size":fs,"font-weight":700,fill:fg}); t.textContent=(b.txt!=null?b.txt:(b.name||"")); g.appendChild(t);
@@ -732,7 +733,8 @@ function build(){
     const rr=rd.r||15;
     g.appendChild(el("circle",{class:"sel-ring",cx:rd.x,cy:rd.y,r:rr+4}));
     g.appendChild(el("circle",{cx:rd.x,cy:rd.y,r:rr,fill:"var(--rond)",stroke:"var(--canvas-bg)","stroke-width":1.5}));
-    const tt=el("text",{x:rd.x,y:rd.y+Math.min(rr*0.36,5),"text-anchor":"middle","font-size":Math.max(9,Math.min(14,rr)),"font-weight":700,fill:"#fff"}); tt.textContent=rd.txt||""; g.appendChild(tt);
+    const rfs=(rd.fs!=null&&rd.fs!=="")?+rd.fs:Math.max(9,Math.min(14,rr));
+    const tt=el("text",{x:rd.x,y:rd.y+rfs*0.35,"text-anchor":"middle","font-size":rfs,"font-weight":700,fill:"#fff"}); tt.textContent=rd.txt||""; g.appendChild(tt);
     wire(g,{kind:"rond",...rd});
     groups.rond.appendChild(g);
   });
@@ -1387,8 +1389,9 @@ const KIND_LIST=[["voies","voie"],["liaisons","liaison"],["aiguilles","aiguille"
   ["prs","prs"],["rond","rond"],["zones","zone"],["km","km"],["dirs","dir"],["bands","band"]];
 // Tailles de texte par défaut (px) des éléments porteurs d'un libellé — sert de
 // valeur initiale au champ « Taille du texte » et de base pour la retaille en lot.
-// (Les boutons PRS et les ronds ne sont pas listés : leur texte suit déjà la taille du bouton / le rayon.)
-const FS_KINDS={voie:11,aiguille:11,signal:10.5,pn:10,poste:13,quai:11,dbc:11,km:9.5,zone:13,dir:12,band:12,limite:11};
+// PRS et ronds : par défaut leur texte suit la taille du bouton / le rayon, mais une
+// valeur `fs` explicite (réglable en édition simple ET en sélection multiple) la surcharge.
+const FS_KINDS={voie:11,aiguille:11,signal:10.5,pn:10,poste:13,quai:11,dbc:11,km:9.5,zone:13,dir:12,band:12,limite:11,prs:11,rond:14};
 function idsOfKind(kind){ const out=[]; KIND_LIST.forEach(([list,kd])=>{ if(kd===kind)(DATA[list]||[]).forEach(o=>out.push(o.id)); }); return out; }
 function countOfKind(kind){ return idsOfKind(kind).length; }
 function selectAllOfKind(kind){

@@ -241,7 +241,7 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
   .rail-toggle{display:grid;place-items:center;position:absolute;left:10px;top:10px;z-index:16;
     width:38px;height:38px;border-radius:9px;background:var(--panel);border:1px solid var(--line);
     color:var(--ink);box-shadow:var(--shadow);font-size:17px;cursor:pointer}
-  /* Export PNG (tapis 10800×4800) trop lourd pour un mobile → masqué. */
+  /* Export PNG (tapis ~15945×7087) trop lourd pour un mobile → masqué. */
   #exportbtn{display:none}
   /* Cibles tactiles plus grandes pour le zoom (44px) + pincer-zoomer géré en JS. */
   .canvas-tools button{width:44px;height:44px;font-size:20px}
@@ -341,7 +341,7 @@ body.editing #overview-svg .ovposte{cursor:ew-resize}
     <button class="iconbtn" id="themebtn" aria-label="Basculer le thème" title="Thème clair / sombre">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
     </button>
-    <button class="iconbtn" id="exportbtn" aria-label="Export PNG tapis" title="Export PNG haute résolution (tapis 900×400 mm — 10800×4800 px)">
+    <button class="iconbtn" id="exportbtn" aria-label="Export PNG tapis" title="Export PNG haute résolution (tapis 900×400 mm — ~450 DPI, rendu par tuiles)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="8.5" cy="9" r="1.4"/></svg>
     </button>
   </header>
@@ -1165,7 +1165,13 @@ svg{background:#26313d}
 .kmtick line{stroke:#6b7c8d}
 `;
 async function exportPNG(){
-  const W=10800,H=4800,BG="#26313d";
+  // Tapis 900×400 mm. Résolution d'impression cible ~450 DPI.
+  // (Rendu par TUILES ci-dessous → chaque tuile est rastérisée à sa taille
+  //  native, ce qui contourne le plafond de rastérisation SVG de Chrome
+  //  responsable du flou quand on rastérisait tout le plan d'un seul coup.)
+  const DPI=450, MM_W=900, MM_H=400;
+  const W=Math.round(MM_W/25.4*DPI), H=Math.round(MM_H/25.4*DPI); // ≈ 15945 × 7087
+  const BG="#26313d";
   toast("Génération du PNG "+W+"×"+H+"…");
   await new Promise(r=>setTimeout(r,30));
   try{
@@ -1213,13 +1219,49 @@ async function exportPNG(){
       }
       curY += r.N*r.bh + (r.N-1)*vgap(r) + vafter(r);
     });
-    const svgTxt='<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(S);
-    const url=URL.createObjectURL(new Blob([svgTxt],{type:"image/svg+xml"}));
-    const img=new Image();
-    await new Promise((res,rej)=>{img.onload=res; img.onerror=()=>rej(new Error("SVG non chargé")); img.src=url;});
+    // ---- Rastérisation PAR TUILES ----------------------------------------
+    // Le contenu (viewBox 0..colW × 0..totalH) est projeté dans le canvas W×H
+    // en mode « meet » (comme preserveAspectRatio xMidYMid meet), puis découpé
+    // en tuiles rastérisées séparément. Chrome plafonne la résolution interne
+    // d'un SVG chargé en <img> ; en dessous de ~2k px par tuile ce plafond
+    // n'est jamais atteint → netteté réelle à 100 % à n'importe quel DPI.
+    const XMLHEAD='<?xml version="1.0" encoding="UTF-8"?>\n';
+    const INNER=[...S.childNodes].map(n=>new XMLSerializer().serializeToString(n)).join("");
     const cv=document.createElement("canvas"); cv.width=W; cv.height=H;
-    const ctx=cv.getContext("2d"); ctx.fillStyle=BG; ctx.fillRect(0,0,W,H); ctx.drawImage(img,0,0,W,H);
-    URL.revokeObjectURL(url);
+    const ctx=cv.getContext("2d"); ctx.fillStyle=BG; ctx.fillRect(0,0,W,H);
+    // Transform « meet » : mise à l'échelle uniforme + centrage.
+    const scale=Math.min(W/colW,H/totalH);
+    const drawnW=colW*scale, drawnH=totalH*scale;
+    const offX=Math.round((W-drawnW)/2), offY=Math.round((H-drawnH)/2);
+    const TILE=2048, BLEED=2; // BLEED : léger recouvrement → zéro couture entre tuiles
+    const dw=Math.ceil(drawnW), dh=Math.ceil(drawnH);
+    const cols=Math.ceil(dw/TILE), rows=Math.ceil(dh/TILE), nTiles=cols*rows;
+    const loadImg=svg=>new Promise((res,rej)=>{
+      const u=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
+      const im=new Image();
+      im.onload=()=>{ res(im); setTimeout(()=>URL.revokeObjectURL(u),0); };
+      im.onerror=()=>{ URL.revokeObjectURL(u); rej(new Error("SVG non chargé")); };
+      im.src=u;
+    });
+    let done=0;
+    for(let ry=0; ry<rows; ry++){
+      for(let rx=0; rx<cols; rx++){
+        // Rectangle de la tuile en px, étendu du BLEED (borné au contenu).
+        const px0=Math.max(0, rx*TILE-BLEED), py0=Math.max(0, ry*TILE-BLEED);
+        const px1=Math.min(dw, (rx+1)*TILE+BLEED), py1=Math.min(dh, (ry+1)*TILE+BLEED);
+        const pw=px1-px0, ph=py1-py0;
+        if(pw<=0||ph<=0) continue;
+        // Fenêtre correspondante en unités utilisateur (viewBox de la tuile).
+        const ux=px0/scale, uy=py0/scale, uw=pw/scale, uh=ph/scale;
+        const tileSvg=XMLHEAD+'<svg xmlns="'+SVGNS+'" viewBox="'+ux+' '+uy+' '+uw+' '+uh
+          +'" width="'+pw+'" height="'+ph+'" preserveAspectRatio="none">'+INNER+'</svg>';
+        const im=await loadImg(tileSvg);
+        ctx.drawImage(im, offX+px0, offY+py0, pw, ph);
+        done++;
+        if(done%4===0||done===nTiles) toast("Rendu "+done+"/"+nTiles+" tuiles…");
+        await new Promise(r=>setTimeout(r,0)); // laisse respirer l'UI
+      }
+    }
     const png=await new Promise(r=>cv.toBlob(r,"image/png"));
     const mb=b2=>(b2.size/1048576).toFixed(1);
     // Repli natif (hors artifact claude.ai : app Veille, ouverture directe…) : lien blob.

@@ -50,10 +50,10 @@ export function EcheanceRow({ item }: Props) {
 
   const canPostpone = POSTPONABLE_KINDS.has(item.kind);
   return (
-    <li className="flex items-start gap-3 px-3 py-3 hover:bg-slate-50 transition-colors min-w-0">
+    <li className="px-3 py-3 hover:bg-slate-50 transition-colors">
       <Link
         href={item.cta.href}
-        className="flex items-start gap-3 flex-1 min-w-0"
+        className="flex items-start gap-3 min-w-0"
       >
         <span
           className={`shrink-0 mt-0.5 w-8 h-8 rounded-lg grid place-items-center ${
@@ -87,14 +87,16 @@ export function EcheanceRow({ item }: Props) {
           </span>
         )}
       </Link>
-      {canPostpone && <PostponeButton item={item} />}
-      <Link
-        href={item.cta.href}
-        className="shrink-0 inline-flex items-center gap-1 text-xs text-indigo-600 font-medium pt-1"
-      >
-        {item.cta.label}
-        <Icon.ChevronRight className="w-4 h-4 text-slate-400" aria-hidden />
-      </Link>
+      <div className="mt-2 pl-11 flex items-center justify-end gap-2">
+        {canPostpone && <PostponeButton item={item} />}
+        <Link
+          href={item.cta.href}
+          className="shrink-0 inline-flex items-center gap-1 text-xs text-indigo-600 font-medium"
+        >
+          {item.cta.label}
+          <Icon.ChevronRight className="w-4 h-4 text-slate-400" aria-hidden />
+        </Link>
+      </div>
     </li>
   );
 }
